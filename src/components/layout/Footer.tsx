@@ -1,0 +1,96 @@
+import { Link } from "react-router-dom";
+import { TruckIcon, ReturnIcon, ShieldIcon, HeadsetIcon } from "../ui/Icons";
+
+const TRUST = [
+  { icon: TruckIcon, title: "Free Shipping", body: "For orders above RM300" },
+  { icon: ReturnIcon, title: "Easy Returns", body: "14 days return policy" },
+  { icon: ShieldIcon, title: "Secure Payment", body: "100% secure checkout" },
+  { icon: HeadsetIcon, title: "Customer Support", body: "We're here to help" },
+];
+
+const LINKS: { heading: string; items: { label: string; to: string }[] }[] = [
+  {
+    heading: "Shop",
+    items: [
+      { label: "Women", to: "/collections/women" },
+      { label: "Men", to: "/collections/men" },
+      { label: "Accessories", to: "/collections/accessories" },
+      { label: "Raya Collection", to: "/collections/raya" },
+      { label: "Best Sellers", to: "/collections/best-sellers" },
+    ],
+  },
+  {
+    heading: "Help",
+    items: [
+      { label: "Shipping", to: "/pages/shipping" },
+      { label: "Returns & Exchanges", to: "/pages/returns" },
+      { label: "Size Guide", to: "/pages/size-guide" },
+      { label: "Contact Us", to: "/pages/contact" },
+    ],
+  },
+  {
+    heading: "Kalima",
+    items: [
+      { label: "About Kalima", to: "/pages/about-kalima" },
+      { label: "Our Fabrics", to: "/pages/fabrics" },
+      { label: "Stores", to: "/pages/stores" },
+      { label: "Kalima Club", to: "/pages/kalima-club" },
+    ],
+  },
+];
+
+export default function Footer() {
+  return (
+    <footer>
+      {/* Trust bar */}
+      <section className="border-t border-navy/10 bg-cream">
+        <div className="mx-auto grid max-w-7xl grid-cols-2 gap-8 px-4 py-10 lg:grid-cols-4">
+          {TRUST.map(({ icon: Icon, title, body }) => (
+            <div key={title} className="flex items-center gap-4">
+              <Icon size={30} className="shrink-0 text-navy" />
+              <div>
+                <p className="text-[13px] font-medium tracking-wide text-navy">{title}</p>
+                <p className="text-[12px] tracking-wide text-navy-400">{body}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Main footer — navy surface with white logo variant */}
+      <section className="bg-navy text-white">
+        <div className="mx-auto grid max-w-7xl gap-12 px-4 py-14 lg:grid-cols-5">
+          <div className="lg:col-span-2">
+            <img src="/brand/kalima-mark-white.png" alt="Kalima" className="h-20 w-auto" />
+            <p className="mt-5 max-w-xs text-[13px] leading-relaxed tracking-wide text-white/60">
+              Timeless modest luxury — designed in Malaysia for every beautiful journey.
+            </p>
+          </div>
+          {LINKS.map((col) => (
+            <div key={col.heading}>
+              <h3 className="label-caps mb-5 text-white/80">{col.heading}</h3>
+              <ul className="space-y-3">
+                {col.items.map((l) => (
+                  <li key={l.label}>
+                    <Link to={l.to} className="text-[13px] tracking-wide text-white/60 hover:text-white transition-colors">
+                      {l.label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-white/10">
+          <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-6 text-[11px] tracking-wide text-white/40 lg:flex-row">
+            <p>© {new Date().getFullYear()} Kalima. All rights reserved.</p>
+            <Link to="/admin" className="hover:text-white/70 transition-colors">
+              Back Office (demo preview)
+            </Link>
+            <p>FPX · Visa · Mastercard · GrabPay — secure checkout</p>
+          </div>
+        </div>
+      </section>
+    </footer>
+  );
+}
