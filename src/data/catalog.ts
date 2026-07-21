@@ -27,6 +27,11 @@ export type Product = {
   tone: string;
   /** Photoshoot image (public path). Falls back to placeholder gradient when absent. */
   image?: string;
+  /**
+   * Units on hand across every variant. Populated from the database; undefined
+   * on the seed fallback, which carries no inventory.
+   */
+  stock?: number;
 };
 
 export const PRODUCTS: Product[] = [
@@ -373,14 +378,28 @@ export const USPS = [
   { icon: "leaf", title: "Sustainable Fashion", body: "Responsible choices for a better tomorrow." },
 ] as const;
 
+/*
+  Collection metadata as the UI consumes it — plain data, so it crosses the
+  server/client boundary and JSON-serialises cleanly.
+*/
 export type CollectionMeta = {
   slug: string;
   title: string;
   description: string;
+};
+
+/*
+  The seed definition additionally carries the membership predicate. It is used
+  only by scripts/generate-seed.mts to compute collection_products rows, and by
+  the seed fallback below — never by the UI, which reads membership from the
+  database. Keeping `filter` off CollectionMeta is what makes that type
+  serialisable.
+*/
+export type SeedCollection = CollectionMeta & {
   filter: (p: Product) => boolean;
 };
 
-export const COLLECTIONS: CollectionMeta[] = [
+export const COLLECTIONS: SeedCollection[] = [
   { slug: "women", title: "Women", description: "Abaya, kurung, dresses and modest essentials.", filter: (p) => p.category === "women" },
   { slug: "men", title: "Men", description: "Kurta, Baju Melayu and refined staples.", filter: (p) => p.category === "men" },
   { slug: "accessories", title: "Accessories", description: "Shawls, inners and finishing touches.", filter: (p) => p.category === "accessories" },
@@ -393,18 +412,8 @@ export const COLLECTIONS: CollectionMeta[] = [
   { slug: "signature", title: "Signature", description: "Maya, Amanda and Luna — the Kalima signatures.", filter: (p) => !!p.collection && p.collection !== "raya" },
 ];
 
-// --- Data access (async; same signatures the Supabase layer will use) ---
-
-export async function fetchProducts(): Promise<Product[]> {
-  return PRODUCTS;
-}
-
-export async function fetchProductBySlug(slug: string): Promise<Product | undefined> {
-  return PRODUCTS.find((p) => p.slug === slug);
-}
-
-export async function fetchCollection(slug: string): Promise<{ meta: CollectionMeta; products: Product[] } | undefined> {
-  const meta = COLLECTIONS.find((c) => c.slug === slug);
-  if (!meta) return undefined;
-  return { meta, products: PRODUCTS.filter(meta.filter) };
-}
+/*
+  Data access moved to src/data/catalog.queries.ts, which reads Supabase.
+  This module stays free of server imports so client components can keep
+  importing the types and the CMS content above.
+*/

@@ -1,78 +1,122 @@
-import { Link, useNavigate } from "react-router-dom";
-import { useCart, cartKey, cartSubtotal, FREE_SHIPPING_THRESHOLD } from "../../stores/cart";
-import { useUi } from "../../stores/ui";
-import { formatRM } from "../../lib/format";
-import { CloseIcon, MinusIcon, PlusIcon } from "../ui/Icons";
-import ProductImage from "../ui/ProductImage";
-import Button from "../ui/Button";
+"use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import {
+  useCart,
+  cartKey,
+  cartSubtotal,
+  FREE_SHIPPING_THRESHOLD,
+} from "@/stores/cart";
+import { useUi } from "@/stores/ui";
+import { useMounted } from "@/hooks/useMounted";
+import { formatRM } from "@/lib/format";
+import { CloseIcon, MinusIcon, PlusIcon } from "@/components/brand/Icons";
+import ProductImage from "@/components/brand/ProductImage";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetTitle,
+} from "@/components/ui/sheet";
+
+/*
+  Slide-over shopping bag, built on the shadcn Sheet (Radix Dialog). The
+  primitive owns the backdrop, focus trap, Escape handling, body scroll lock
+  and the slide animation; everything below is Kalima chrome.
+*/
 export default function CartDrawer() {
   const { cartOpen, setCartOpen } = useUi();
   const { items, setQty, remove } = useCart();
-  const navigate = useNavigate();
-  const subtotal = cartSubtotal(items);
+  const router = useRouter();
+
+  // The cart is persisted to localStorage — hold the empty state until mount.
+  const mounted = useMounted();
+  const cartItems = mounted ? items : [];
+
+  const subtotal = cartSubtotal(cartItems);
   const remaining = Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal);
   const progress = Math.min(100, (subtotal / FREE_SHIPPING_THRESHOLD) * 100);
 
   return (
-    <>
-      <div
-        className={`fixed inset-0 z-50 bg-navy-900/40 transition-opacity ${
-          cartOpen ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        onClick={() => setCartOpen(false)}
-        aria-hidden
-      />
-      <aside
-        className={`fixed right-0 top-0 z-50 flex h-full w-full max-w-md flex-col bg-cream-50 shadow-2xl transition-transform duration-300 ${
-          cartOpen ? "translate-x-0" : "translate-x-full"
-        }`}
-        aria-label="Shopping bag"
+    <Sheet open={cartOpen} onOpenChange={setCartOpen}>
+      <SheetContent
+        side="right"
+        showCloseButton={false}
+        aria-describedby={undefined}
+        className="flex w-full max-w-md flex-col gap-0 border-l-0 bg-cream-50 p-0 shadow-2xl sm:max-w-md"
       >
         <div className="flex items-center justify-between border-b border-navy/10 px-6 py-5">
-          <h2 className="label-caps !text-[13px]">Your Bag</h2>
-          <button onClick={() => setCartOpen(false)} aria-label="Close bag" className="text-navy-400 hover:text-navy cursor-pointer">
+          <SheetTitle className="label-caps !text-[13px] font-medium text-navy">
+            Your Bag
+          </SheetTitle>
+          <SheetClose
+            aria-label="Close bag"
+            className="text-navy-400 hover:text-navy cursor-pointer"
+          >
             <CloseIcon size={18} />
-          </button>
+          </SheetClose>
         </div>
 
         <div className="border-b border-navy/10 px-6 py-4">
           <p className="text-[12px] tracking-wide text-navy-400">
             {remaining > 0 ? (
               <>
-                You're <span className="text-navy font-medium">{formatRM(remaining)}</span> away from free shipping
+                You&apos;re{" "}
+                <span className="text-navy font-medium">{formatRM(remaining)}</span>{" "}
+                away from free shipping
               </>
             ) : (
-              <span className="text-navy font-medium">You've unlocked free shipping ✨</span>
+              <span className="text-navy font-medium">
+                You&apos;ve unlocked free shipping ✨
+              </span>
             )}
           </p>
-          <div className="mt-2 h-1 w-full bg-navy-100">
-            <div className="h-1 bg-navy transition-all duration-500" style={{ width: `${progress}%` }} />
-          </div>
+          <Progress
+            value={progress}
+            aria-label="Progress towards free shipping"
+            className="mt-2 h-1 w-full rounded-none bg-navy-100 [&>*]:bg-navy [&>*]:duration-500"
+          />
         </div>
 
         <div className="flex-1 overflow-y-auto px-6">
-          {items.length === 0 ? (
+          {cartItems.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-5 text-center">
               <p className="font-display text-xl text-navy">Your bag is empty</p>
-              <Button variant="outline" onClick={() => setCartOpen(false)}>
+              <Button
+                variant="kalimaOutline"
+                size="editorial"
+                onClick={() => setCartOpen(false)}
+              >
                 Continue Shopping
               </Button>
             </div>
           ) : (
             <ul className="divide-y divide-navy/10">
-              {items.map((item) => {
+              {cartItems.map((item) => {
                 const key = cartKey(item);
                 return (
                   <li key={key} className="flex gap-4 py-5">
-                    <Link to={`/products/${item.slug}`} onClick={() => setCartOpen(false)} className="shrink-0">
-                      <ProductImage image={item.image} tone={item.tone} alt={item.name} className="h-24 w-20" />
+                    <Link
+                      href={`/products/${item.slug}`}
+                      onClick={() => setCartOpen(false)}
+                      className="shrink-0"
+                    >
+                      <ProductImage
+                        image={item.image}
+                        tone={item.tone}
+                        alt={item.name}
+                        className="h-24 w-20"
+                        sizes="80px"
+                      />
                     </Link>
                     <div className="flex flex-1 flex-col">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <Link
-                            to={`/products/${item.slug}`}
+                            href={`/products/${item.slug}`}
                             onClick={() => setCartOpen(false)}
                             className="text-[14px] hover:underline underline-offset-4"
                           >
@@ -118,27 +162,29 @@ export default function CartDrawer() {
           )}
         </div>
 
-        {items.length > 0 && (
+        {cartItems.length > 0 && (
           <div className="border-t border-navy/10 px-6 py-5">
             <div className="mb-4 flex items-center justify-between">
               <span className="label-caps">Subtotal</span>
               <span className="font-display text-xl">{formatRM(subtotal)}</span>
             </div>
             <Button
+              variant="kalima"
+              size="editorial"
               className="w-full"
               onClick={() => {
                 setCartOpen(false);
-                navigate("/checkout");
+                router.push("/checkout");
               }}
             >
               Secure Checkout
             </Button>
             <p className="mt-3 text-center text-[11px] tracking-wide text-navy-300">
-              Shipping & taxes calculated at checkout
+              Shipping &amp; taxes calculated at checkout
             </p>
           </div>
         )}
-      </aside>
-    </>
+      </SheetContent>
+    </Sheet>
   );
 }

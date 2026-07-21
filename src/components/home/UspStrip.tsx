@@ -1,5 +1,11 @@
-import { USPS } from "../../data/catalog";
-import { FlagIcon, FabricIcon, ScissorsIcon, SizesIcon, LeafIcon } from "../ui/Icons";
+import { USPS } from "@/data/catalog";
+import {
+  FlagIcon,
+  FabricIcon,
+  ScissorsIcon,
+  SizesIcon,
+  LeafIcon,
+} from "@/components/brand/Icons";
 
 const ICONS = {
   flag: FlagIcon,
@@ -9,6 +15,7 @@ const ICONS = {
   leaf: LeafIcon,
 } as const;
 
+/* Server Component — static trust strip. */
 export default function UspStrip() {
   return (
     <section className="bg-beige">

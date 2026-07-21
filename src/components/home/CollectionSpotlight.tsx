@@ -1,6 +1,8 @@
-import { Link } from "react-router-dom";
-import { ArrowRightIcon } from "../ui/Icons";
+import Image from "next/image";
+import Link from "next/link";
+import { ArrowRightIcon } from "@/components/brand/Icons";
 
+/* Server Component — editorial band, purely presentational. */
 export default function CollectionSpotlight() {
   return (
     <section className="bg-cream">
@@ -13,18 +15,22 @@ export default function CollectionSpotlight() {
             <br />
             Crafted with Premium Fabric.
           </p>
-          <Link to="/collections/maya" className="link-editorial mt-8">
+          <Link href="/collections/maya" className="link-editorial mt-8">
             Discover Collection <ArrowRightIcon size={13} />
           </Link>
         </div>
         <div className="order-1 flex lg:order-2 lg:justify-end">
           {/* Arch-masked visual per mockup */}
-          <img
-            src="/products/ruwa-kaftan.jpg"
-            alt="Maya Collection campaign"
-            draggable={false}
-            className="aspect-[4/5] w-full max-w-lg rounded-t-[999px] object-cover object-top select-none"
-          />
+          <div className="relative aspect-[4/5] w-full max-w-lg overflow-hidden rounded-t-[999px]">
+            <Image
+              src="/products/ruwa-kaftan.jpg"
+              alt="Maya Collection campaign"
+              fill
+              sizes="(max-width: 1024px) 100vw, 32rem"
+              draggable={false}
+              className="object-cover object-top select-none"
+            />
+          </div>
         </div>
       </div>
     </section>

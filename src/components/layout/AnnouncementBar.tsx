@@ -1,6 +1,8 @@
+"use client";
+
 import { useEffect, useState } from "react";
-import { ANNOUNCEMENTS } from "../../data/catalog";
-import { ChevronLeftIcon, ChevronRightIcon } from "../ui/Icons";
+import { ANNOUNCEMENTS } from "@/data/catalog";
+import { ChevronLeftIcon, ChevronRightIcon } from "@/components/brand/Icons";
 
 export default function AnnouncementBar() {
   const [index, setIndex] = useState(0);

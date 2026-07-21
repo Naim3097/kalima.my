@@ -1,10 +1,16 @@
 node_modules
-dist
-dist-ssr
+.next
+out
+build
 *.local
 .env
 .env.*
 !.env.example
 .DS_Store
 *.tsbuildinfo
+next-env.d.ts
+.vercel
 .claude/settings.local.json
+
+# Supabase CLI scratch
+supabase/.temp

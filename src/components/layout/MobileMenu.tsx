@@ -1,33 +1,40 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
-import { NAV } from "../../data/catalog";
-import { useUi } from "../../stores/ui";
-import { ChevronDownIcon, CloseIcon } from "../ui/Icons";
+"use client";
 
+import { useState } from "react";
+import Link from "next/link";
+import { NAV } from "@/data/catalog";
+import { useUi } from "@/stores/ui";
+import { ChevronDownIcon, CloseIcon } from "@/components/brand/Icons";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetTitle,
+} from "@/components/ui/sheet";
+
+/*
+  Mobile navigation drawer on the shadcn Sheet (left side). The primitive owns
+  the backdrop, Escape, focus trap, body scroll lock and slide animation.
+*/
 export default function MobileMenu() {
   const { mobileMenuOpen, setMobileMenuOpen } = useUi();
   const [expanded, setExpanded] = useState<string | null>(null);
 
   return (
-    <>
-      <div
-        className={`fixed inset-0 z-50 bg-navy-900/40 transition-opacity lg:hidden ${
-          mobileMenuOpen ? "opacity-100" : "pointer-events-none opacity-0"
-        }`}
-        onClick={() => setMobileMenuOpen(false)}
-        aria-hidden
-      />
-      <aside
-        className={`fixed left-0 top-0 z-50 h-full w-full max-w-xs overflow-y-auto bg-cream-50 shadow-2xl transition-transform duration-300 lg:hidden ${
-          mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
-        aria-label="Menu"
+    <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+      <SheetContent
+        side="left"
+        showCloseButton={false}
+        aria-describedby={undefined}
+        className="w-full max-w-xs gap-0 overflow-y-auto border-r-0 bg-cream-50 p-0 shadow-2xl sm:max-w-xs"
       >
         <div className="flex items-center justify-between border-b border-navy/10 px-6 py-5">
-          <span className="font-display tracking-[0.3em] text-navy">KALIMA</span>
-          <button onClick={() => setMobileMenuOpen(false)} aria-label="Close menu" className="text-navy-400 cursor-pointer">
+          <SheetTitle className="font-display font-normal tracking-[0.3em] text-navy">
+            KALIMA
+          </SheetTitle>
+          <SheetClose aria-label="Close menu" className="text-navy-400 cursor-pointer">
             <CloseIcon size={18} />
-          </button>
+          </SheetClose>
         </div>
         <nav className="px-6 py-4">
           <ul className="divide-y divide-navy/5">
@@ -35,7 +42,7 @@ export default function MobileMenu() {
               <li key={item.label} className="py-1">
                 <div className="flex items-center justify-between">
                   <Link
-                    to={item.to}
+                    href={item.to}
                     onClick={() => setMobileMenuOpen(false)}
                     className="label-caps block py-3 text-navy"
                   >
@@ -58,7 +65,7 @@ export default function MobileMenu() {
                     {item.children.map((child) => (
                       <li key={child.label}>
                         <Link
-                          to={child.to}
+                          href={child.to}
                           onClick={() => setMobileMenuOpen(false)}
                           className="block py-1 text-[13px] tracking-wide text-navy-400"
                         >
@@ -75,14 +82,14 @@ export default function MobileMenu() {
           {/* Utility links — mirrors the desktop header extras */}
           <ul className="mt-2 border-t border-navy/10 pt-4 space-y-1">
             {[
-              { label: "My Account", to: "/account" },
-              { label: "Wishlist", to: "/wishlist" },
-              { label: "Stores", to: "/pages/stores" },
-              { label: "Back Office (demo)", to: "/admin" },
+              { label: "My Account", href: "/account" },
+              { label: "Wishlist", href: "/wishlist" },
+              { label: "Stores", href: "/pages/stores" },
+              { label: "Back Office (demo)", href: "/admin" },
             ].map((l) => (
-              <li key={l.to}>
+              <li key={l.href}>
                 <Link
-                  to={l.to}
+                  href={l.href}
                   onClick={() => setMobileMenuOpen(false)}
                   className="block py-2 text-[13px] tracking-wide text-navy-400"
                 >
@@ -92,7 +99,7 @@ export default function MobileMenu() {
             ))}
           </ul>
         </nav>
-      </aside>
-    </>
+      </SheetContent>
+    </Sheet>
   );
 }

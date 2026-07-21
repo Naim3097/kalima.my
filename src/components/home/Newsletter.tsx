@@ -1,5 +1,11 @@
-import { useState, type FormEvent } from "react";
+"use client";
 
+import { useState, type FormEvent } from "react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+/* Client Component — controlled email input + submit handler. */
 export default function Newsletter() {
   const [email, setEmail] = useState("");
   const [done, setDone] = useState(false);
@@ -7,8 +13,11 @@ export default function Newsletter() {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!email.trim()) return;
-    // Phase 2+: persist to Supabase newsletter_subscribers with PDPA consent record
+    // Demo only — Phase 2+: persist to Supabase newsletter_subscribers with PDPA consent record
     setDone(true);
+    toast.success("Welcome to Kalima Club", {
+      description: `We'll send the next drop to ${email.trim()}.`,
+    });
   };
 
   return (
@@ -26,21 +35,18 @@ export default function Newsletter() {
           </p>
         ) : (
           <form onSubmit={submit} className="flex w-full max-w-lg lg:justify-self-end">
-            <input
+            <Input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Enter your email"
               aria-label="Email address"
-              className="w-full border border-navy/20 bg-white px-5 py-3.5 text-[14px] tracking-wide text-navy placeholder:text-navy-300 focus:border-navy focus:outline-none"
+              className="h-auto w-full border-navy/20 bg-white px-5 py-3.5 text-[14px] tracking-wide text-navy shadow-none placeholder:text-navy-300 focus-visible:border-navy focus-visible:ring-0 md:text-[14px]"
             />
-            <button
-              type="submit"
-              className="label-caps shrink-0 bg-navy px-8 text-white transition-colors hover:bg-navy-700 cursor-pointer"
-            >
+            <Button type="submit" variant="kalima" size="editorial" className="shrink-0 px-8 py-0">
               Subscribe
-            </button>
+            </Button>
           </form>
         )}
       </div>

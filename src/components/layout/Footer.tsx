@@ -1,5 +1,11 @@
-import { Link } from "react-router-dom";
-import { TruckIcon, ReturnIcon, ShieldIcon, HeadsetIcon } from "../ui/Icons";
+import Link from "next/link";
+import Image from "next/image";
+import {
+  TruckIcon,
+  ReturnIcon,
+  ShieldIcon,
+  HeadsetIcon,
+} from "@/components/brand/Icons";
 
 const TRUST = [
   { icon: TruckIcon, title: "Free Shipping", body: "For orders above RM300" },
@@ -8,33 +14,33 @@ const TRUST = [
   { icon: HeadsetIcon, title: "Customer Support", body: "We're here to help" },
 ];
 
-const LINKS: { heading: string; items: { label: string; to: string }[] }[] = [
+const LINKS: { heading: string; items: { label: string; href: string }[] }[] = [
   {
     heading: "Shop",
     items: [
-      { label: "Women", to: "/collections/women" },
-      { label: "Men", to: "/collections/men" },
-      { label: "Accessories", to: "/collections/accessories" },
-      { label: "Raya Collection", to: "/collections/raya" },
-      { label: "Best Sellers", to: "/collections/best-sellers" },
+      { label: "Women", href: "/collections/women" },
+      { label: "Men", href: "/collections/men" },
+      { label: "Accessories", href: "/collections/accessories" },
+      { label: "Raya Collection", href: "/collections/raya" },
+      { label: "Best Sellers", href: "/collections/best-sellers" },
     ],
   },
   {
     heading: "Help",
     items: [
-      { label: "Shipping", to: "/pages/shipping" },
-      { label: "Returns & Exchanges", to: "/pages/returns" },
-      { label: "Size Guide", to: "/pages/size-guide" },
-      { label: "Contact Us", to: "/pages/contact" },
+      { label: "Shipping", href: "/pages/shipping" },
+      { label: "Returns & Exchanges", href: "/pages/returns" },
+      { label: "Size Guide", href: "/pages/size-guide" },
+      { label: "Contact Us", href: "/pages/contact" },
     ],
   },
   {
     heading: "Kalima",
     items: [
-      { label: "About Kalima", to: "/pages/about-kalima" },
-      { label: "Our Fabrics", to: "/pages/fabrics" },
-      { label: "Stores", to: "/pages/stores" },
-      { label: "Kalima Club", to: "/pages/kalima-club" },
+      { label: "About Kalima", href: "/pages/about-kalima" },
+      { label: "Our Fabrics", href: "/pages/fabrics" },
+      { label: "Stores", href: "/pages/stores" },
+      { label: "Kalima Club", href: "/pages/kalima-club" },
     ],
   },
 ];
@@ -61,7 +67,13 @@ export default function Footer() {
       <section className="bg-navy text-white">
         <div className="mx-auto grid max-w-7xl gap-12 px-4 py-14 lg:grid-cols-5">
           <div className="lg:col-span-2">
-            <img src="/brand/kalima-mark-white.png" alt="Kalima" className="h-20 w-auto" />
+            <Image
+              src="/brand/kalima-mark-white.png"
+              alt="Kalima"
+              width={1563}
+              height={1563}
+              className="h-20 w-auto"
+            />
             <p className="mt-5 max-w-xs text-[13px] leading-relaxed tracking-wide text-white/60">
               Timeless modest luxury — designed in Malaysia for every beautiful journey.
             </p>
@@ -72,7 +84,7 @@ export default function Footer() {
               <ul className="space-y-3">
                 {col.items.map((l) => (
                   <li key={l.label}>
-                    <Link to={l.to} className="text-[13px] tracking-wide text-white/60 hover:text-white transition-colors">
+                    <Link href={l.href} className="text-[13px] tracking-wide text-white/60 hover:text-white transition-colors">
                       {l.label}
                     </Link>
                   </li>
@@ -84,7 +96,7 @@ export default function Footer() {
         <div className="border-t border-white/10">
           <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-6 text-[11px] tracking-wide text-white/40 lg:flex-row">
             <p>© {new Date().getFullYear()} Kalima. All rights reserved.</p>
-            <Link to="/admin" className="hover:text-white/70 transition-colors">
+            <Link href="/admin" className="hover:text-white/70 transition-colors">
               Back Office (demo preview)
             </Link>
             <p>FPX · Visa · Mastercard · GrabPay — secure checkout</p>

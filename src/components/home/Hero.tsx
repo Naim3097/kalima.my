@@ -1,12 +1,18 @@
+"use client";
+
 import { useEffect, useState } from "react";
-import { HERO_SLIDES } from "../../data/catalog";
-import Button from "../ui/Button";
+import Image from "next/image";
+import Link from "next/link";
+import { HERO_SLIDES } from "@/data/catalog";
+import { Button } from "@/components/ui/button";
 
 /*
   Editorial split hero — copy aligned to the site container on the left,
   photography full-bleed to the viewport edge on the right. The section
   background stays neutral cream/beige (no campaign tint) so every slide's
   studio backdrop blends cleanly; slides crossfade.
+
+  Client Component: carousel index state + the auto-advance timer.
 */
 export default function Hero() {
   const [index, setIndex] = useState(0);
@@ -33,13 +39,17 @@ export default function Hero() {
         {/* Campaign image — bleeds to the right viewport edge */}
         <div className="relative order-1 h-[440px] sm:h-[520px] lg:order-2 lg:h-auto">
           {HERO_SLIDES.map((s, i) => (
-            <img
+            <Image
               key={s.image}
               src={s.image}
               alt={i === index ? s.title : ""}
+              fill
+              sizes="100vw"
+              /* First slide is the LCP element — never lazy-load it */
+              priority={i === 0}
               draggable={false}
               aria-hidden={i !== index}
-              className={`absolute inset-0 h-full w-full object-cover select-none transition-opacity duration-[1200ms] ease-in-out ${
+              className={`object-cover select-none transition-opacity duration-[1200ms] ease-in-out ${
                 i === index ? "opacity-100" : "opacity-0"
               }`}
               style={{ objectPosition: s.focal ?? "center 20%" }}
@@ -77,9 +87,11 @@ export default function Hero() {
                 {slide.body}
               </p>
               <div className="mt-10 flex flex-wrap gap-4">
-                <Button to={slide.primary.to}>{slide.primary.label}</Button>
-                <Button to={slide.secondary.to} variant="outline">
-                  {slide.secondary.label}
+                <Button asChild variant="kalima" size="editorial">
+                  <Link href={slide.primary.to}>{slide.primary.label}</Link>
+                </Button>
+                <Button asChild variant="kalimaOutline" size="editorial">
+                  <Link href={slide.secondary.to}>{slide.secondary.label}</Link>
                 </Button>
               </div>
             </div>

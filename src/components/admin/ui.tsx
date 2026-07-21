@@ -1,7 +1,37 @@
 import type { ReactNode } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Card as ShadCard } from "@/components/ui/card";
+import {
+  Table as ShadTable,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
+
+/*
+  Shared back-office primitives. Rebuilt on the shadcn primitives (Card,
+  Badge, Table) with the admin mockup's flat, sharp-cornered treatment layered
+  on top — the rendered output is identical to the pre-port markup.
+
+  Everything here is server-renderable; none of it holds state.
+*/
 
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`border border-navy/10 bg-white ${className}`}>{children}</div>;
+  return (
+    <ShadCard
+      className={cn(
+        // flatten the shadcn card back to the admin surface: plain block,
+        // no vertical padding, no shadow, hairline navy border on white
+        "block gap-0 border border-navy/10 bg-white py-0 shadow-none",
+        className,
+      )}
+    >
+      {children}
+    </ShadCard>
+  );
 }
 
 export function CardHeader({ title, action }: { title: string; action?: ReactNode }) {
@@ -49,9 +79,14 @@ const PILL_STYLES: Record<string, string> = {
 
 export function Pill({ value }: { value: string }) {
   return (
-    <span className={`inline-block rounded-full px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider ${PILL_STYLES[value] ?? "bg-navy-100 text-navy"}`}>
+    <Badge
+      className={cn(
+        "rounded-full px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider",
+        PILL_STYLES[value] ?? "bg-navy-100 text-navy",
+      )}
+    >
       {value}
-    </span>
+    </Badge>
   );
 }
 
@@ -62,33 +97,48 @@ export function ChannelBadge({ channel }: { channel: "web" | "shopee" | "tiktok"
     tiktok: { label: "TikTok", cls: "bg-[#161823] text-white" },
   }[channel];
   return (
-    <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${meta.cls}`}>
+    <Badge className={cn("rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider", meta.cls)}>
       {meta.label}
-    </span>
+    </Badge>
+  );
+}
+
+/** Neutral chip used for customer tags / tiers. */
+export function Chip({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <Badge className={cn("rounded bg-navy-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-navy", className)}>
+      {children}
+    </Badge>
   );
 }
 
 export function Table({ head, children }: { head: string[]; children: ReactNode }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left text-[13px]">
-        <thead>
-          <tr className="border-b border-navy/10">
-            {head.map((h) => (
-              <th key={h} className="label-caps whitespace-nowrap px-5 py-3 !text-[10px] font-medium text-navy-400">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-navy/5 text-navy">{children}</tbody>
-      </table>
-    </div>
+    <ShadTable className="w-full text-left text-[13px]">
+      <TableHeader>
+        <TableRow className="border-navy/10 hover:bg-transparent">
+          {head.map((h) => (
+            <TableHead
+              key={h}
+              className="label-caps h-auto whitespace-nowrap px-5 py-3 !text-[10px] font-medium text-navy-400"
+            >
+              {h}
+            </TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody className="text-navy">{children}</TableBody>
+    </ShadTable>
   );
 }
 
+/** Body row — hairline separator + the mockup's cream hover. */
+export function Tr({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return <TableRow className={cn("border-navy/5 hover:bg-cream-50", className)}>{children}</TableRow>;
+}
+
 export function Td({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <td className={`whitespace-nowrap px-5 py-3.5 ${className}`}>{children}</td>;
+  return <TableCell className={cn("whitespace-nowrap px-5 py-3.5", className)}>{children}</TableCell>;
 }
 
 export function DemoNote({ children }: { children: ReactNode }) {
@@ -96,5 +146,18 @@ export function DemoNote({ children }: { children: ReactNode }) {
     <p className="mt-6 border border-dashed border-navy/20 bg-navy-100/40 px-4 py-3 text-[12px] leading-relaxed tracking-wide text-navy-400">
       {children}
     </p>
+  );
+}
+
+/** The persistent "Demo preview" banner shown above every back-office page. */
+export function DemoPreviewBanner() {
+  return (
+    <div className="border-b border-amber-300/60 bg-amber-50 px-4 py-2.5 lg:px-6">
+      <p className="text-[12px] tracking-wide text-amber-900">
+        <span className="font-semibold uppercase tracking-wider">Demo preview</span> — sample data for client
+        walkthrough. Numbered modules ①–⑥ are the client&apos;s requested features; live integrations arrive in
+        Phases 4–9.
+      </p>
+    </div>
   );
 }

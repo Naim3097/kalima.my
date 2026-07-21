@@ -1,0 +1,187 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+  Kalima design tokens — PROJECT_PLAN.md §2.1 / §2.1.1
+  Brand navy #383C61 extracted from official logo files.
+*/
+@theme {
+  --color-navy-900: #20233a;
+  --color-navy-700: #2c2f4d;
+  --color-navy: #383c61;
+  --color-navy-400: #686c8f;
+  --color-navy-300: #9b9cb0;
+  --color-navy-100: #ebecf2;
+
+  --color-cream: #f7f3ec;
+  --color-cream-50: #fbf9f5;
+  --color-beige: #efe7db;
+  --color-beige-300: #e3d7c6;
+
+  --color-ink: #383c61;
+
+  /* Supplied by next/font in src/app/layout.tsx */
+  --font-display: var(--font-playfair), "Georgia", serif;
+  --font-sans: var(--font-jost), "Segoe UI", sans-serif;
+
+  --tracking-luxe: 0.18em;
+  --tracking-wide2: 0.12em;
+}
+
+/*
+  shadcn/ui semantic tokens, mapped onto the Kalima palette rather than the
+  library defaults — primitives inherit the brand instead of neutral greys.
+  Radius is 0: the mockup's buttons and cards are sharp-cornered (§2.1).
+*/
+:root {
+  --radius: 0rem;
+
+  --background: #f7f3ec;
+  --foreground: #383c61;
+  --card: #fbf9f5;
+  --card-foreground: #383c61;
+  --popover: #fbf9f5;
+  --popover-foreground: #383c61;
+  --primary: #383c61;
+  --primary-foreground: #ffffff;
+  --secondary: #efe7db;
+  --secondary-foreground: #383c61;
+  --muted: #ebecf2;
+  --muted-foreground: #686c8f;
+  --accent: #efe7db;
+  --accent-foreground: #383c61;
+  --destructive: #9b2c2c;
+  --destructive-foreground: #ffffff;
+  --border: #e3d7c6;
+  --input: #e3d7c6;
+  --ring: #686c8f;
+
+  --chart-1: #383c61;
+  --chart-2: #686c8f;
+  --chart-3: #9b9cb0;
+  --chart-4: #b3a294;
+  --chart-5: #a9b39b;
+
+  --sidebar: #383c61;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #383c61;
+  --sidebar-accent: #2c2f4d;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #4a4e73;
+  --sidebar-ring: #9b9cb0;
+}
+
+/*
+  The storefront is light-only by art direction (warm cream surfaces).
+  This block exists so shadcn primitives stay legible if a future admin
+  surface opts into `.dark` — it is not applied anywhere today.
+*/
+.dark {
+  --background: #20233a;
+  --foreground: #f7f3ec;
+  --card: #2c2f4d;
+  --card-foreground: #f7f3ec;
+  --popover: #2c2f4d;
+  --popover-foreground: #f7f3ec;
+  --primary: #f7f3ec;
+  --primary-foreground: #20233a;
+  --secondary: #2c2f4d;
+  --secondary-foreground: #f7f3ec;
+  --muted: #2c2f4d;
+  --muted-foreground: #9b9cb0;
+  --accent: #383c61;
+  --accent-foreground: #f7f3ec;
+  --destructive: #e05252;
+  --destructive-foreground: #ffffff;
+  --border: #4a4e73;
+  --input: #4a4e73;
+  --ring: #9b9cb0;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-cream text-ink font-sans antialiased;
+}
+
+/* Uppercase micro-label used across nav, eyebrows, buttons */
+@utility label-caps {
+  @apply uppercase tracking-luxe text-[11px] font-medium;
+}
+
+/* Editorial underlined link, e.g. DISCOVER COLLECTION → */
+@utility link-editorial {
+  @apply label-caps inline-flex items-center gap-2 border-b border-ink/60 pb-1 transition-colors hover:border-ink;
+}
+
+/* Hide scrollbar for horizontal product rails on mobile */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Hero copy entrance on slide change — transform-only so text is never
+   invisible if the animation is deferred (background tab, low power) */
+@keyframes hero-fade {
+  from {
+    transform: translateY(16px);
+  }
+  to {
+    transform: none;
+  }
+}
+.animate-hero-fade {
+  animation: hero-fade 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-hero-fade {
+    animation: none;
+  }
+}
