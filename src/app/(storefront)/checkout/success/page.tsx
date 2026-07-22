@@ -1,54 +1,103 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { cookies } from "next/headers";
+import { formatRM } from "@/lib/format";
+import { getOrderByReference } from "@/lib/commerce";
 import { Button } from "@/components/ui/button";
-import OrderConfirmationLine from "@/components/checkout/OrderConfirmationLine";
+import ClearCart from "@/components/checkout/ClearCart";
 
 export const metadata: Metadata = {
-  title: "Order Confirmed",
-  description:
-    "Your Kalima order is confirmed — WhatsApp confirmation sent, EasyParcel booking queued and Club points on the way.",
+  title: "Order received",
+  description: "Your Kalima order has been received.",
 };
 
-const STEPS = [
-  { icon: "💬", title: "WhatsApp confirmation sent", body: "Order details delivered to +60 12-345 6789 — tracking link follows automatically when the parcel ships." },
-  { icon: "📦", title: "EasyParcel booking queued", body: "Warehouse books the consignment in one click; you'll get the courier + AWB tracking number." },
-  { icon: "✨", title: "289 Kalima Club points earned", body: "Points credit after the 14-day return window. You're RM320 away from Gold tier." },
-];
-
 /*
-  Server Component. Only the paid-amount readout touches the persisted cart
-  (and clears it after payment), so that single line is a client child.
+  Reads the just-placed order from the httpOnly cookie set by placeOrder (keeps
+  the email out of the URL) and shows it status-aware. Never marks anything
+  paid — that only happens via the gateway webhook.
 */
-export default function CheckoutSuccessPage() {
+export default async function CheckoutSuccessPage() {
+  const jar = await cookies();
+  const raw = jar.get("kalima_order")?.value;
+
+  let order = null;
+  if (raw) {
+    try {
+      const { reference, email } = JSON.parse(raw) as { reference: string; email: string };
+      order = await getOrderByReference(reference, email);
+    } catch {
+      order = null;
+    }
+  }
+
+  if (!order) {
+    return (
+      <div className="mx-auto max-w-2xl px-4 py-24 text-center">
+        <h1 className="font-display text-3xl text-navy">No recent order found</h1>
+        <p className="mt-3 text-[14px] tracking-wide text-navy-400">
+          If you&apos;ve just ordered, check your email for confirmation.
+        </p>
+        <div className="mt-8 flex justify-center gap-4">
+          <Button asChild variant="kalima" size="editorial"><Link href="/account">My Account</Link></Button>
+          <Button asChild variant="kalimaOutline" size="editorial"><Link href="/">Home</Link></Button>
+        </div>
+      </div>
+    );
+  }
+
+  const paid = order.status === "paid" || order.status === "fulfilled" || order.status === "completed";
+  const recipient =
+    (order.shipping_address as { recipient?: string } | null)?.recipient?.split(" ")[0] ?? "there";
+
   return (
     <div className="mx-auto max-w-2xl px-4 py-16 text-center">
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-navy text-2xl text-white">✓</div>
-      <h1 className="mt-6 font-display text-4xl text-navy">Terima kasih, Nurul 🤍</h1>
-      <OrderConfirmationLine />
+      <ClearCart />
 
-      <div className="mt-10 space-y-3 text-left">
-        {STEPS.map((step) => (
-          <div key={step.title} className="flex gap-4 border border-navy/10 bg-white px-5 py-4">
-            <span className="text-xl">{step.icon}</span>
-            <div>
-              <p className="text-[14px] font-medium text-navy">{step.title}</p>
-              <p className="mt-0.5 text-[13px] leading-relaxed tracking-wide text-navy-400">{step.body}</p>
-            </div>
-          </div>
-        ))}
+      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-navy text-2xl text-white">
+        ✓
       </div>
-
-      <p className="mt-6 text-[12px] tracking-wide text-navy-300">
-        Demo preview — in production this page follows a real gateway webhook confirmation.
+      <h1 className="mt-6 font-display text-4xl text-navy">Terima kasih, {recipient} 🤍</h1>
+      <p className="mt-3 text-[14px] tracking-wide text-navy-400">
+        Order <span className="font-medium text-navy">{order.reference}</span>{" "}
+        {paid ? "is confirmed and being prepared." : "has been received."}
       </p>
 
+      {!paid && (
+        <p className="mx-auto mt-6 max-w-md border border-navy/15 bg-cream-50 px-4 py-3 text-[13px] leading-relaxed text-navy-400">
+          We&apos;ll confirm by email the moment your payment is processed. Your items are
+          reserved against this order.
+        </p>
+      )}
+
+      {/* Order summary */}
+      <div className="mt-10 border border-navy/10 bg-white text-left">
+        <ul className="divide-y divide-navy/5 px-5">
+          {order.items.map((i, idx) => (
+            <li key={idx} className="flex items-center justify-between py-4 text-[13px]">
+              <span className="text-navy">
+                {i.product_name}
+                <span className="text-navy-400"> · {i.color_name} · {i.size} × {i.qty}</span>
+              </span>
+              <span className="text-navy">{formatRM(i.line_total_sen / 100)}</span>
+            </li>
+          ))}
+        </ul>
+        <dl className="space-y-2 border-t border-navy/10 px-5 py-4 text-[13px]">
+          <div className="flex justify-between text-navy-400"><dt>Subtotal</dt><dd>{formatRM(order.subtotal_sen / 100)}</dd></div>
+          {order.discount_sen > 0 && (
+            <div className="flex justify-between text-emerald-700"><dt>Discount</dt><dd>−{formatRM(order.discount_sen / 100)}</dd></div>
+          )}
+          <div className="flex justify-between text-navy-400"><dt>Shipping</dt><dd>{order.shipping_sen === 0 ? "FREE" : formatRM(order.shipping_sen / 100)}</dd></div>
+          <div className="flex justify-between border-t border-navy/10 pt-3 text-[15px] text-navy">
+            <dt className="font-medium">Total</dt>
+            <dd className="font-display text-lg">{formatRM(order.total_sen / 100)}</dd>
+          </div>
+        </dl>
+      </div>
+
       <div className="mt-8 flex justify-center gap-4">
-        <Button asChild variant="kalima" size="editorial">
-          <Link href="/account">View My Account</Link>
-        </Button>
-        <Button asChild variant="kalimaOutline" size="editorial">
-          <Link href="/">Back to Home</Link>
-        </Button>
+        <Button asChild variant="kalima" size="editorial"><Link href="/account">View my orders</Link></Button>
+        <Button asChild variant="kalimaOutline" size="editorial"><Link href="/">Continue shopping</Link></Button>
       </div>
     </div>
   );

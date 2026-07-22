@@ -1,16 +1,25 @@
 import type { Metadata } from "next";
 import CheckoutForm from "@/components/checkout/CheckoutForm";
+import { getCurrentUser } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "Checkout",
   description:
-    "Secure checkout — FPX, card and e-wallet payments with live EasyParcel shipping rates across Malaysia.",
+    "Secure checkout with delivery across Malaysia. Free shipping over RM300.",
 };
 
 /*
-  Server Component shell. Every part of checkout reads the persisted cart or
-  holds form state, so the whole flow lives in the CheckoutForm client child.
+  Server Component shell. Prefills contact details for a signed-in shopper, then
+  hands off to the CheckoutForm client child (cart + form state + the order
+  server action).
 */
-export default function CheckoutPage() {
-  return <CheckoutForm />;
+export default async function CheckoutPage() {
+  const current = await getCurrentUser();
+  return (
+    <CheckoutForm
+      defaultEmail={current?.user.email ?? ""}
+      defaultName={current?.profile?.full_name ?? ""}
+      defaultPhone={current?.profile?.phone ?? ""}
+    />
+  );
 }

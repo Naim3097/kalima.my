@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPaymentProvider } from "@/lib/payments";
 import { markOrderPaid } from "@/lib/commerce";
+import { sendPaymentConfirmedEmail } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/server";
 
 /*
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
   }
   const { data: order } = await admin
     .from("orders")
-    .select("id, total_sen")
+    .select("id, total_sen, email")
     .eq("reference", result.orderReference)
     .maybeSingle();
 
@@ -58,13 +59,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Amount mismatch" }, { status: 409 });
   }
 
-  await markOrderPaid({
+  const outcome = await markOrderPaid({
     orderId: order.id,
     provider: provider.name,
     providerRef: result.providerRef ?? "",
     amountSen: result.amountSen ?? order.total_sen,
     raw: result.raw,
   });
+
+  // Send the confirmation only on the transition to paid, not on retries.
+  if (outcome.status === "paid") {
+    await sendPaymentConfirmedEmail(result.orderReference, order.email).catch(() => {});
+  }
 
   return NextResponse.json({ received: true });
 }

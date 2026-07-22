@@ -6,20 +6,24 @@ import { formatRM } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { getCurrentUser } from "@/lib/auth";
+import { fetchMyOrders } from "@/lib/commerce";
 import { signOut } from "@/app/auth/actions";
 import ChangePasswordForm from "@/components/account/ChangePasswordForm";
+
+const ORDER_STATUS_LABEL: Record<string, string> = {
+  pending: "Pending payment",
+  paid: "Paid — preparing",
+  fulfilled: "Shipped",
+  completed: "Delivered",
+  cancelled: "Cancelled",
+  refunded: "Refunded",
+};
 
 export const metadata: Metadata = {
   title: "My Account",
   description:
     "Your Kalima Club dashboard — points balance, tier progress, order history and saved details.",
 };
-
-const MOCK_ORDERS = [
-  { id: "KLM-10248", date: "17 Jul 2026", items: "Maya Chiffon (M), Satin Shawl", total: 339, status: "Paid — preparing", tracking: null },
-  { id: "KLM-10201", date: "28 Jun 2026", items: "Bella Dress (S)", total: 289, status: "Delivered", tracking: "EP934601827MY" },
-  { id: "KLM-10142", date: "9 Jun 2026", items: "Sofea Dress (M), Rayon Inner", total: 319, status: "Delivered", tracking: "EP934418805MY" },
-];
 
 const POINTS_HISTORY = [
   { date: "28 Jun", event: "Order KLM-10201 — points credited", delta: "+289" },
@@ -45,6 +49,7 @@ export default async function AccountPage({
 
   const { password } = await searchParams;
   const { user, profile } = current;
+  const orders = await fetchMyOrders();
   const displayName = profile?.full_name?.trim() || user.email?.split("@")[0] || "there";
   const profileLine = [
     profile?.full_name,
@@ -145,37 +150,50 @@ export default async function AccountPage({
         </div>
       </section>
 
-      {/* Orders */}
+      {/* Orders — real */}
       <section className="mt-10">
         <h2 className="label-caps mb-4 !text-[13px]">Order History</h2>
-        <div className="space-y-3">
-          {MOCK_ORDERS.map((o) => (
-            <div key={o.id} className="flex flex-wrap items-center justify-between gap-4 border border-navy/10 bg-white px-5 py-4">
-              <div>
-                <p className="text-[14px] font-medium text-navy">{o.id}</p>
-                <p className="mt-0.5 text-[12px] tracking-wide text-navy-400">
-                  {o.date} · {o.items}
-                </p>
-              </div>
-              <div className="flex items-center gap-6">
-                <span className="text-[14px] text-navy">{formatRM(o.total)}</span>
-                <Badge
-                  variant="ghost"
-                  className={`rounded-full px-3 py-1 text-[10px] font-normal uppercase tracking-wider ${
-                    o.status === "Delivered" ? "bg-emerald-100 text-emerald-900" : "bg-navy-100 text-navy"
-                  }`}
-                >
-                  {o.status}
-                </Badge>
-                {o.tracking ? (
-                  <span className="text-[12px] tracking-wide text-navy-400">{o.tracking}</span>
-                ) : (
-                  <span className="text-[12px] tracking-wide text-navy-300">Tracking soon via WhatsApp</span>
-                )}
-              </div>
+        {orders.length === 0 ? (
+          <div className="border border-navy/10 bg-white px-5 py-10 text-center">
+            <p className="text-[14px] text-navy-400">No orders yet.</p>
+            <div className="mt-4">
+              <Link href="/collections/best-sellers" className="link-editorial text-navy">
+                Shop best sellers
+              </Link>
             </div>
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {orders.map((o) => {
+              const itemsLine = o.items
+                .map((i) => `${i.product_name} (${i.size}) × ${i.qty}`)
+                .join(", ");
+              const delivered = o.status === "completed" || o.status === "fulfilled";
+              return (
+                <div key={o.reference} className="flex flex-wrap items-center justify-between gap-4 border border-navy/10 bg-white px-5 py-4">
+                  <div>
+                    <p className="text-[14px] font-medium text-navy">{o.reference}</p>
+                    <p className="mt-0.5 text-[12px] tracking-wide text-navy-400">
+                      {new Date(o.created_at).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}
+                      {itemsLine && ` · ${itemsLine}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-6">
+                    <span className="text-[14px] text-navy">{formatRM(o.total_sen / 100)}</span>
+                    <Badge
+                      variant="ghost"
+                      className={`rounded-full px-3 py-1 text-[10px] font-normal uppercase tracking-wider ${
+                        delivered ? "bg-emerald-100 text-emerald-900" : "bg-navy-100 text-navy"
+                      }`}
+                    >
+                      {ORDER_STATUS_LABEL[o.status] ?? o.status}
+                    </Badge>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* Profile blocks */}

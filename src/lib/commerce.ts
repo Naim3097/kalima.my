@@ -11,6 +11,48 @@ import { createAdminClient, createClient } from "@/lib/supabase/server";
 
 export type CartLine = { variant_id: string; qty: number };
 
+/** A cart line as the client stores it — resolved to a variant id below. */
+export type CartRef = { slug: string; color: string; size: string; qty: number };
+
+/*
+  Resolves cart lines (product slug + colour name + size, as the client stores
+  them) to product_variant ids for create_order. Runs server-side with the
+  admin client. Any line that no longer maps to a published variant is returned
+  in `missing` so checkout can tell the shopper rather than silently dropping it.
+*/
+export async function resolveCartLines(
+  refs: CartRef[],
+): Promise<{ lines: CartLine[]; missing: CartRef[]; subtotalSen: number }> {
+  const supabase = admin();
+  const lines: CartLine[] = [];
+  const missing: CartRef[] = [];
+  let subtotalSen = 0;
+
+  for (const ref of refs) {
+    const { data, error } = await supabase
+      .from("product_variants")
+      .select("id, price_sen, products!inner(slug, published, price_sen)")
+      .eq("products.slug", ref.slug)
+      .eq("products.published", true)
+      .eq("color_name", ref.color)
+      .eq("size", ref.size)
+      .maybeSingle();
+
+    if (error) throw new Error(`resolveCartLines failed: ${error.message}`);
+    if (!data) {
+      missing.push(ref);
+      continue;
+    }
+    // Variant override, else product base price — the same rule create_order uses.
+    const product = data.products as unknown as { price_sen: number };
+    const unit = data.price_sen ?? product.price_sen;
+    subtotalSen += unit * ref.qty;
+    lines.push({ variant_id: data.id, qty: ref.qty });
+  }
+
+  return { lines, missing, subtotalSen };
+}
+
 export type OrderAddress = {
   recipient: string;
   phone?: string;
