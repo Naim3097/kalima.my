@@ -187,6 +187,87 @@ export async function markOrderPaid(params: {
   return data as { status: string; reference: string };
 }
 
+/*
+  The order fields the payment step needs, gated by matching email (guest-safe).
+  Returns null unless the order exists and belongs to that email.
+*/
+export async function getOrderForCheckout(
+  reference: string,
+  email: string,
+): Promise<{
+  id: string;
+  reference: string;
+  email: string;
+  phone: string | null;
+  total_sen: number;
+  status: string;
+  shipping_address: OrderAddress | null;
+} | null> {
+  const { data, error } = await admin()
+    .from("orders")
+    .select("id, reference, email, phone, total_sen, status, shipping_address")
+    .eq("reference", reference)
+    .ilike("email", email)
+    .maybeSingle();
+  if (error) throw new Error(`getOrderForCheckout failed: ${error.message}`);
+  return data ?? null;
+}
+
+/*
+  Records the pending payment attempt at bill creation (guide §4). The webhook
+  later upserts this row to paid via mark_order_paid, keyed on (provider,
+  provider_ref) — so the bill_no is the idempotency anchor.
+*/
+export async function recordPendingPayment(
+  orderId: string,
+  providerRef: string,
+  amountSen: number,
+): Promise<void> {
+  const { error } = await admin().from("payments").insert({
+    order_id: orderId,
+    provider: "leanx",
+    provider_ref: providerRef,
+    status: "pending",
+    amount_sen: amountSen,
+  });
+  if (error) throw new Error(`recordPendingPayment failed: ${error.message}`);
+}
+
+/*
+  Resolves a webhook's bill_no back to its order (primary match). Falls back to
+  the invoice_ref (order reference) when no pending payment row is found.
+*/
+export async function resolveWebhookOrder(
+  providerRef: string | undefined,
+  orderReference: string | undefined,
+): Promise<{ id: string; total_sen: number; email: string; reference: string } | null> {
+  const supabase = admin();
+
+  if (providerRef) {
+    const { data } = await supabase
+      .from("payments")
+      .select("order_id, orders(id, total_sen, email, reference)")
+      .eq("provider", "leanx")
+      .eq("provider_ref", providerRef)
+      .maybeSingle();
+    const order = data?.orders as unknown as
+      | { id: string; total_sen: number; email: string; reference: string }
+      | null;
+    if (order) return order;
+  }
+
+  if (orderReference) {
+    const { data } = await supabase
+      .from("orders")
+      .select("id, total_sen, email, reference")
+      .eq("reference", orderReference)
+      .maybeSingle();
+    if (data) return data;
+  }
+
+  return null;
+}
+
 /** A signed-in customer's own orders, for the account order history. */
 export async function fetchMyOrders(): Promise<
   {

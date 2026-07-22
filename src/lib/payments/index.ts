@@ -1,22 +1,16 @@
 import "server-only";
 
 import type { PaymentProvider } from "./types";
+import { leanx, leanxConfigured } from "./leanx";
 
 /*
-  Resolves the active payment provider. LeanX drops in here once the
-  integration .md arrives:
-
-    import { leanx } from "./leanx";
-    return leanx;
-
-  Until then this returns null and the checkout stops at "order created,
-  payment pending" rather than pretending a gateway exists. Nothing else in the
-  flow needs to change when LeanX is wired — see ./types.ts.
+  The active payment provider, or null when unconfigured. With no LeanX
+  credentials the checkout stops at "order received, payment pending" rather
+  than pretending a gateway exists — an unconfigured gateway is visibly
+  unconfigured, never a silent success.
 */
 export function getPaymentProvider(): PaymentProvider | null {
-  // Pending: LeanX. Deliberately not a mock — an unconfigured gateway should be
-  // visibly unconfigured, not silently "succeed".
-  return null;
+  return leanxConfigured() ? leanx : null;
 }
 
-export type { PaymentProvider } from "./types";
+export type { PaymentProvider, PaymentService } from "./types";

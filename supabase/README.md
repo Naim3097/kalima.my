@@ -40,6 +40,27 @@ security warnings.
 > order lookup all run through it. Add it from Project Settings → API. The app builds
 > without it, but checkout will error at runtime until it is set.
 
+### Payment — LeanX (FPX + e-wallets)
+
+`src/lib/payments/leanx.ts` implements LeanX's Silent Bill flow per
+`LEANX_SAAS_INTEGRATION_GUIDE.md`. Checkout falls back to "order received, payment pending"
+until the credentials are set; then it becomes:
+
+`place order → /checkout/pay (pick bank/e-wallet) → LeanX hosted page → webhook → paid`.
+
+| Env var | Notes |
+|---|---|
+| `LEANX_API_HOST` | `https://api.leanx.io` (must be `.io`) |
+| `LEANX_AUTH_TOKEN` | "Auth Token" — sent as the `auth-token` header |
+| `LEANX_COLLECTION_UUID` | "Collection UUID" |
+| `LEANX_WEBHOOK_SECRET` | "Hash Key" — webhook HMAC; without it the webhook fails closed (401) |
+
+The webhook (`/api/payments/webhook`) is the only path to `paid`: it verifies HMAC-SHA256
+over the raw body (`x-leanx-signature`), matches the order by `bill_no`, checks the amount
+against the stored total, then calls the idempotent `mark_order_paid`. Verified with a
+signed test webhook: bad signature → 401, valid → paid + stock decremented, replay →
+no double-decrement, amount mismatch → 409.
+
 Seeded from `seed.sql`: 10 collections · 13 products · 188 variants · 8 images ·
 23 curated memberships.
 

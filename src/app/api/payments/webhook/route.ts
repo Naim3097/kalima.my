@@ -1,60 +1,48 @@
 import { NextResponse } from "next/server";
 import { getPaymentProvider } from "@/lib/payments";
-import { markOrderPaid } from "@/lib/commerce";
+import { markOrderPaid, resolveWebhookOrder } from "@/lib/commerce";
 import { sendPaymentConfirmedEmail } from "@/lib/email";
-import { createAdminClient } from "@/lib/supabase/server";
 
 /*
-  Payment gateway webhook — the ONLY place an order becomes paid (§4.2: payment
-  confirmed by webhook, never by the client redirect).
+  Payment gateway webhook — the ONLY place an order becomes paid (guide §6;
+  PROJECT_PLAN §4.2). Rules, in order:
 
-  Flow, once LeanX is wired:
-    1. provider.verifyWebhook() checks the signature and extracts the outcome
-    2. on a verified "paid" event, markOrderPaid() atomically records the
-       payment, decrements stock (oversell-guarded) and flips the order
+    1. no provider configured        → 503 (fail closed)
+    2. verify HMAC over the raw body → 401 on failure (fail closed)
+    3. non-paid event (pending/…)    → 200, do nothing
+    4. unknown order                 → 200, so LeanX stops retrying
+    5. amount must match our order   → 409 on mismatch
+    6. markOrderPaid (idempotent)    → paid transition; email once
 
-  markOrderPaid is idempotent, so gateway retries are safe. Until a provider is
-  configured this returns 503 — there is deliberately no mock success path.
+  markOrderPaid is idempotent, so redelivered webhooks never double-credit or
+  double-email.
 */
 export async function POST(request: Request) {
   const provider = getPaymentProvider();
   if (!provider) {
-    return NextResponse.json(
-      { error: "No payment provider configured" },
-      { status: 503 },
-    );
+    return NextResponse.json({ error: "No payment provider configured" }, { status: 503 });
   }
 
   let result;
   try {
     result = await provider.verifyWebhook(request);
   } catch {
-    // Signature failure or malformed payload — do not leak details.
-    return NextResponse.json({ error: "Invalid webhook" }, { status: 400 });
+    // Bad signature or malformed payload — do not leak details, do not process.
+    return NextResponse.json({ error: "Invalid webhook" }, { status: 401 });
   }
 
-  if (!result.paid || !result.orderReference) {
-    // A valid but non-paid event (pending/failed) — acknowledge, do nothing.
-    return NextResponse.json({ received: true });
+  if (!result.paid) {
+    // Valid but not a paid event — acknowledge so retries stop.
+    return NextResponse.json({ received: true, status: result.status });
   }
 
-  // Resolve the reference to an order id. The webhook has no session, so this
-  // uses the admin client directly.
-  const admin = createAdminClient();
-  if (!admin) {
-    return NextResponse.json({ error: "Server not configured" }, { status: 500 });
-  }
-  const { data: order } = await admin
-    .from("orders")
-    .select("id, total_sen, email")
-    .eq("reference", result.orderReference)
-    .maybeSingle();
-
+  const order = await resolveWebhookOrder(result.providerRef, result.orderReference);
   if (!order) {
-    return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    // Unknown order — ack 200 so LeanX stops retrying, but do nothing.
+    return NextResponse.json({ received: true, note: "order not found" });
   }
 
-  // Guard against an amount mismatch between the gateway and our order.
+  // The webhook's amount must match what we charged (never trust its number).
   if (typeof result.amountSen === "number" && result.amountSen !== order.total_sen) {
     return NextResponse.json({ error: "Amount mismatch" }, { status: 409 });
   }
@@ -67,9 +55,9 @@ export async function POST(request: Request) {
     raw: result.raw,
   });
 
-  // Send the confirmation only on the transition to paid, not on retries.
+  // Side effects exactly once — only on the transition to paid, not on retries.
   if (outcome.status === "paid") {
-    await sendPaymentConfirmedEmail(result.orderReference, order.email).catch(() => {});
+    await sendPaymentConfirmedEmail(order.reference, order.email).catch(() => {});
   }
 
   return NextResponse.json({ received: true });

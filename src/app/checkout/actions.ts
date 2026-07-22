@@ -6,6 +6,8 @@ import {
   createOrder,
   resolveCartLines,
   validateDiscount,
+  getOrderForCheckout,
+  recordPendingPayment,
   type CartRef,
   type DiscountResult,
 } from "@/lib/commerce";
@@ -106,23 +108,45 @@ export async function placeOrder(
     maxAge: 60 * 60,
   });
 
-  // Hand off to the gateway when one is configured; until LeanX lands there is
-  // no provider, so the order sits pending and we show the confirmation.
-  const provider = getPaymentProvider();
-  if (provider) {
-    const { origin } = new URL((await headersOrigin()) || "http://localhost:3000");
-    const session = await provider.createCheckout({
-      orderId: order.order_id,
-      reference: order.reference,
-      amountSen: order.total_sen,
-      currency: "MYR",
-      customerEmail: email,
-      returnUrl: `${origin}/checkout/success`,
-    });
-    redirect(session.redirectUrl);
-  }
+  // With a gateway configured, go pick a bank/e-wallet; otherwise the order
+  // sits pending and we show the confirmation directly.
+  redirect(getPaymentProvider() ? "/checkout/pay" : "/checkout/success");
+}
 
-  redirect("/checkout/success");
+/*
+  Step 2 (only when a gateway is configured): the shopper picked a bank/e-wallet
+  on /checkout/pay. Create the LeanX bill for the order's server-side total,
+  record the pending payment, and hand off to the hosted page.
+*/
+export async function startPayment(paymentServiceId: string): Promise<PlaceOrderState> {
+  const provider = getPaymentProvider();
+  if (!provider) return { error: "Payment is not available right now." };
+  if (!paymentServiceId) return { error: "Please choose how you'd like to pay." };
+
+  const jar = await cookies();
+  const raw = jar.get("kalima_order")?.value;
+  if (!raw) return { error: "Your checkout session expired. Please try again." };
+
+  const { reference, email } = JSON.parse(raw) as { reference: string; email: string };
+  const order = await getOrderForCheckout(reference, email);
+  if (!order) return { error: "Order not found." };
+  if (order.status !== "pending") return { error: "This order is no longer awaiting payment." };
+
+  const origin = (await headersOrigin()) || "http://localhost:3000";
+
+  const session = await provider.createCheckout({
+    reference: order.reference,
+    amountSen: order.total_sen, // server-side total, never the client's
+    fullName: order.shipping_address?.recipient ?? "Customer",
+    email: order.email,
+    phone: order.phone ?? "",
+    paymentServiceId,
+    returnUrl: `${origin}/checkout/success`,
+    callbackUrl: `${origin}/api/payments/webhook`,
+  });
+
+  await recordPendingPayment(order.id, session.providerRef, order.total_sen);
+  redirect(session.redirectUrl);
 }
 
 async function headersOrigin(): Promise<string | null> {
