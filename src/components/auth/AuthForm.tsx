@@ -60,9 +60,19 @@ export default function AuthForm({ mode, next }: { mode: Mode; next?: string }) 
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="password" className="label-caps !text-[11px] text-navy-400">
-          Password
-        </Label>
+        <div className="flex items-baseline justify-between">
+          <Label htmlFor="password" className="label-caps !text-[11px] text-navy-400">
+            Password
+          </Label>
+          {!isSignup && (
+            <Link
+              href="/forgot-password"
+              className="text-[12px] text-navy-400 underline underline-offset-4 hover:text-navy"
+            >
+              Forgot?
+            </Link>
+          )}
+        </div>
         <Input
           id="password"
           name="password"

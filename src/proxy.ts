@@ -47,7 +47,12 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
   const needsAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
-  const needsAuth = pathname === "/account" || pathname.startsWith("/account/");
+  // /reset-password runs inside the recovery session the callback establishes,
+  // so it needs a signed-in user just like /account.
+  const needsAuth =
+    pathname === "/account" ||
+    pathname.startsWith("/account/") ||
+    pathname === "/reset-password";
 
   if (needsAdmin || needsAuth) {
     if (!user) return redirectToLogin(request);
