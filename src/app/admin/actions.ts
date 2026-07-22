@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getCurrentUser, isStaff } from "@/lib/auth";
+import { getCurrentUser, isStaff, type Role } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
+
+const ROLES: Role[] = ["customer", "staff", "admin", "affiliate"];
 
 /*
   Revalidate both the admin view and the storefront surfaces a catalog edit
@@ -339,4 +341,81 @@ export async function saveContentPage(input: {
   revalidatePath("/admin/cms");
   revalidatePath(`/pages/${slug}`);
   return { ok: true, slug };
+}
+
+/* ---- Settings ----------------------------------------------------------- */
+
+export async function saveSettings(input: {
+  storeName: string; storeEmail: string; storePhone: string; currency: string;
+  freeShippingThresholdSen: number; flatShippingSen: number; taxRateBps: number;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!input.storeName.trim()) return { error: "Store name is required." };
+  if (input.freeShippingThresholdSen < 0 || input.flatShippingSen < 0) {
+    return { error: "Shipping amounts can't be negative." };
+  }
+  if (input.taxRateBps < 0 || input.taxRateBps > 10000) {
+    return { error: "Tax rate must be between 0% and 100%." };
+  }
+
+  const { error } = await db.from("store_settings").update({
+    store_name: input.storeName.trim(),
+    store_email: input.storeEmail.trim(),
+    store_phone: input.storePhone.trim() || null,
+    currency: input.currency.trim() || "MYR",
+    free_shipping_threshold_sen: input.freeShippingThresholdSen,
+    flat_shipping_sen: input.flatShippingSen,
+    tax_rate_bps: input.taxRateBps,
+  }).eq("id", 1);
+
+  if (error) return { error: error.message };
+  revalidatePath("/admin/settings");
+  revalidatePath("/", "layout"); // storefront reads shipping threshold for display
+  return { ok: true };
+}
+
+/* ---- Staff -------------------------------------------------------------- */
+
+export async function setUserRole(userId: string, role: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!ROLES.includes(role as Role)) return { error: "Unknown role." };
+
+  // Lockout guard: an admin can't strip their own admin (would lock themselves out).
+  const current = await getCurrentUser();
+  if (current && current.user.id === userId && current.role === "admin" && role !== "admin") {
+    return { error: "You can't remove your own admin access." };
+  }
+
+  // Service-role write — allowed through protect_profile_role; sync_role_to_jwt
+  // propagates to the user's JWT claim on their next refresh.
+  const { error } = await db.from("profiles").update({ role }).eq("id", userId);
+  if (error) return { error: error.message };
+  revalidatePath("/admin/staff");
+  return { ok: true };
+}
+
+export async function addRoleGrant(email: string, role: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const clean = email.trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clean)) return { error: "Enter a valid email." };
+  if (!ROLES.includes(role as Role)) return { error: "Unknown role." };
+
+  const { error } = await db.from("role_grants").upsert({ email: clean, role }, { onConflict: "email" });
+  if (error) return { error: error.message };
+  revalidatePath("/admin/staff");
+  return { ok: true };
+}
+
+export async function removeRoleGrant(email: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const { error } = await db.from("role_grants").delete().eq("email", email);
+  if (error) return { error: error.message };
+  revalidatePath("/admin/staff");
+  return { ok: true };
 }

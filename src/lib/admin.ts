@@ -239,6 +239,51 @@ export type DiscountRow = {
   maxRedemptions: number | null; redeemedCount: number; active: boolean; endsAt: string | null;
 };
 
+/* ---- Settings ----------------------------------------------------------- */
+
+export type StoreSettings = {
+  storeName: string; storeEmail: string; storePhone: string | null; currency: string;
+  freeShippingThresholdSen: number; flatShippingSen: number; taxRateBps: number;
+};
+
+export async function getStoreSettings(): Promise<StoreSettings> {
+  const { data, error } = await db().from("store_settings").select("*").eq("id", 1).single();
+  if (error) throw new Error(`getStoreSettings failed: ${error.message}`);
+  return {
+    storeName: data.store_name, storeEmail: data.store_email, storePhone: data.store_phone,
+    currency: data.currency, freeShippingThresholdSen: data.free_shipping_threshold_sen,
+    flatShippingSen: data.flat_shipping_sen, taxRateBps: data.tax_rate_bps,
+  };
+}
+
+/* ---- Staff -------------------------------------------------------------- */
+
+export type StaffUser = { id: string; name: string | null; email: string; role: string; createdAt: string };
+export type RoleGrant = { email: string; role: string; createdAt: string };
+
+/** All users with their roles, for staff management (reuses the customer join). */
+export async function listUsers(): Promise<StaffUser[]> {
+  const supabase = db();
+  const { data: profiles, error } = await supabase
+    .from("profiles").select("id, full_name, role, created_at").order("created_at", { ascending: false });
+  if (error) throw new Error(`listUsers failed: ${error.message}`);
+
+  const { data: authList } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+  const emailById = new Map((authList?.users ?? []).map((u) => [u.id, u.email ?? ""]));
+
+  return (profiles ?? []).map((p) => ({
+    id: p.id, name: p.full_name, email: emailById.get(p.id) ?? "", role: p.role, createdAt: p.created_at,
+  }));
+}
+
+/** The bootstrap allowlist — emails granted a role the moment they sign up. */
+export async function listRoleGrants(): Promise<RoleGrant[]> {
+  const { data, error } = await db()
+    .from("role_grants").select("email, role, created_at").order("created_at", { ascending: false });
+  if (error) throw new Error(`listRoleGrants failed: ${error.message}`);
+  return (data ?? []).map((g) => ({ email: g.email, role: g.role, createdAt: g.created_at }));
+}
+
 /* ---- CMS ---------------------------------------------------------------- */
 
 export type AdminAnnouncement = { id: string; text: string; sortOrder: number; active: boolean };

@@ -48,6 +48,13 @@ const NAV_SECTIONS: { heading: string; items: { label: string; to: string; end?:
       { label: "Unified Inbox", to: "/admin/inbox", badge: "⑥" },
     ],
   },
+  {
+    heading: "Configure",
+    items: [
+      { label: "Settings", to: "/admin/settings" },
+      { label: "Staff & Roles", to: "/admin/staff" },
+    ],
+  },
 ];
 
 export const metadata: Metadata = {
