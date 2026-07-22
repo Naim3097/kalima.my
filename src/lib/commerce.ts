@@ -1,0 +1,181 @@
+import "server-only";
+
+import { createAdminClient, createClient } from "@/lib/supabase/server";
+
+/*
+  Commerce data access. The order functions are service_role-only in Postgres,
+  so everything here runs through the admin client and MUST stay server-side.
+  Price/discount/shipping are computed inside the DB functions — never trust
+  amounts from the browser.
+*/
+
+export type CartLine = { variant_id: string; qty: number };
+
+export type OrderAddress = {
+  recipient: string;
+  phone?: string;
+  line1: string;
+  line2?: string;
+  city: string;
+  postcode: string;
+  state: string;
+  country?: string;
+};
+
+export type DiscountResult = {
+  valid: boolean;
+  code?: string;
+  kind?: "percent" | "fixed" | "free_shipping";
+  discount_sen: number;
+  free_shipping?: boolean;
+  reason?: string;
+};
+
+export type CreateOrderResult = {
+  order_id: string;
+  reference: string;
+  total_sen: number;
+};
+
+export type OrderView = {
+  reference: string;
+  status: string;
+  email: string;
+  subtotal_sen: number;
+  discount_sen: number;
+  shipping_sen: number;
+  total_sen: number;
+  shipping_address: OrderAddress | null;
+  created_at: string;
+  items: {
+    product_name: string;
+    color_name: string;
+    size: string;
+    qty: number;
+    line_total_sen: number;
+  }[];
+};
+
+function admin() {
+  const client = createAdminClient();
+  if (!client) {
+    // Phase 2 needs the service-role key; fail loud rather than half-work.
+    throw new Error(
+      "SUPABASE_SERVICE_ROLE_KEY is not set — order operations require it.",
+    );
+  }
+  return client;
+}
+
+/** Live discount validation against a server-computed subtotal (in sen). */
+export async function validateDiscount(
+  code: string,
+  subtotalSen: number,
+): Promise<DiscountResult> {
+  const { data, error } = await admin().rpc("validate_discount", {
+    p_code: code,
+    p_subtotal_sen: subtotalSen,
+  });
+  if (error) throw new Error(`validateDiscount failed: ${error.message}`);
+  return data as DiscountResult;
+}
+
+/*
+  Creates a pending order. `userId` is the *verified* session user (or null for
+  guests) — resolved here from the auth cookie, never taken from the caller's
+  input, so a guest can't spoof someone else's account onto an order.
+*/
+export async function createOrder(params: {
+  items: CartLine[];
+  email: string;
+  phone?: string;
+  address: OrderAddress;
+  shippingMethod: string;
+  discountCode?: string;
+}): Promise<CreateOrderResult> {
+  const auth = await createClient();
+  const userId = auth ? (await auth.auth.getUser()).data.user?.id ?? null : null;
+
+  const { data, error } = await admin().rpc("create_order", {
+    p_user_id: userId,
+    p_items: params.items,
+    p_email: params.email,
+    p_phone: params.phone ?? null,
+    p_address: params.address,
+    p_shipping_method: params.shippingMethod,
+    p_discount_code: params.discountCode ?? null,
+  });
+  if (error) throw new Error(`createOrder failed: ${error.message}`);
+  return data as CreateOrderResult;
+}
+
+/** Guest-safe order lookup for the confirmation page (email must match). */
+export async function getOrderByReference(
+  reference: string,
+  email: string,
+): Promise<OrderView | null> {
+  const { data, error } = await admin().rpc("get_order_by_reference", {
+    p_reference: reference,
+    p_email: email,
+  });
+  if (error) throw new Error(`getOrderByReference failed: ${error.message}`);
+  return (data as OrderView | null) ?? null;
+}
+
+/*
+  Confirms payment: idempotent, oversell-guarded, decrements stock. Called ONLY
+  from the payment webhook AFTER the gateway signature has been verified — never
+  from a browser redirect. LeanX-specific parsing lands when the .md arrives.
+*/
+export async function markOrderPaid(params: {
+  orderId: string;
+  provider: string;
+  providerRef: string;
+  amountSen: number;
+  raw?: unknown;
+}): Promise<{ status: string; reference: string }> {
+  const { data, error } = await admin().rpc("mark_order_paid", {
+    p_order_id: params.orderId,
+    p_provider: params.provider,
+    p_provider_ref: params.providerRef,
+    p_amount_sen: params.amountSen,
+    p_raw: params.raw ?? null,
+  });
+  if (error) throw new Error(`markOrderPaid failed: ${error.message}`);
+  return data as { status: string; reference: string };
+}
+
+/** A signed-in customer's own orders, for the account order history. */
+export async function fetchMyOrders(): Promise<
+  {
+    reference: string;
+    status: string;
+    total_sen: number;
+    created_at: string;
+    items: { product_name: string; color_name: string; size: string; qty: number }[];
+  }[]
+> {
+  const supabase = await createClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select(
+      "reference, status, total_sen, created_at, order_items(product_name, color_name, size, qty)",
+    )
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(`fetchMyOrders failed: ${error.message}`);
+  return (data ?? []).map((o) => ({
+    reference: o.reference,
+    status: o.status,
+    total_sen: o.total_sen,
+    created_at: o.created_at,
+    items: (o.order_items ?? []) as {
+      product_name: string;
+      color_name: string;
+      size: string;
+      qty: number;
+    }[],
+  }));
+}

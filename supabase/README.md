@@ -16,6 +16,29 @@ security warnings.
 | `20260720000002_harden_security_definer_helpers.sql` | moves `is_staff()` out of the exposed schema, pins `search_path` |
 | `20260721000001_add_variant_color_position.sql` | persists swatch/colour order |
 | `20260722000001_auth_profiles_and_roles.sql` | `profiles`, `user_role`, signup pipeline, self-elevation guard |
+| `20260722100001_commerce_schema.sql` | orders, order_items, payments, stock_movements, discounts, addresses + RLS |
+| `20260722100002_commerce_functions.sql` | create_order, validate_discount, mark_order_paid, get_order_by_reference |
+
+## Commerce (Phase 2)
+
+- **Money is integer sen**; order/item prices are **snapshots** taken server-side at
+  creation, so catalog edits never rewrite order history.
+- **Stock lives only on `product_variants.stock_on_hand`**; every change is a row in
+  `stock_movements`. Stock is decremented at **payment**, not order creation, so an
+  abandoned pending order holds no inventory.
+- **An order becomes `paid` only via `mark_order_paid`** — idempotent (webhook retries
+  are safe) and **oversell-guarded** (a line it can't fulfil rolls the whole payment back).
+  Called exclusively by the payment webhook after signature verification, never a redirect.
+- **All four order functions are `service_role`-only** and invoked from server-side app
+  code (`src/lib/commerce.ts`), never exposed as anon/authenticated RPCs. Locking a
+  function down needs `revoke from public, anon, authenticated` (all three) — Supabase's
+  default privileges grant new public functions explicit anon/authenticated EXECUTE on top
+  of the built-in PUBLIC grant.
+- Demo discount code `AISYAH10` (10% off) seeded live, out of band.
+
+> **`SUPABASE_SERVICE_ROLE_KEY` is now required.** Order creation, the payment webhook and
+> order lookup all run through it. Add it from Project Settings → API. The app builds
+> without it, but checkout will error at runtime until it is set.
 
 Seeded from `seed.sql`: 10 collections · 13 products · 188 variants · 8 images ·
 23 curated memberships.
