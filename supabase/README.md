@@ -14,9 +14,35 @@ security warnings.
 |---|---|
 | `20260720000001_catalog.sql` | collections, products, variants, images, FTS, RLS |
 | `20260720000002_harden_security_definer_helpers.sql` | moves `is_staff()` out of the exposed schema, pins `search_path` |
+| `20260721000001_add_variant_color_position.sql` | persists swatch/colour order |
+| `20260722000001_auth_profiles_and_roles.sql` | `profiles`, `user_role`, signup pipeline, self-elevation guard |
 
 Seeded from `seed.sql`: 10 collections · 13 products · 188 variants · 8 images ·
 23 curated memberships.
+
+## Auth & roles
+
+- **Roles** (`customer`/`staff`/`admin`/`affiliate`) live in the JWT `app_metadata.role`
+  claim — the same source `private.is_staff()` and RLS read. `profiles.role` mirrors it;
+  triggers keep them in sync. A customer **cannot** self-elevate (`protect_profile_role`).
+- **Admin bootstrap** is the `role_grants` allowlist: an email in it is granted its role
+  the moment it signs up, before the account exists. Grants are **data, seeded out of band**
+  so no personal email lands in the repo:
+  ```sql
+  insert into role_grants (email, role) values ('you@example.com', 'admin');
+  ```
+  `freelancerzafs@gmail.com → admin` is already seeded on the live project. Sign up with
+  that email (your own password) to get the first admin.
+- **Route gates**: `/admin` → staff/admin (proxy + admin layout, defence in depth);
+  `/account` → any signed-in user.
+- All auth helpers are SECURITY DEFINER in the **`private`** schema (not PostgREST-exposed),
+  with `search_path` pinned. Linter: **zero warnings.**
+
+> **Email confirmation is on** with Supabase's default SMTP, which is rate-limited to a few
+> sends/hour — fine for real traffic, painful for bulk testing. For faster local testing,
+> disable "Confirm email" under Auth → Providers in the dashboard, or wire custom SMTP.
+> Do **not** create test users by inserting into `auth.users` directly: GoTrue can't scan
+> NULL token columns (`confirmation_token` etc.), so those accounts fail at login.
 
 `seed.sql` is **generated** from `src/data/catalog.ts` — never edit it by hand.
 After changing the catalog:

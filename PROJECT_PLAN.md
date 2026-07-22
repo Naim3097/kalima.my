@@ -223,10 +223,10 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 
 - [x] Repo init (Git) — *done; branch strategy + CI pipeline pending*
 - [x] Vite + React + TS + Tailwind v4 + Router v7 + TanStack Query + Zustand scaffolding
-- [ ] Supabase project (staging + production), CLI migrations workflow, seed scripts — *client Supabase account needed; `src/lib/supabase.ts` + `.env.example` wired, data layer serves seed data until then*
+- [x] Supabase project + migrations workflow + seed scripts — *live (`gylsymfonxyegdlfodvk`, Singapore); catalog + auth schema applied, `seed.sql` generated from `catalog.ts`. Single production env for now, not staging+prod.*
 - [x] Design tokens from §2.1/§2.1.1 in `src/index.css` — Kalima Navy `#383C61` scale, cream/beige surfaces, Playfair Display + Jost pairing, tracked-caps label utility
 - [x] Base component library: Button (solid/outline/white), section header, product card w/ swatches, placeholder imagery, 20-icon thin-line set
-- [ ] Auth skeleton: email/password + Google sign-in, phone capture (needed later for WhatsApp), roles (`customer`, `staff`, `admin`, `affiliate`) — *blocked on Supabase project*
+- [x] Auth skeleton: email/password sign-in, phone capture, roles (`customer`/`staff`/`admin`/`affiliate`) — *done: Supabase Auth + `profiles`, role in JWT `app_metadata`, signup pipeline with an admin allowlist, self-elevation blocked. `/admin` gated on staff/admin, `/account` on any signed-in user. **Google sign-in deferred** (needs a Google OAuth app); magic link not built.*
 - [ ] Domain + DNS for `kalima.my`, staging URL
 
 **Exit criteria:** deployed "hello storefront" on staging with auth working and design tokens applied.

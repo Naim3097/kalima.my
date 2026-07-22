@@ -5,6 +5,7 @@ import { useCart, cartCount } from "@/stores/cart";
 import { useWishlist } from "@/stores/wishlist";
 import { useUi } from "@/stores/ui";
 import { useMounted } from "@/hooks/useMounted";
+import { useAuth } from "@/hooks/useAuth";
 import {
   SearchIcon,
   PinIcon,
@@ -22,6 +23,7 @@ export default function HeaderActions({ side }: { side: "left" | "right" }) {
   const items = useCart((s) => s.items);
   const wishlistIds = useWishlist((s) => s.ids);
   const { setCartOpen, setSearchOpen, setMobileMenuOpen } = useUi();
+  const { signedIn, ready: authReady } = useAuth();
 
   // Persisted stores are empty during SSR; hold the empty state until mount.
   const mounted = useMounted();
@@ -64,10 +66,10 @@ export default function HeaderActions({ side }: { side: "left" | "right" }) {
         <SearchIcon size={19} />
       </button>
       <Link
-        href="/account"
+        href={authReady && !signedIn ? "/login" : "/account"}
         className="hidden lg:inline-flex items-center gap-2 label-caps text-navy-400 hover:text-navy transition-colors"
       >
-        <UserIcon size={16} /> Account
+        <UserIcon size={16} /> {authReady && !signedIn ? "Sign in" : "Account"}
       </Link>
       <Link
         href="/wishlist"

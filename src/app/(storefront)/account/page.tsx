@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { formatRM } from "@/lib/format";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { getCurrentUser } from "@/lib/auth";
+import { signOut } from "@/app/auth/actions";
 
 export const metadata: Metadata = {
   title: "My Account",
@@ -25,21 +28,47 @@ const POINTS_HISTORY = [
 ];
 
 /*
-  Fully static — the Kalima Club dashboard reads demo data only, so the whole
-  page stays a Server Component. The tier meter uses shadcn Progress (a client
-  primitive) but nothing else here ships interactivity.
+  Server Component. The identity block (greeting + Profile card + sign-out) is
+  now real, read from the signed-in session. Orders and the Kalima Club
+  dashboard are still demo data — those are Phase 2 / Phase 7 — and keep the
+  demo badge. The tier meter uses shadcn Progress (a client primitive).
 */
-export default function AccountPage() {
+export default async function AccountPage() {
+  const current = await getCurrentUser();
+  // The proxy already gates /account, but never assume the edge ran.
+  if (!current) redirect("/login?next=/account");
+
+  const { user, profile } = current;
+  const displayName = profile?.full_name?.trim() || user.email?.split("@")[0] || "there";
+  const profileLine = [
+    profile?.full_name,
+    user.email,
+    profile?.phone,
+    `WhatsApp updates ${profile?.marketing_consent ? "ON" : "OFF"}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-12">
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="label-caps text-navy-400">My Account</p>
-          <h1 className="mt-1 font-display text-4xl text-navy">Salam, Nurul Aisyah</h1>
+          <h1 className="mt-1 font-display text-4xl text-navy">Salam, {displayName}</h1>
         </div>
-        <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[11px] uppercase tracking-wider text-amber-900">
-          Demo preview — Phases 2 &amp; 7
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[11px] uppercase tracking-wider text-amber-900">
+            Club &amp; orders: demo — Phases 2 &amp; 7
+          </span>
+          <form action={signOut}>
+            <button
+              type="submit"
+              className="label-caps cursor-pointer border border-navy/30 px-4 py-1.5 text-navy transition-colors hover:border-navy"
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
       </div>
 
       {/* Kalima Club card */}
@@ -140,14 +169,16 @@ export default function AccountPage() {
       {/* Profile blocks */}
       <section className="mt-10 grid gap-4 md:grid-cols-3">
         {[
-          { title: "Profile", body: "Nurul Aisyah · nurul@email.com · +60 12-345 6789 · WhatsApp updates ON" },
-          { title: "Address book", body: "12, Jalan Setia 3/2, 40170 Shah Alam, Selangor (default)" },
-          { title: "Preferences", body: "Kalima Club member since Mar 2025 · PDPA consent given · Birthday: 2 June" },
+          { title: "Profile", body: profileLine, real: true },
+          { title: "Address book", body: "12, Jalan Setia 3/2, 40170 Shah Alam, Selangor (default)", real: false },
+          { title: "Preferences", body: "Kalima Club member since Mar 2025 · PDPA consent given · Birthday: 2 June", real: false },
         ].map((b) => (
           <div key={b.title} className="border border-navy/10 bg-white px-5 py-4">
             <h3 className="label-caps !text-[12px]">{b.title}</h3>
             <p className="mt-2 text-[13px] leading-relaxed tracking-wide text-navy-400">{b.body}</p>
-            <button className="mt-3 cursor-pointer text-[12px] text-navy underline underline-offset-4">Edit</button>
+            {!b.real && (
+              <button className="mt-3 cursor-pointer text-[12px] text-navy underline underline-offset-4">Edit</button>
+            )}
           </div>
         ))}
       </section>

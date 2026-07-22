@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import AdminNavLink from "@/components/admin/AdminNavLink";
 import { DemoPreviewBanner } from "@/components/admin/ui";
+import { getCurrentUser, isStaff } from "@/lib/auth";
 
 /*
   Back-office shell. Server Component — the sidebar, the mobile nav strip and
@@ -11,6 +13,11 @@ import { DemoPreviewBanner } from "@/components/admin/ui";
 
   The navy surface comes from the --sidebar-* tokens in globals.css
   (bg-navy-900 / white text), unchanged from the pre-port design.
+
+  Access: the proxy already gates /admin on a staff/admin role. This is the
+  defence-in-depth re-check — a layout should never assume the edge did its
+  job. Only enforced when Supabase is configured; the seed-data demo (no auth)
+  stays open, as before.
 */
 
 const NAV_SECTIONS: { heading: string; items: { label: string; to: string; end?: boolean; badge?: string }[] }[] = [
@@ -46,7 +53,14 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  // Gate only when auth is live. Unconfigured Supabase → open demo (unchanged).
+  if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    const current = await getCurrentUser();
+    if (!current) redirect("/login?next=/admin");
+    if (!isStaff(current.role)) redirect("/");
+  }
+
   return (
     <div className="flex min-h-screen bg-cream">
       {/* Sidebar */}
