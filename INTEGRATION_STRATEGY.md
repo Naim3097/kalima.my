@@ -91,23 +91,36 @@ Malaysian business. Direct APIs remain the end-state for a single source of trut
 
 Sources: [BigSeller MY pricing](https://www.bigseller.com/blog/articleDetails/4643/erp-tools-cost-malaysian-sellers.htm) · [BigSeller sync](https://www.bigseller.com/blog/articleDetails/4512/inventory-shopee-lazada-tiktok-shop-malaysia.htm) · [SiteGiant pricing](https://sitegiant.my/pricing/) · [Zetpy pricing](https://www.zetpy.com/pricing/)
 
-### ⑥ Unified inbox (Shopee · TikTok Shop · IG · WhatsApp)
+### ⑥ Unified inbox (Shopee · TikTok Shop + organic DMs · Instagram · Facebook · WhatsApp)
 
-**Critical market gap found:** the polished Western omnichannel tools (respond.io, SleekFlow) cover
+> **This is the client's headline priority.** The ask is *unification and reply from one place*,
+> not outbound blasting — every incoming message, every channel, one screen, linked to the
+> customer's orders and Kalima Club profile. Broadcast (①) stays for opt-in transactional
+> messaging, but the inbox is what the client actually wants to buy.
+
+**Channel coverage is now complete for Kalima's setup.** The client's TikTok is a **Business account**,
+which unlocks the **TikTok Business Messaging API** (send/receive organic TikTok DMs, 48h reply window) on
+top of TikTok *Shop* buyer chat. Combined with Shopee chat, Instagram + Facebook Page (Meta Messenger API),
+and WhatsApp, every channel the client uses has an **official** API. The only thing with no API anywhere —
+TikTok *personal/creator* DMs — does not apply to a Business account.
+
+**Critical market gap (still true):** the polished Western omnichannel tools (respond.io, SleekFlow) cover
 WhatsApp/IG/FB/TikTok Business Messaging — **but none integrate Shopee chat.** Only SEA marketplace ERPs
 (BigSeller chat, Ginee Chat, SiteGiant MultiChat, Zetpy Multichat) unify Shopee/Lazada/TikTok Shop buyer
-chats, and those don't do WhatsApp broadcast automation at respond.io's level. **No single vendor covers all
-of the client's channels.** Whatever we choose, "one inbox" across Shopee + TikTok Shop + IG + WhatsApp
-either means (a) our native Phase 9 build on official APIs, or (b) two tools side by side.
+chats, and those don't do IG/WhatsApp well and aren't linked to our order data. **No single vendor covers
+Kalima's exact mix** (Shopee + TikTok Shop + TikTok organic + IG + FB + WhatsApp, order-linked). "One inbox"
+across all of it means our native Phase 9 build on official APIs — nothing off the shelf reaches it.
 
 | Option | Cost | Coverage |
 |---|---|---|
-| **Build: native (Phase 9)** ✅ | RM0/mo | Shopee chat API + TikTok Shop CS API + IG Messaging (Meta review) + WhatsApp — all four in OUR inbox, linked to orders/customers. TikTok *personal* DMs excluded (no API exists anywhere). |
-| Buy: BigSeller/Ginee/Zetpy chat | Included/add-on in sync plan | Marketplace chats ✓, but WhatsApp/IG weak or absent; not linked to our order data. |
-| Buy: respond.io / SleekFlow | RM340–1,500/mo | WhatsApp/IG/TikTok ads messaging ✓, **Shopee ✗**. |
+| **Build: native (Phase 9)** ✅ | RM0/mo | Shopee chat API + TikTok Shop CS API + **TikTok Business Messaging API** + IG/Messenger (Meta review) + WhatsApp — all in OUR inbox, linked to orders/customers. TikTok *personal* DMs excluded (no API anywhere; N/A for a Business account). |
+| Buy: BigSeller/Ginee/Zetpy chat | Included/add-on in sync plan | Marketplace chats ✓, but IG/WhatsApp weak or absent, no TikTok organic DMs, not linked to our order data. |
+| Buy: respond.io / SleekFlow | RM340–1,500/mo | WhatsApp/IG/TikTok Business messaging ✓, **Shopee ✗** — and priced for broadcast automation the client isn't asking for. |
 
-**Verdict: bridge with the sync tool's chat console (already paid for), build native Phase 9 for the real
-"everything in one place, linked to orders" experience** — which no vendor sells at any price.
+**Verdict: build native Phase 9.** It is the only way to get *every* channel in one order-linked inbox, it
+fits the client's reply-focused (not blast-focused) goal, and it carries no monthly fee. The sync tool's chat
+console (① BigSeller, already in the stack) can bridge marketplace chats on day one while our Shopee/TikTok/Meta
+app approvals clear.
 
 Sources: [respond.io channels](https://respond.io/integrations) · [Ginee Chat](https://chrome.google.com/webstore/detail/ginee-chat-multi-messenge/cjglhjhlfmjmdjfkllnhapkddfamabpb) · [Zetpy Multichat](https://www.zetpy.com/multichat/)
 
@@ -152,16 +165,20 @@ Sources: [respond.io channels](https://respond.io/integrations) · [Ginee Chat](
    and a marketplace chat console from day one, while our Shopee/TikTok Open Platform app approvals
    (1–4 weeks, outside our control) grind through. MyInvois e-invoicing at RM129 is a compliance bonus
    EasyStore charges more to match.
-3. **Native unified inbox in Phase 9** stays on the roadmap because **nobody sells the client's exact ask**
-   (Shopee + TikTok Shop + IG in one place) — our build is the only way to get it, and it links every
-   conversation to orders and Kalima Club profiles, which no external tool can.
-4. **Skip respond.io/SleekFlow** unless the client later wants managed chatbot/automation tooling — they'd
-   add ~RM640–1,500/mo yet still miss Shopee.
+3. **Native unified inbox in Phase 9 is the client's headline feature** — the ask is reply-from-one-place,
+   not blasting. **Nobody sells the client's exact channel mix** (Shopee + TikTok Shop + TikTok organic DMs +
+   IG + Facebook + WhatsApp, order-linked). Our build is the only way to get it, and it links every
+   conversation to orders and Kalima Club profiles, which no external tool can. Kalima's TikTok Business
+   account means even organic TikTok DMs are in scope via the Business Messaging API.
+4. **Skip respond.io/SleekFlow** — they're priced for broadcast automation the client isn't asking for
+   (~RM640–1,500/mo) and still miss Shopee entirely.
 
 **Bottom line for the client:** fixed platform costs of **~RM86–215/month** (vs EasyStore Business RM499 + apps),
-full data ownership, and two features EasyStore can't offer at any tier — an order-linked unified inbox
-including Shopee, and loyalty/affiliate engines running on the store's own database. The dominant real cost
-is WhatsApp usage (~RM0.35/marketing message), which is Meta's fee no matter which vendor sits in front of it.
+full data ownership, and features EasyStore can't offer at any tier — an order-linked unified inbox spanning
+Shopee, TikTok Shop **and** organic TikTok DMs, Instagram, Facebook and WhatsApp (the client's headline ask),
+plus loyalty/affiliate engines on the store's own database. The main variable cost is WhatsApp *outbound*
+usage (~RM0.35/marketing message) — but since the client's priority is inbound reply, not blasting, most
+inbox traffic is inbound and free-to-receive; service replies within the window carry no per-message fee.
 
 ## 5. Robustness requirements (apply to whichever bundle)
 

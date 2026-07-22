@@ -26,7 +26,7 @@
    - [Phase 6 — Affiliate Program](#phase-6--affiliate-program)
    - [Phase 7 — Loyalty & Membership](#phase-7--loyalty--membership)
    - [Phase 8 — Marketplace Stock Sync (Shopee + TikTok Shop)](#phase-8--marketplace-stock-sync-shopee--tiktok-shop)
-   - [Phase 9 — Unified Inbox (TikTok / IG / Shopee)](#phase-9--unified-inbox-tiktok--ig--shopee)
+   - [Phase 9 — Unified Inbox (Shopee / TikTok / Instagram / WhatsApp)](#phase-9--unified-inbox-shopee--tiktok--instagram--whatsapp)
    - [Phase 10 — QA, SEO, Performance & Launch](#phase-10--qa-seo-performance--launch)
 7. [Timeline Summary](#7-timeline-summary)
 8. [Third-Party Accounts & Prerequisites (Client Action Items)](#8-third-party-accounts--prerequisites-client-action-items)
@@ -134,9 +134,11 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 | 3 | Loyalty / membership | ✅ Fully feasible | Native build: points ledger, tier system ("Kalima Club": e.g. Member/Gold/Platinum), earn on purchase, redeem at checkout, birthday rewards. | 7 |
 | 4 | Link postage to EasyParcel | ✅ Fully feasible | EasyParcel Individual/Marketplace API: live rate quotes at checkout, one-click consignment booking from admin, AWB label PDF, tracking webhooks → auto customer notification. | 4 |
 | 5 | Stock sync with Shopee & TikTok Shop | ✅ Feasible (approval-gated) | Shopee Open Platform API + TikTok Shop Open Platform API. SKU mapping table, near-real-time stock push on our sales, webhook-driven stock pull on marketplace sales. Requires developer app approval on both platforms (lead time). | 8 |
-| 6 | Read TikTok / IG / Shopee messages in one place | ⚠️ Partially feasible | **Shopee:** ✅ chat API available via Open Platform. **TikTok Shop:** ✅ customer-service conversation API available to approved apps. **Instagram:** ✅ via Meta's Instagram Messaging API — but requires Meta App Review + IG professional account linked to a FB Page. **TikTok (non-Shop DMs):** ❌ no public API — only TikTok *Shop* buyer messages are accessible. Recommend Phase 9 scoped to Shopee + TikTok Shop + IG, with WhatsApp added since we already integrate it in Phase 5. | 9 |
+| 6 | Read TikTok / IG / Shopee messages in one place | ✅ Feasible (approval-gated) | **Shopee:** ✅ chat API via Open Platform. **TikTok Shop:** ✅ customer-service conversation API for approved apps. **TikTok organic DMs:** ✅ **Business Messaging API** — Kalima's TikTok account is a Business account, which unlocks send/receive of organic TikTok DMs (48h reply window). **Instagram + FB Page:** ✅ via Meta's Messenger API for Instagram — requires Meta App Review + IG professional account linked to a FB Page. **WhatsApp:** ✅ Cloud API (already integrated in Phase 5). Only gap: TikTok *personal/creator* DMs (no API on any platform) — not relevant here, since Kalima runs a Business account. | 9 |
 
-**Honest summary for the client:** items 1–5 boleh buat semua. Item 6 boleh untuk Shopee chat, TikTok **Shop** chat, dan Instagram DM (lepas Meta approval) — tapi TikTok personal/creator DM tiada API rasmi, so that one specifically is not possible on any platform (EasyStore also cannot).
+**Honest summary for the client:** items 1–6 boleh buat semua. Item 6 (unified inbox) covers Shopee chat, TikTok **Shop** buyer chat, **TikTok organic DMs** (Kalima's TikTok is a Business account, so the TikTok Business Messaging API applies), Instagram DM + Facebook Page (lepas Meta approval), and WhatsApp — semua dalam satu inbox, reply terus dari sana. The only thing with no API anywhere is TikTok *personal/creator* DMs, which does not apply to a Business account. This is beyond what EasyStore offers at any tier, and no third-party vendor sells this exact channel mix (see [INTEGRATION_STRATEGY.md §2⑥](./INTEGRATION_STRATEGY.md)).
+
+> **Client priority (confirmed):** the goal is **unification — read and reply to every channel from one place** — not outbound blasting. Broadcast (Phase 5) stays in scope for transactional/opt-in messaging, but Phase 9's inbox is the headline: one screen, every conversation, each linked to the customer's orders and Kalima Club profile.
 
 ---
 
@@ -214,7 +216,7 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 > | `/admin/loyalty` | **③ Loyalty/membership** — tiers, earn/redeem rules, liability | 7 |
 > | `/admin/shipping` | **④ EasyParcel** — credit, courier quotes, booking, AWB, tracking timeline | 4 |
 > | `/admin/sync` | **⑤ Shopee & TikTok stock sync** — connections, SKU mapping, live stock, activity log | 8 |
-> | `/admin/inbox` | **⑥ Unified inbox** — Shopee/TikTok Shop/IG/WhatsApp threads, quick replies, linked orders | 9 |
+> | `/admin/inbox` | **⑥ Unified inbox** — Shopee, TikTok Shop + organic DMs, Instagram, WhatsApp threads in one place, quick replies, linked orders | 9 |
 
 ### Phase 0 — Foundations & Project Setup
 **Duration: ~1 week**
@@ -355,17 +357,22 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 
 ---
 
-### Phase 9 — Unified Inbox (TikTok / IG / Shopee)
-**Duration: ~2–3 weeks** — *client feature #6* · scope per feasibility matrix (§3)
+### Phase 9 — Unified Inbox (Shopee / TikTok / Instagram / WhatsApp)
+**Duration: ~2–3 weeks** — *client feature #6, the client's headline priority* · scope per feasibility matrix (§3)
 
-- [ ] **Channels in scope:** Shopee chat ✅ · TikTok **Shop** buyer chat ✅ · Instagram DM ✅ (post Meta App Review) · WhatsApp ✅ (bonus — infra already exists from Phase 5) · TikTok personal DMs ❌ (no API exists — excluded, communicated to client)
+> **This is the "reply to everyone from one place" feature.** The client's focus is
+> unification and response, not outbound blasting — every incoming message from every
+> channel lands in one screen, each linked to the customer's orders and Kalima Club
+> profile, and staff reply without leaving the admin.
+
+- [ ] **Channels in scope:** Shopee chat ✅ · TikTok **Shop** buyer chat ✅ · **TikTok organic DMs** ✅ (Business Messaging API — Kalima runs a TikTok **Business** account, 48h reply window) · Instagram DM ✅ (post Meta App Review) · Facebook Page messages ✅ (same Meta track) · WhatsApp ✅ (infra already exists from Phase 5) · TikTok *personal/creator* DMs ❌ (no API anywhere — not applicable to a Business account)
 - [ ] **Ingestion** — per-channel webhook receivers (Edge Functions) normalize messages into `conversations`/`messages`; media attachments mirrored to Storage
 - [ ] **Inbox UI (admin)** — 3-pane layout: conversation list w/ channel badges & unread counts, thread view, reply composer; Supabase Realtime for live updates; filters by channel/assignee/unread; link conversation → customer profile & orders
-- [ ] **Replies** — send back through each channel's API (Shopee `send_message`, TikTok Shop CS reply, IG Messaging send — note IG's 24-hour standard messaging window; WhatsApp 24h window + template fallback)
+- [ ] **Replies** — send back through each channel's API (Shopee `send_message`, TikTok Shop CS reply, TikTok Business Messaging send, IG/Messenger send, WhatsApp send). Respect per-channel reply windows: IG/FB 24h, TikTok Business 48h, WhatsApp 24h + template fallback. Outside the window the composer disables free-text and surfaces the reason
 - [ ] **Team features** — assign conversation to staff, internal notes, canned replies/quick answers ("What's my order status?" → auto-context from linked order)
-- [ ] **Meta App Review** submission for `instagram_manage_messages` (allow 2–4 weeks; feature ships Shopee+TikTok-first, IG toggled on when approved)
+- [ ] **Meta App Review** submission for `instagram_business_manage_messages` + `pages_messaging` (allow 2–4 weeks; feature ships Shopee + TikTok-first, Meta channels toggled on when approved)
 
-**Exit criteria:** messages from a test buyer on Shopee, TikTok Shop, and IG all appear in one inbox and receive replies from it.
+**Exit criteria:** messages from a test buyer on Shopee, TikTok Shop, TikTok organic DM, and Instagram all appear in one inbox and receive replies from it — each thread linked to the sender's customer record.
 
 ---
 
@@ -417,7 +424,8 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 | Meta Business Manager (verified) + WhatsApp number | Phase 5 | Business verification can take 1–3 weeks — **start early**. Number must not be attached to a personal WhatsApp. |
 | Shopee seller account + Open Platform app approval | Phase 8 | Apply during Phase 3; approval 1–4 wks |
 | TikTok Shop seller account + Partner Center app approval | Phase 8 | Apply during Phase 3; approval 1–4 wks |
-| Instagram professional account linked to Facebook Page | Phase 9 | Needed for IG DM API + Meta App Review |
+| Instagram professional account linked to Facebook Page | Phase 9 | Needed for IG DM + Messenger API + Meta App Review |
+| TikTok **Business** account + Business Messaging API access | Phase 9 | Confirmed: Kalima's TikTok is a Business account. Register for Business Messaging API credentials + authorize the account to our app |
 | Product photography & copy (per mockup art direction) | Phase 1 | Warm-tone studio style; 4:5 product shots + lookbook |
 | Policies content: returns (14-day), shipping, privacy (PDPA) | Phase 2/10 | We provide templates for review |
 
@@ -427,7 +435,7 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 
 ### Risks
 1. **Platform approvals are the critical path** for Phases 8–9 (Shopee/TikTok/Meta reviews are outside our control). Mitigation: apply during Phase 3; soft-launch strategy makes these non-blocking.
-2. **TikTok personal DM has no API** — unified inbox covers TikTok *Shop* chat only. Set client expectation now (already stated in §3).
+2. **TikTok DM coverage depends on account type** — Kalima's TikTok is a **Business** account, so both TikTok *Shop* buyer chat and **organic TikTok DMs** (via the Business Messaging API) are inboxable. Only TikTok *personal/creator* DMs have no API anywhere, and that does not apply here. No client-facing gap on TikTok.
 3. **WhatsApp broadcast costs & quality rating** — aggressive blasts can degrade the WABA quality score and throttle sending. Mitigation: consent-gated segments, frequency caps.
 4. **Marketplace stock race conditions** — flash-sale moments can oversell across channels. Mitigation: ledger constraints + per-channel safety buffer + oversell alerts.
 5. **SPA SEO** — client-rendered React can underperform for organic search. Mitigation: Phase 10 prerender/SSR decision for PDP/PLP.
