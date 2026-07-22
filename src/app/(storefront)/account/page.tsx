@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { getCurrentUser } from "@/lib/auth";
 import { signOut } from "@/app/auth/actions";
+import ChangePasswordForm from "@/components/account/ChangePasswordForm";
 
 export const metadata: Metadata = {
   title: "My Account",
@@ -33,11 +34,16 @@ const POINTS_HISTORY = [
   dashboard are still demo data — those are Phase 2 / Phase 7 — and keep the
   demo badge. The tier meter uses shadcn Progress (a client primitive).
 */
-export default async function AccountPage() {
+export default async function AccountPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ password?: string }>;
+}) {
   const current = await getCurrentUser();
   // The proxy already gates /account, but never assume the edge ran.
   if (!current) redirect("/login?next=/account");
 
+  const { password } = await searchParams;
   const { user, profile } = current;
   const displayName = profile?.full_name?.trim() || user.email?.split("@")[0] || "there";
   const profileLine = [
@@ -51,6 +57,12 @@ export default async function AccountPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-12">
+      {password === "changed" && (
+        <p className="mb-6 border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-800">
+          Your password has been updated.
+        </p>
+      )}
+
       <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="label-caps text-navy-400">My Account</p>
@@ -181,6 +193,17 @@ export default async function AccountPage() {
             )}
           </div>
         ))}
+      </section>
+
+      {/* Security — real */}
+      <section className="mt-10">
+        <div className="border border-navy/10 bg-white px-5 py-5">
+          <h3 className="label-caps !text-[12px]">Security</h3>
+          <p className="mt-2 mb-4 text-[13px] leading-relaxed tracking-wide text-navy-400">
+            Change your password. You&apos;ll need your current one.
+          </p>
+          <ChangePasswordForm />
+        </div>
       </section>
 
       <p className="mt-8 text-[12px] tracking-wide text-navy-300">

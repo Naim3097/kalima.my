@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
+import { createClient, createPublicClient } from "@/lib/supabase/server";
 
 /*
   Server Actions for auth. Kept minimal and typed: each returns an error
@@ -125,6 +125,53 @@ export async function updatePassword(formData: FormData): Promise<AuthResult> {
 
   revalidatePath("/", "layout");
   redirect("/account");
+}
+
+/*
+  In-account password change for a signed-in user. Unlike the recovery flow,
+  this requires the CURRENT password (reauthentication) — so a hijacked session
+  can't silently change it.
+
+  The current password is verified on a throwaway, cookie-less client so the
+  verification sign-in never overwrites the user's live session; that session
+  is then revoked. Only then does the real (cookie-bound) client update the
+  password.
+*/
+export async function changePassword(formData: FormData): Promise<AuthResult> {
+  const currentPassword = String(formData.get("current_password") ?? "");
+  const password = String(formData.get("password") ?? "");
+  const confirm = String(formData.get("confirm") ?? "");
+
+  if (!currentPassword) return { error: "Enter your current password." };
+  if (password.length < 8) return { error: "New password must be at least 8 characters." };
+  if (password !== confirm) return { error: "New passwords do not match." };
+  if (password === currentPassword) {
+    return { error: "New password must be different from your current one." };
+  }
+
+  const supabase = await createClient();
+  if (!supabase) return { error: "Authentication is not configured." };
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.email) return { error: "You must be signed in." };
+
+  // Verify the current password without touching the live session's cookies.
+  const verifier = createPublicClient();
+  if (!verifier) return { error: "Authentication is not configured." };
+  const { error: verifyError } = await verifier.auth.signInWithPassword({
+    email: user.email,
+    password: currentPassword,
+  });
+  if (verifyError) return { error: "Your current password is incorrect." };
+  await verifier.auth.signOut(); // discard the throwaway verification session
+
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { error: error.message };
+
+  revalidatePath("/account");
+  redirect("/account?password=changed");
 }
 
 /** Absolute site origin for auth redirect links. */
