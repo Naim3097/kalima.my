@@ -239,6 +239,46 @@ export type DiscountRow = {
   maxRedemptions: number | null; redeemedCount: number; active: boolean; endsAt: string | null;
 };
 
+/* ---- CMS ---------------------------------------------------------------- */
+
+export type AdminAnnouncement = { id: string; text: string; sortOrder: number; active: boolean };
+export type AdminHeroSlide = {
+  id: string; eyebrow: string | null; title: string; body: string | null; image: string; focal: string | null;
+  primaryLabel: string | null; primaryHref: string | null; secondaryLabel: string | null; secondaryHref: string | null;
+  sortOrder: number; active: boolean;
+};
+export type AdminContentPage = { id: string; slug: string; title: string; body: string[]; published: boolean };
+
+export async function listAnnouncements(): Promise<AdminAnnouncement[]> {
+  const { data, error } = await db()
+    .from("announcements").select("id, text, sort_order, active").order("sort_order");
+  if (error) throw new Error(`listAnnouncements failed: ${error.message}`);
+  return (data ?? []).map((a) => ({ id: a.id, text: a.text, sortOrder: a.sort_order, active: a.active }));
+}
+
+export async function listHeroSlides(): Promise<AdminHeroSlide[]> {
+  const { data, error } = await db()
+    .from("hero_slides")
+    .select("id, eyebrow, title, body, image, focal, primary_label, primary_href, secondary_label, secondary_href, sort_order, active")
+    .order("sort_order");
+  if (error) throw new Error(`listHeroSlides failed: ${error.message}`);
+  return (data ?? []).map((s) => ({
+    id: s.id, eyebrow: s.eyebrow, title: s.title, body: s.body, image: s.image, focal: s.focal,
+    primaryLabel: s.primary_label, primaryHref: s.primary_href,
+    secondaryLabel: s.secondary_label, secondaryHref: s.secondary_href,
+    sortOrder: s.sort_order, active: s.active,
+  }));
+}
+
+export async function listContentPages(): Promise<AdminContentPage[]> {
+  const { data, error } = await db()
+    .from("content_pages").select("id, slug, title, body, published").order("slug");
+  if (error) throw new Error(`listContentPages failed: ${error.message}`);
+  return (data ?? []).map((p) => ({
+    id: p.id, slug: p.slug, title: p.title, body: (p.body as string[]) ?? [], published: p.published,
+  }));
+}
+
 /* ---- Products (editor) -------------------------------------------------- */
 
 export type EditVariant = {

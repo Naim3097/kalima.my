@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getContentPage, listContentPageSlugs } from "@/lib/cms";
 
 const PAGES: Record<string, { title: string; body: string[] }> = {
   "about-kalima": {
@@ -56,20 +57,33 @@ const PAGES: Record<string, { title: string; body: string[] }> = {
 
 type Props = { params: Promise<{ slug: string }> };
 
-export function generateStaticParams() {
-  return Object.keys(PAGES).map((slug) => ({ slug }));
+export const revalidate = 3600;
+
+/*
+  Pages are CMS-managed (src/lib/cms.ts). The hardcoded PAGES map above is the
+  fallback for an unconfigured Supabase (fresh clone) — the DB wins when present.
+*/
+async function resolvePage(slug: string): Promise<{ title: string; body: string[] } | null> {
+  const fromCms = await getContentPage(slug);
+  if (fromCms) return { title: fromCms.title, body: fromCms.body };
+  return PAGES[slug] ?? null;
+}
+
+export async function generateStaticParams() {
+  const slugs = await listContentPageSlugs();
+  return (slugs.length ? slugs : Object.keys(PAGES)).map((slug) => ({ slug }));
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const page = PAGES[slug];
+  const page = await resolvePage(slug);
   if (!page) return { title: "Page not found" };
   return { title: page.title, description: page.body[0] };
 }
 
 export default async function ContentPage({ params }: Props) {
   const { slug } = await params;
-  const page = PAGES[slug];
+  const page = await resolvePage(slug);
 
   if (!page) notFound();
 

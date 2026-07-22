@@ -242,3 +242,101 @@ export async function adjustStock(
   revalidateProduct(productSlug);
   return { ok: true, newStock: data as number };
 }
+
+/* ---- CMS ---------------------------------------------------------------- */
+
+// Storefront surfaces the CMS drives — revalidated on every content edit.
+function revalidateStorefront() {
+  revalidatePath("/", "layout"); // announcements (in the layout) + hero (home)
+}
+
+export async function saveAnnouncement(input: {
+  id?: string; text: string; sortOrder: number; active: boolean;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  if (!input.text.trim()) return { error: "Message text is required." };
+
+  const row = { text: input.text.trim(), sort_order: input.sortOrder, active: input.active };
+  const { error } = input.id
+    ? await db.from("announcements").update(row).eq("id", input.id)
+    : await db.from("announcements").insert(row);
+  if (error) return { error: error.message };
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+export async function deleteAnnouncement(id: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const { error } = await db.from("announcements").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+export async function saveHeroSlide(input: {
+  id?: string; eyebrow: string; title: string; body: string; image: string; focal: string;
+  primaryLabel: string; primaryHref: string; secondaryLabel: string; secondaryHref: string;
+  sortOrder: number; active: boolean;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  if (!input.title.trim()) return { error: "Title is required." };
+  if (!input.image.trim()) return { error: "Image path is required." };
+
+  const row = {
+    eyebrow: input.eyebrow.trim() || null,
+    title: input.title.trim(),
+    body: input.body.trim() || null,
+    image: input.image.trim(),
+    focal: input.focal.trim() || "center",
+    primary_label: input.primaryLabel.trim() || null,
+    primary_href: input.primaryHref.trim() || null,
+    secondary_label: input.secondaryLabel.trim() || null,
+    secondary_href: input.secondaryHref.trim() || null,
+    sort_order: input.sortOrder,
+    active: input.active,
+  };
+  const { error } = input.id
+    ? await db.from("hero_slides").update(row).eq("id", input.id)
+    : await db.from("hero_slides").insert(row);
+  if (error) return { error: error.message };
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+export async function deleteHeroSlide(id: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const { error } = await db.from("hero_slides").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+export async function saveContentPage(input: {
+  id?: string; slug: string; title: string; body: string[]; published: boolean;
+}): Promise<ActionResult & { slug?: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const slug = slugify(input.slug || input.title);
+  if (!slug) return { error: "A slug is required." };
+  if (!input.title.trim()) return { error: "Title is required." };
+
+  const body = input.body.map((p) => p.trim()).filter(Boolean);
+  const row = { slug, title: input.title.trim(), body, published: input.published };
+  const { error } = input.id
+    ? await db.from("content_pages").update(row).eq("id", input.id)
+    : await db.from("content_pages").insert(row);
+  if (error) {
+    return { error: error.message.includes("unique") ? "That slug is already in use." : error.message };
+  }
+  revalidatePath("/admin/cms");
+  revalidatePath(`/pages/${slug}`);
+  return { ok: true, slug };
+}

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { fetchProducts } from "@/data/catalog.queries";
+import { getHeroSlides } from "@/lib/cms";
 import Hero from "@/components/home/Hero";
 import CategoryTiles from "@/components/home/CategoryTiles";
 import CollectionSpotlight from "@/components/home/CollectionSpotlight";
@@ -19,12 +20,14 @@ export const metadata: Metadata = {
   BestSellers, so no section below needs its own data boundary. Only Hero
   (carousel) and Newsletter (email form) ship client JS.
 */
+export const revalidate = 3600;
+
 export default async function HomePage() {
-  const products = await fetchProducts();
+  const [products, heroSlides] = await Promise.all([fetchProducts(), getHeroSlides()]);
 
   return (
     <>
-      <Hero />
+      <Hero slides={heroSlides} />
       <CategoryTiles />
       <CollectionSpotlight />
       <BestSellers products={products} />

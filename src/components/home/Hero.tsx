@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { HERO_SLIDES } from "@/data/catalog";
+import type { HeroSlide } from "@/lib/cms";
 import { Button } from "@/components/ui/button";
 
 /*
@@ -14,16 +14,18 @@ import { Button } from "@/components/ui/button";
 
   Client Component: carousel index state + the auto-advance timer.
 */
-export default function Hero() {
+export default function Hero({ slides }: { slides: HeroSlide[] }) {
   const [index, setIndex] = useState(0);
 
   // setTimeout keyed on index: any change (auto or manual dot click) restarts the 7s clock
   useEffect(() => {
-    const t = setTimeout(() => setIndex((i) => (i + 1) % HERO_SLIDES.length), 7000);
+    if (slides.length <= 1) return;
+    const t = setTimeout(() => setIndex((i) => (i + 1) % slides.length), 7000);
     return () => clearTimeout(t);
-  }, [index]);
+  }, [index, slides.length]);
 
-  const slide = HERO_SLIDES[index];
+  if (slides.length === 0) return null;
+  const slide = slides[index];
 
   return (
     <section
@@ -38,7 +40,7 @@ export default function Hero() {
       <div className="grid items-stretch lg:min-h-[600px] lg:grid-cols-[1.05fr_1fr]">
         {/* Campaign image — bleeds to the right viewport edge */}
         <div className="relative order-1 h-[440px] sm:h-[520px] lg:order-2 lg:h-auto">
-          {HERO_SLIDES.map((s, i) => (
+          {slides.map((s, i) => (
             <Image
               key={s.image}
               src={s.image}
@@ -87,19 +89,23 @@ export default function Hero() {
                 {slide.body}
               </p>
               <div className="mt-10 flex flex-wrap gap-4">
-                <Button asChild variant="kalima" size="editorial">
-                  <Link href={slide.primary.to}>{slide.primary.label}</Link>
-                </Button>
-                <Button asChild variant="kalimaOutline" size="editorial">
-                  <Link href={slide.secondary.to}>{slide.secondary.label}</Link>
-                </Button>
+                {slide.primary && (
+                  <Button asChild variant="kalima" size="editorial">
+                    <Link href={slide.primary.href}>{slide.primary.label}</Link>
+                  </Button>
+                )}
+                {slide.secondary && (
+                  <Button asChild variant="kalimaOutline" size="editorial">
+                    <Link href={slide.secondary.href}>{slide.secondary.label}</Link>
+                  </Button>
+                )}
               </div>
             </div>
 
             {/* Slide navigation — stable, never over the photo */}
             <div className="mt-14 flex items-center gap-5">
               <div className="flex gap-2.5">
-                {HERO_SLIDES.map((_, i) => (
+                {slides.map((_, i) => (
                   <button
                     key={i}
                     aria-label={`Slide ${i + 1}`}
@@ -111,7 +117,7 @@ export default function Hero() {
                 ))}
               </div>
               <span className="text-[11px] tracking-[0.25em] text-navy-300">
-                0{index + 1} / 0{HERO_SLIDES.length}
+                0{index + 1} / 0{slides.length}
               </span>
             </div>
           </div>

@@ -29,6 +29,7 @@ const NAV_SECTIONS: { heading: string; items: { label: string; to: string; end?:
       { label: "Products", to: "/admin/products" },
       { label: "Customers", to: "/admin/customers" },
       { label: "Discounts", to: "/admin/discounts" },
+      { label: "Content", to: "/admin/cms" },
     ],
   },
   {

@@ -18,6 +18,8 @@ security warnings.
 | `20260722000001_auth_profiles_and_roles.sql` | `profiles`, `user_role`, signup pipeline, self-elevation guard |
 | `20260722100001_commerce_schema.sql` | orders, order_items, payments, stock_movements, discounts, addresses + RLS |
 | `20260722100002_commerce_functions.sql` | create_order, validate_discount, mark_order_paid, get_order_by_reference |
+| `20260722100003_admin_adjust_stock.sql` | ledger-backed manual stock adjustment |
+| `20260722100004_cms_content.sql` | announcements, hero_slides, content_pages (CMS) + RLS |
 
 ## Commerce (Phase 2)
 

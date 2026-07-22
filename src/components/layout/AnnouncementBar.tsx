@@ -1,17 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ANNOUNCEMENTS } from "@/data/catalog";
 import { ChevronLeftIcon, ChevronRightIcon } from "@/components/brand/Icons";
 
-export default function AnnouncementBar() {
+/*
+  The rotating announcement bar. Messages arrive as a prop from the server
+  layout (CMS-managed via src/lib/cms.ts), so the copy is client-editable.
+*/
+export default function AnnouncementBar({ messages }: { messages: string[] }) {
   const [index, setIndex] = useState(0);
-  const count = ANNOUNCEMENTS.length;
+  const count = messages.length;
 
   useEffect(() => {
+    if (count <= 1) return;
     const t = setInterval(() => setIndex((i) => (i + 1) % count), 5000);
     return () => clearInterval(t);
   }, [count]);
+
+  if (count === 0) return null;
 
   return (
     <div className="bg-cream-50 border-b border-navy/10">
@@ -24,7 +30,7 @@ export default function AnnouncementBar() {
           <ChevronLeftIcon size={14} />
         </button>
         <p className="label-caps !tracking-wide2 text-center text-navy" aria-live="polite">
-          {ANNOUNCEMENTS[index]}
+          {messages[index]}
         </p>
         <button
           aria-label="Next announcement"
