@@ -5,6 +5,19 @@ import { getCurrentUser, isStaff } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 
 /*
+  Revalidate both the admin view and the storefront surfaces a catalog edit
+  affects, so a change shows immediately rather than waiting out ISR.
+*/
+function revalidateProduct(slug?: string) {
+  revalidatePath("/admin/products");
+  revalidatePath("/", "layout"); // storefront catalog (home, PLPs)
+  if (slug) {
+    revalidatePath(`/admin/products/${slug}`);
+    revalidatePath(`/products/${slug}`);
+  }
+}
+
+/*
   Back-office mutations. Server actions are POST endpoints callable from
   anywhere, so each RE-VERIFIES a staff session before touching the admin
   (service-role) client — the /admin route guard is not enough on its own.
@@ -103,4 +116,129 @@ export async function toggleDiscount(id: string, active: boolean): Promise<Actio
   if (error) return { error: error.message };
   revalidatePath("/admin/discounts");
   return { ok: true };
+}
+
+/* ---- Products ----------------------------------------------------------- */
+
+const slugify = (s: string) =>
+  s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+
+export type ProductInput = {
+  id?: string;
+  name: string;
+  slug: string;
+  description: string;
+  fabric: string;
+  category: "women" | "men" | "accessories";
+  priceSen: number;
+  bestSeller: boolean;
+  newArrival: boolean;
+  tone: string;
+  published: boolean;
+};
+
+export async function saveProduct(input: ProductInput): Promise<ActionResult & { slug?: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const name = input.name.trim();
+  if (!name) return { error: "Name is required." };
+  const slug = slugify(input.slug || name);
+  if (!slug) return { error: "Could not derive a slug — check the name." };
+  if (input.priceSen < 0) return { error: "Price cannot be negative." };
+
+  const row = {
+    name, slug,
+    description: input.description.trim() || null,
+    fabric: input.fabric.trim() || null,
+    category: input.category,
+    price_sen: input.priceSen,
+    best_seller: input.bestSeller,
+    new_arrival: input.newArrival,
+    tone: input.tone.trim() || "#383c61",
+    published: input.published,
+  };
+
+  const { error } = input.id
+    ? await db.from("products").update(row).eq("id", input.id)
+    : await db.from("products").insert(row);
+
+  if (error) {
+    return { error: error.message.includes("unique") ? "That slug is already in use." : error.message };
+  }
+  revalidateProduct(slug);
+  return { ok: true, slug };
+}
+
+export async function addVariant(input: {
+  productId: string; productSlug: string;
+  colorName: string; colorHex: string; size: string; sku: string;
+  priceSen: number | null; initialStock: number; colorPosition: number; position: number;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!input.colorName.trim() || !input.size.trim()) return { error: "Colour and size are required." };
+  const sku = input.sku.trim().toUpperCase() ||
+    `KLM-${input.productSlug}-${input.colorName}-${input.size}`.toUpperCase().replace(/[^A-Z0-9-]+/g, "");
+
+  const { data, error } = await db.from("product_variants").insert({
+    product_id: input.productId,
+    sku,
+    color_name: input.colorName.trim(),
+    color_hex: input.colorHex.trim() || "#cccccc",
+    size: input.size.trim(),
+    price_sen: input.priceSen,
+    stock_on_hand: 0, // initial stock is added via the ledger below
+    color_position: input.colorPosition,
+    position: input.position,
+  }).select("id").single();
+
+  if (error) {
+    return { error: error.message.includes("unique") ? "That SKU or colour/size already exists." : error.message };
+  }
+
+  // Seed initial stock through the ledger so inventory has an audit trail.
+  if (input.initialStock > 0) {
+    const { error: adjErr } = await db.rpc("adjust_stock", {
+      p_variant_id: data.id, p_delta: input.initialStock, p_reason: "initial stock",
+    });
+    if (adjErr) return { error: adjErr.message };
+  }
+
+  revalidateProduct(input.productSlug);
+  return { ok: true };
+}
+
+export async function deleteVariant(id: string, productSlug: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  // A variant that appears in an order is FK-restricted — surface that clearly.
+  const { error } = await db.from("product_variants").delete().eq("id", id);
+  if (error) {
+    return { error: error.message.includes("foreign key") || error.message.includes("violates")
+      ? "Can't delete a variant that appears in an order."
+      : error.message };
+  }
+  revalidateProduct(productSlug);
+  return { ok: true };
+}
+
+export async function adjustStock(
+  variantId: string, delta: number, reason: string, productSlug: string,
+): Promise<ActionResult & { newStock?: number }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!Number.isInteger(delta) || delta === 0) return { error: "Enter a non-zero whole number." };
+
+  const { data, error } = await db.rpc("adjust_stock", {
+    p_variant_id: variantId, p_delta: delta, p_reason: reason,
+  });
+  if (error) {
+    return { error: error.message.includes("below zero") ? "That would take stock below zero." : error.message };
+  }
+  revalidateProduct(productSlug);
+  return { ok: true, newStock: data as number };
 }

@@ -239,6 +239,45 @@ export type DiscountRow = {
   maxRedemptions: number | null; redeemedCount: number; active: boolean; endsAt: string | null;
 };
 
+/* ---- Products (editor) -------------------------------------------------- */
+
+export type EditVariant = {
+  id: string; sku: string; colorName: string; colorHex: string; size: string;
+  priceSen: number | null; stockOnHand: number; colorPosition: number; position: number;
+};
+
+export type ProductForEdit = {
+  id: string; slug: string; name: string; description: string | null; fabric: string | null;
+  category: "women" | "men" | "accessories"; priceSen: number;
+  bestSeller: boolean; newArrival: boolean; tone: string; published: boolean;
+  variants: EditVariant[];
+};
+
+export async function getProductForEdit(slug: string): Promise<ProductForEdit | null> {
+  const { data, error } = await db()
+    .from("products")
+    .select("*, product_variants(id, sku, color_name, color_hex, size, price_sen, stock_on_hand, color_position, position)")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (error) throw new Error(`getProductForEdit failed: ${error.message}`);
+  if (!data) return null;
+
+  const variants = (data.product_variants ?? [])
+    .map((v: Record<string, unknown>) => ({
+      id: v.id as string, sku: v.sku as string, colorName: v.color_name as string,
+      colorHex: v.color_hex as string, size: v.size as string,
+      priceSen: (v.price_sen as number | null) ?? null, stockOnHand: v.stock_on_hand as number,
+      colorPosition: v.color_position as number, position: v.position as number,
+    }))
+    .sort((a: EditVariant, b: EditVariant) => a.colorPosition - b.colorPosition || a.position - b.position);
+
+  return {
+    id: data.id, slug: data.slug, name: data.name, description: data.description, fabric: data.fabric,
+    category: data.category, priceSen: data.price_sen, bestSeller: data.best_seller,
+    newArrival: data.new_arrival, tone: data.tone, published: data.published, variants,
+  };
+}
+
 export async function listDiscounts(): Promise<DiscountRow[]> {
   const { data, error } = await db()
     .from("discount_codes")

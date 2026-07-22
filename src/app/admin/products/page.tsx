@@ -1,18 +1,20 @@
 import type { Metadata } from "next";
-import { Card, CardHeader, DemoNote, Pill, Table, Td, Tr } from "@/components/admin/ui";
+import Link from "next/link";
+import { Card, CardHeader, Pill, Table, Td, Tr } from "@/components/admin/ui";
 import ProductImage from "@/components/brand/ProductImage";
+import { Button } from "@/components/ui/button";
 import { fetchProducts } from "@/data/catalog.queries";
 import { formatRM } from "@/lib/format";
 
 export const metadata: Metadata = {
   title: "Products · Admin",
-  description: "One Kalima catalog synced across web, Shopee and TikTok Shop.",
+  description: "Kalima catalog — edit products, variants and ledger-tracked stock.",
 };
 
 /*
-  Server Component. Catalog and stock now come from Supabase — stock is the sum
-  of stock_on_hand across the product's variants, so the "low" flag reflects
-  real inventory rather than a hardcoded table.
+  Server Component. Catalog and stock come from Supabase — stock is the sum of
+  stock_on_hand across the product's variants, so the "low" flag reflects real
+  inventory. Each row links into the product editor.
 */
 export default async function AdminProductsPage() {
   const products = await fetchProducts();
@@ -23,23 +25,23 @@ export default async function AdminProductsPage() {
         <div>
           <h1 className="font-display text-3xl text-navy">Products</h1>
           <p className="mt-1 text-[13px] tracking-wide text-navy-400">
-            One catalog, three channels — stock is ledger-tracked and synced to Shopee &amp; TikTok Shop.
+            One catalog — stock is ledger-tracked and adjusted with a reason for every change.
           </p>
         </div>
-        <button className="label-caps bg-navy px-5 py-2.5 text-white hover:bg-navy-700 transition-colors cursor-pointer">
-          + Add Product
-        </button>
+        <Button asChild variant="kalima" size="editorial" className="cursor-pointer px-5 py-2.5">
+          <Link href="/admin/products/new">+ Add Product</Link>
+        </Button>
       </div>
 
       <Card>
         <CardHeader title={`${products.length} products`} />
-        <Table head={["Product", "Price", "Variants", "Stock", "Status", "Channels"]}>
+        <Table head={["Product", "Price", "Variants", "Stock", "Status", ""]}>
           {products.map((p) => {
             const stock = p.stock ?? 0;
             return (
               <Tr key={p.id}>
                 <Td>
-                  <div className="flex items-center gap-3">
+                  <Link href={`/admin/products/${p.slug}`} className="flex items-center gap-3 group">
                     {p.image ? (
                       <ProductImage
                         image={p.image}
@@ -53,13 +55,13 @@ export default async function AdminProductsPage() {
                       <div className="h-12 w-10" style={{ background: p.tone }} />
                     )}
                     <div>
-                      <p className="font-medium">{p.name}</p>
+                      <p className="font-medium group-hover:underline">{p.name}</p>
                       <p className="text-[11px] uppercase tracking-wider text-navy-300">
                         {p.collection ? `${p.collection} · ` : ""}
                         {p.category}
                       </p>
                     </div>
-                  </div>
+                  </Link>
                 </Td>
                 <Td>{formatRM(p.price)}</Td>
                 <Td className="text-navy-400">
@@ -72,17 +74,19 @@ export default async function AdminProductsPage() {
                 <Td>
                   <Pill value="active" />
                 </Td>
-                <Td className="text-[11px] tracking-wide text-navy-400">Web · Shopee · TikTok</Td>
+                <Td>
+                  <Link
+                    href={`/admin/products/${p.slug}`}
+                    className="label-caps text-[11px] text-navy-400 hover:text-navy"
+                  >
+                    Edit
+                  </Link>
+                </Td>
               </Tr>
             );
           })}
         </Table>
       </Card>
-
-      <DemoNote>
-        Demo view. Full product editor (variant matrix, image manager, CSV import/export, stock adjustment with
-        reasons) is a Phase 3 deliverable backed by Supabase.
-      </DemoNote>
     </div>
   );
 }
