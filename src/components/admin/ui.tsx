@@ -61,6 +61,9 @@ const PILL_STYLES: Record<string, string> = {
   // order statuses
   pending: "bg-amber-100 text-amber-900",
   paid: "bg-navy-100 text-navy",
+  fulfilled: "bg-sky-100 text-sky-900",
+  completed: "bg-emerald-100 text-emerald-900",
+  refunded: "bg-red-100 text-red-900",
   packed: "bg-indigo-100 text-indigo-900",
   shipped: "bg-sky-100 text-sky-900",
   delivered: "bg-emerald-100 text-emerald-900",

@@ -1,36 +1,59 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardHeader, ChannelBadge, Pill, Table, Td, Tr } from "@/components/admin/ui";
-import type { Channel, DemoOrder } from "@/data/demo";
-import { formatRM } from "@/lib/format";
+import { usePathname, useRouter } from "next/navigation";
+import type { OrderStatus } from "@/lib/admin";
 
 /*
-  Client island for the orders list: the channel filter is the only piece of
-  this page that needs state, so the page itself stays a Server Component and
-  hands the rows down as props.
+  Filter bar for the orders list. This is a small client island — the table
+  itself stays server-rendered on the page. Changing a filter rewrites the URL
+  searchParams (?status=&q=), which re-runs the Server Component's listOrders().
 */
 
-const FILTERS: { label: string; value: Channel | "all" }[] = [
-  { label: "All channels", value: "all" },
-  { label: "kalima.my", value: "web" },
-  { label: "Shopee", value: "shopee" },
-  { label: "TikTok Shop", value: "tiktok" },
+const STATUSES: { label: string; value: OrderStatus | "all" }[] = [
+  { label: "All", value: "all" },
+  { label: "Pending", value: "pending" },
+  { label: "Paid", value: "paid" },
+  { label: "Fulfilled", value: "fulfilled" },
+  { label: "Completed", value: "completed" },
+  { label: "Cancelled", value: "cancelled" },
+  { label: "Refunded", value: "refunded" },
 ];
 
-export default function OrdersBrowser({ allOrders }: { allOrders: DemoOrder[] }) {
-  const [filter, setFilter] = useState<Channel | "all">("all");
-  const orders = allOrders.filter((o) => filter === "all" || o.channel === filter);
+export default function OrdersBrowser({
+  status,
+  q,
+}: {
+  status?: OrderStatus;
+  q?: string;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [search, setSearch] = useState(q ?? "");
+
+  function apply(next: { status?: OrderStatus | "all"; q?: string }) {
+    const params = new URLSearchParams();
+    const nextStatus = next.status ?? status;
+    const nextQ = next.q ?? search;
+    if (nextStatus && nextStatus !== "all") params.set("status", nextStatus);
+    if (nextQ && nextQ.trim()) params.set("q", nextQ.trim());
+    const qs = params.toString();
+    router.push(qs ? `${pathname}?${qs}` : pathname);
+  }
+
+  const active = status ?? "all";
 
   return (
-    <>
-      <div className="flex gap-2">
-        {FILTERS.map((f) => (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap gap-2">
+        {STATUSES.map((f) => (
           <button
             key={f.value}
-            onClick={() => setFilter(f.value)}
+            onClick={() => apply({ status: f.value })}
             className={`label-caps px-4 py-2 transition-colors cursor-pointer ${
-              filter === f.value ? "bg-navy text-white" : "border border-navy/20 text-navy-400 hover:border-navy hover:text-navy"
+              active === f.value
+                ? "bg-navy text-white"
+                : "border border-navy/20 text-navy-400 hover:border-navy hover:text-navy"
             }`}
           >
             {f.label}
@@ -38,44 +61,26 @@ export default function OrdersBrowser({ allOrders }: { allOrders: DemoOrder[] })
         ))}
       </div>
 
-      <Card>
-        <CardHeader title={`${orders.length} orders`} />
-        <Table head={["Order", "Date", "Customer", "Channel", "Items", "Total", "Status", "Shipping", ""]}>
-          {orders.map((o) => (
-            <Tr key={o.id}>
-              <Td className="font-medium">{o.id}</Td>
-              <Td className="text-navy-400">{o.date}</Td>
-              <Td>{o.customer}</Td>
-              <Td>
-                <ChannelBadge channel={o.channel} />
-              </Td>
-              <Td className="max-w-52 truncate">{o.items}</Td>
-              <Td>{formatRM(o.total)}</Td>
-              <Td>
-                <Pill value={o.status} />
-              </Td>
-              <Td className="text-navy-400">
-                {o.tracking ? (
-                  <span title={o.courier}>{o.tracking}</span>
-                ) : o.channel !== "web" ? (
-                  <span className="text-navy-300">Seller Center</span>
-                ) : o.status === "paid" ? (
-                  <span className="text-amber-700">Awaiting booking</span>
-                ) : (
-                  "—"
-                )}
-              </Td>
-              <Td>
-                {o.channel === "web" && o.status === "paid" && (
-                  <button className="label-caps border border-navy/30 px-3 py-1.5 text-navy hover:border-navy transition-colors cursor-pointer">
-                    Book shipment
-                  </button>
-                )}
-              </Td>
-            </Tr>
-          ))}
-        </Table>
-      </Card>
-    </>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          apply({ q: search });
+        }}
+        className="flex items-center gap-2"
+      >
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search reference or email"
+          className="w-64 border border-navy/20 bg-white px-3 py-2 text-[13px] text-navy placeholder:text-navy-300 focus:border-navy focus:outline-none"
+        />
+        <button
+          type="submit"
+          className="label-caps border border-navy/30 px-4 py-2 text-navy transition-colors hover:border-navy cursor-pointer"
+        >
+          Search
+        </button>
+      </form>
+    </div>
   );
 }

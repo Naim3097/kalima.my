@@ -36,6 +36,16 @@ security warnings.
   of the built-in PUBLIC grant.
 - Demo discount code `AISYAH10` (10% off) seeded live, out of band.
 
+### Demo data (Phase 3 admin)
+
+Seeded live so the back-office is populated for walkthroughs: **4 customer accounts**
+(`nurul.aisyah@`, `siti.khadijah@`, `farah.hanim@`, `aina.sofia@` — all `@gmail.com`,
+password `KalimaDemo123!`) and **12 orders** through the real pipeline (paid orders
+decremented stock and wrote ledger rows), spread across the last 30 days with a mix of
+pending / paid / fulfilled / completed. All figures on the admin dashboard are computed
+from these, not mocked. Remove with `delete from auth.users where email like '%@gmail.com'`
+plus the guest orders (`email like 'walkin%'`) when real traffic arrives.
+
 > **`SUPABASE_SERVICE_ROLE_KEY` is now required.** Order creation, the payment webhook and
 > order lookup all run through it. Add it from Project Settings → API. The app builds
 > without it, but checkout will error at runtime until it is set.
