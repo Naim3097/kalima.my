@@ -154,6 +154,7 @@ export type OrderDetail = {
   discountCode: string | null; shippingMethod: string | null;
   shippingAddress: Record<string, string> | null;
   createdAt: string; paidAt: string | null;
+  refundedSen: number; refundedAt: string | null;
   items: { productName: string; colorName: string; size: string; sku: string; qty: number; unitSen: number; lineSen: number }[];
   payment: { provider: string; providerRef: string | null; status: string; amountSen: number } | null;
 };
@@ -175,6 +176,7 @@ export async function getOrder(reference: string): Promise<OrderDetail | null> {
     taxSen: o.tax_sen ?? 0, totalSen: o.total_sen,
     discountCode: o.discount_code, shippingMethod: o.shipping_method, shippingAddress: o.shipping_address,
     createdAt: o.created_at, paidAt: o.paid_at,
+    refundedSen: o.refunded_sen ?? 0, refundedAt: o.refunded_at ?? null,
     items: (o.order_items ?? []).map((i: Record<string, unknown>) => ({
       productName: i.product_name as string, colorName: i.color_name as string, size: i.size as string,
       sku: i.variant_sku as string, qty: i.qty as number, unitSen: i.unit_price_sen as number, lineSen: i.line_total_sen as number,
@@ -490,6 +492,7 @@ export async function getOrdersForPacking(opts: {
       discountCode: o.discount_code, shippingMethod: o.shipping_method,
       shippingAddress: o.shipping_address,
       createdAt: o.created_at, paidAt: o.paid_at,
+      refundedSen: o.refunded_sen ?? 0, refundedAt: o.refunded_at ?? null,
       items: (o.order_items ?? []).map((i: Record<string, unknown>) => ({
         productName: i.product_name as string, colorName: i.color_name as string,
         size: i.size as string, sku: i.variant_sku as string, qty: i.qty as number,

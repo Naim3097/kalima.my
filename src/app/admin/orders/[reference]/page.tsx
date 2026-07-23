@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, CardHeader, Pill, Table, Td, Tr } from "@/components/admin/ui";
+import { RefundPanel } from "@/components/admin/RefundPanel";
 import StatusUpdater from "@/components/admin/StatusUpdater";
 import { Button } from "@/components/ui/button";
 import { getOrder } from "@/lib/admin";
@@ -77,6 +78,14 @@ export default async function AdminOrderDetailPage({
           <StatusUpdater reference={order.reference} status={order.status} />
         </div>
       </Card>
+
+      <RefundPanel
+        reference={order.reference}
+        totalSen={order.totalSen}
+        status={order.status}
+        refundedSen={order.refundedSen}
+        refundedAt={order.refundedAt}
+      />
 
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
