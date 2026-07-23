@@ -1,119 +1,198 @@
 import type { Metadata } from "next";
-import { formatRM } from "@/lib/format";
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { AffiliateApply } from "@/components/affiliate/AffiliateApply";
+import { CopyField } from "@/components/affiliate/CopyField";
+import { getCurrentUser } from "@/lib/auth";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import ReferralLink from "@/components/affiliate/ReferralLink";
+  getAffiliateStats,
+  getMyAffiliate,
+  listPayouts,
+  listReferrals,
+} from "@/lib/affiliate";
+import { formatRM } from "@/lib/format";
 
 export const metadata: Metadata = {
-  title: "Affiliate Portal",
-  description:
-    "Kalima affiliate portal — track clicks, orders, commissions and monthly DuitNow payouts.",
+  // The root layout appends "· Kalima" via its title template.
+  title: "Affiliate",
+  description: "Your Kalima affiliate dashboard.",
+  robots: { index: false, follow: false },
 };
 
-const REFERRAL_LINK = "https://kalima.my/?ref=aisyah";
+export const dynamic = "force-dynamic";
 
-const STATS = [
-  { label: "Clicks (30d)", value: "4,212" },
-  { label: "Orders (30d)", value: "218" },
-  { label: "Conversion", value: "5.2%" },
-  { label: "Earnings (30d)", value: "RM5,643" },
-];
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://kalima.my";
 
-const COMMISSIONS = [
-  { order: "KLM-10244", date: "14 Jul", amount: 578, commission: 57.8, status: "Pending (return window)" },
-  { order: "KLM-10228", date: "11 Jul", amount: 250, commission: 25.0, status: "Approved" },
-  { order: "KLM-10195", date: "27 Jun", amount: 862, commission: 86.2, status: "Paid — 30 Jun batch" },
-  { order: "KLM-10171", date: "20 Jun", amount: 339, commission: 33.9, status: "Paid — 30 Jun batch" },
-];
+function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+  return (
+    <div className="border border-navy/10 bg-white px-5 py-4">
+      <p className="label-caps text-[10px] text-navy-400">{label}</p>
+      <p className="mt-1 font-display text-2xl text-navy">{value}</p>
+      {hint && <p className="mt-0.5 text-[11px] tracking-wide text-navy-400">{hint}</p>}
+    </div>
+  );
+}
 
 /*
-  Server Component — every figure here is static demo data. Only the
-  copy-to-clipboard control on the referral link ships JS.
+  Affiliate portal.
+
+  Signed-in customers who have not applied see the application form; pending
+  applicants see their status; approved affiliates see their link, code and
+  earnings. Balances are split into held vs payable because "when do I actually
+  get paid" is the question this page exists to answer.
 */
-export default function AffiliatePage() {
-  return (
-    <div className="mx-auto max-w-6xl px-4 py-12">
-      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="label-caps text-navy-400">Affiliate Portal</p>
-          <h1 className="mt-1 font-display text-4xl text-navy">Welcome back, Aisyah ✨</h1>
-        </div>
-        <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[11px] uppercase tracking-wider text-amber-900">
-          Demo preview — Phase 6
-        </span>
-      </div>
+export default async function AffiliatePage() {
+  const current = await getCurrentUser();
+  if (!current) redirect("/login?next=/affiliate");
 
-      {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-4">
-        {STATS.map((s) => (
-          <div key={s.label} className="border border-navy/10 bg-white px-5 py-4">
-            <p className="label-caps text-navy-400">{s.label}</p>
-            <p className="mt-2 font-display text-3xl text-navy">{s.value}</p>
-          </div>
-        ))}
-      </div>
+  const affiliate = await getMyAffiliate();
 
-      {/* Link & code */}
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <div className="border border-navy/10 bg-white px-5 py-5">
-          <p className="label-caps mb-3 text-navy-400">Your referral link</p>
-          <ReferralLink link={REFERRAL_LINK} />
-          <p className="mt-2 text-[12px] tracking-wide text-navy-300">30-day cookie — you&apos;re credited even if they buy later</p>
-        </div>
-        <div className="border border-navy/10 bg-white px-5 py-5">
-          <p className="label-caps mb-3 text-navy-400">Your code — followers get 10% off</p>
-          <div className="flex items-center justify-between border border-dashed border-navy/30 bg-cream-50 px-4 py-3">
-            <code className="font-display text-2xl tracking-[0.2em] text-navy">AISYAH10</code>
-            <span className="text-[12px] tracking-wide text-navy-400">You earn 10% per order</span>
-          </div>
-        </div>
-      </div>
+  if (!affiliate) {
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-16">
+        <AffiliateApply defaultName={current.profile?.full_name ?? ""} />
+      </main>
+    );
+  }
 
-      {/* Commissions */}
-      <div className="mt-6 border border-navy/10 bg-white">
-        <div className="flex items-center justify-between border-b border-navy/10 px-5 py-4">
-          <h2 className="label-caps !text-[12px]">Recent commissions</h2>
-          <span className="text-[12px] tracking-wide text-navy-400">Payouts monthly via DuitNow</span>
-        </div>
-        <Table className="text-left text-[13px]">
-          <TableHeader>
-            <TableRow className="border-navy/10 hover:bg-transparent">
-              {["Order", "Date", "Order value", "Your commission", "Status"].map((h) => (
-                <TableHead key={h} className="label-caps h-auto whitespace-nowrap px-5 py-3 !text-[10px] text-navy-400">
-                  {h}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {COMMISSIONS.map((c) => (
-              <TableRow key={c.order} className="border-navy/5 hover:bg-cream-50">
-                <TableCell className="px-5 py-3.5 font-medium text-navy">{c.order}</TableCell>
-                <TableCell className="px-5 py-3.5 text-navy-400">{c.date}</TableCell>
-                <TableCell className="px-5 py-3.5 text-navy">{formatRM(c.amount)}</TableCell>
-                <TableCell className="px-5 py-3.5 font-medium text-navy">{formatRM(c.commission)}</TableCell>
-                <TableCell className="px-5 py-3.5 text-navy-400">{c.status}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border border-navy/10 bg-beige px-5 py-4">
-        <p className="text-[13px] tracking-wide text-navy">
-          📁 Campaign assets — approved photos, captions &amp; story templates for the Maya Collection
+  if (affiliate.status !== "approved") {
+    const suspended = affiliate.status === "suspended";
+    return (
+      <main className="mx-auto max-w-2xl px-4 py-20 text-center">
+        <h1 className="font-display text-3xl text-navy">
+          {suspended ? "Your affiliate account is paused" : "Application received"}
+        </h1>
+        <p className="mt-4 text-[14px] leading-relaxed tracking-wide text-navy-400">
+          {suspended
+            ? "Please contact us and we'll get it sorted."
+            : "We're reviewing your application and will be in touch by email. Nothing to do for now."}
         </p>
-        <Button variant="kalimaOutline" size="editorial" className="cursor-pointer px-4 py-2">
-          Download pack
-        </Button>
+        <Link href="/" className="label-caps mt-8 inline-block text-[11px] text-navy-400 hover:text-navy">
+          ← Back to Kalima
+        </Link>
+      </main>
+    );
+  }
+
+  const [stats, referrals, payouts] = await Promise.all([
+    getAffiliateStats(affiliate.id),
+    listReferrals(affiliate.id),
+    listPayouts(affiliate.id),
+  ]);
+
+  const link = `${APP_URL}/?ref=${affiliate.slug}`;
+
+  return (
+    <main className="mx-auto max-w-5xl px-4 py-14">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl text-navy">Affiliate dashboard</h1>
+          <p className="mt-1 text-[13px] tracking-wide text-navy-400">
+            {affiliate.name} · {(affiliate.commissionBps / 100).toFixed(affiliate.commissionBps % 100 ? 1 : 0)}% commission
+          </p>
+        </div>
       </div>
-    </div>
+
+      {/* Sharing tools */}
+      <section className="mt-8 grid gap-4 sm:grid-cols-2">
+        <CopyField label="Your referral link" value={link} />
+        {affiliate.discountCode ? (
+          <CopyField label="Your discount code" value={affiliate.discountCode} />
+        ) : (
+          <div>
+            <p className="label-caps text-[10px] text-navy-400">Your discount code</p>
+            <p className="mt-1 border border-dashed border-navy/15 px-3 py-2.5 text-[13px] text-navy-400">
+              Not issued yet — your link works on its own.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* Earnings */}
+      <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Clicks" value={String(stats.clicks)} />
+        <Stat label="Orders" value={String(stats.orders)} />
+        <Stat
+          label="Held"
+          value={formatRM(stats.pendingSen / 100)}
+          hint="Inside the 14-day return window"
+        />
+        <Stat
+          label="Payable"
+          value={formatRM(stats.payableSen / 100)}
+          hint="Cleared — due at the next payout"
+        />
+      </section>
+
+      {(stats.paidSen > 0 || stats.clawedBackSen > 0) && (
+        <p className="mt-3 text-[12px] tracking-wide text-navy-400">
+          {formatRM(stats.paidSen / 100)} paid to date
+          {stats.clawedBackSen > 0 && ` · ${formatRM(stats.clawedBackSen / 100)} reversed from refunded orders`}
+        </p>
+      )}
+
+      {/* Referrals */}
+      <section className="mt-10">
+        <h2 className="font-display text-xl text-navy">Referred orders</h2>
+        {referrals.length === 0 ? (
+          <p className="mt-3 text-[13px] tracking-wide text-navy-400">
+            No referred orders yet. Share your link — commission appears here once an
+            order is paid.
+          </p>
+        ) : (
+          <div className="mt-3 overflow-x-auto border border-navy/10 bg-white">
+            <table className="w-full text-left text-[13px]">
+              <thead>
+                <tr className="border-b border-navy/10">
+                  <th className="label-caps px-4 py-3 text-[10px] text-navy-400">Order</th>
+                  <th className="label-caps px-4 py-3 text-[10px] text-navy-400">Via</th>
+                  <th className="label-caps px-4 py-3 text-[10px] text-navy-400">Order value</th>
+                  <th className="label-caps px-4 py-3 text-[10px] text-navy-400">Commission</th>
+                  <th className="label-caps px-4 py-3 text-[10px] text-navy-400">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {referrals.map((r) => {
+                  const held = r.status !== "paid" && r.status !== "clawed_back" &&
+                    new Date(r.holdUntil).getTime() > Date.now();
+                  return (
+                    <tr key={r.id} className="border-b border-navy/5 last:border-0">
+                      <td className="px-4 py-3">{r.orderReference ?? "—"}</td>
+                      <td className="px-4 py-3 text-navy-400">{r.source}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatRM(r.baseSen / 100)}</td>
+                      <td className="px-4 py-3 tabular-nums">{formatRM(r.commissionSen / 100)}</td>
+                      <td className="px-4 py-3 text-navy-400">
+                        {r.status === "clawed_back"
+                          ? "Reversed (refunded)"
+                          : r.status === "paid"
+                            ? "Paid"
+                            : held
+                              ? `Held until ${new Date(r.holdUntil).toLocaleDateString("en-MY", { day: "numeric", month: "short" })}`
+                              : "Payable"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {payouts.length > 0 && (
+        <section className="mt-10">
+          <h2 className="font-display text-xl text-navy">Payouts</h2>
+          <ul className="mt-3 space-y-2">
+            {payouts.map((p) => (
+              <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 border border-navy/10 bg-white px-4 py-3 text-[13px]">
+                <span>{new Date(p.paidAt).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}</span>
+                <span className="text-navy-400">{p.reference ?? "—"}</span>
+                <span className="tabular-nums">{formatRM(p.amountSen / 100)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </main>
   );
 }
