@@ -561,3 +561,36 @@ export async function getOrderWeightGrams(orderReference: string): Promise<numbe
     return total + (i.qty as number) * (v?.weight_grams ?? 0);
   }, 0);
 }
+
+/* ---- Shipping settings (EasyParcel) ------------------------------------- */
+
+export type SenderSettings = {
+  easyparcelEnabled: boolean;
+  connected: boolean;
+  fallbackEnabled: boolean;
+  senderName: string | null;
+  senderPhone: string | null;
+  senderLine1: string | null;
+  senderLine2: string | null;
+  senderCity: string | null;
+  senderPostcode: string | null;
+  senderState: string | null;
+};
+
+export async function getSenderSettings(): Promise<SenderSettings> {
+  const { data, error } = await db()
+    .from("store_settings")
+    .select("easyparcel_enabled, easyparcel_access_token, shipping_fallback_enabled, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state")
+    .eq("id", 1)
+    .single();
+  if (error) throw new Error(`getSenderSettings failed: ${error.message}`);
+  return {
+    easyparcelEnabled: Boolean(data.easyparcel_enabled),
+    connected: Boolean(data.easyparcel_access_token),
+    fallbackEnabled: Boolean(data.shipping_fallback_enabled),
+    senderName: data.sender_name, senderPhone: data.sender_phone,
+    senderLine1: data.sender_line1, senderLine2: data.sender_line2,
+    senderCity: data.sender_city, senderPostcode: data.sender_postcode,
+    senderState: data.sender_state,
+  };
+}
