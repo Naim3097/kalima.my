@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, CardHeader, Pill, Table, Td, Tr } from "@/components/admin/ui";
 import StatusUpdater from "@/components/admin/StatusUpdater";
+import { Button } from "@/components/ui/button";
 import { getOrder } from "@/lib/admin";
 import { formatRM } from "@/lib/format";
 
@@ -65,6 +66,9 @@ export default async function AdminOrderDetailPage({
             {order.paidAt ? ` · Paid ${dateFmt.format(new Date(order.paidAt))}` : ""}
           </p>
         </div>
+        <Button asChild variant="kalimaOutline" size="editorial">
+          <Link href={`/admin/orders/${order.reference}/packing-slip`}>Packing slip</Link>
+        </Button>
       </div>
 
       <Card className="px-5 py-4">
