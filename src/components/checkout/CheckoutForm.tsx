@@ -26,9 +26,34 @@ const FLAT_SHIPPING = 10; // RM — placeholder until EasyParcel live rates (Pha
 const fieldClass =
   "h-auto rounded-none border-navy/20 bg-white px-4 py-3 text-[14px] md:text-[14px] text-navy shadow-none placeholder:text-navy-300 focus-visible:border-navy focus-visible:ring-0";
 
-type Props = { defaultEmail?: string; defaultName?: string; defaultPhone?: string };
+/*
+  Loyalty context, resolved on the server. Everything here is for DISPLAY: the
+  form sends a points request and create_order decides what it is worth, so a
+  tampered value can mislead this panel but never change what is charged.
+*/
+export type LoyaltyContext = {
+  balance: number;
+  senPerPoint: number;
+  minRedeemPoints: number;
+  maxRedeemBps: number;
+  pointsPerRm: number;
+  multiplierBps: number;
+  tierName: string;
+};
 
-export default function CheckoutForm({ defaultEmail = "", defaultName = "", defaultPhone = "" }: Props) {
+type Props = {
+  defaultEmail?: string;
+  defaultName?: string;
+  defaultPhone?: string;
+  loyalty?: LoyaltyContext | null;
+};
+
+export default function CheckoutForm({
+  defaultEmail = "",
+  defaultName = "",
+  defaultPhone = "",
+  loyalty = null,
+}: Props) {
   const mounted = useMounted();
   const { items } = useCart();
   const subtotal = cartSubtotal(items);
@@ -58,10 +83,39 @@ export default function CheckoutForm({ defaultEmail = "", defaultName = "", defa
     [items],
   );
 
+  const [usePoints, setUsePoints] = useState(false);
+
   const discountRM = discount ? discount.discountSen / 100 : 0;
+
+  /*
+    Mirrors the server's clamp so the shopper sees the real figure before
+    committing: capped by their balance, by the scheme's share of the goods
+    value, and by what is actually left to pay. The server recomputes all of
+    this — this is a preview, not the decision.
+  */
+  const goodsAfterDiscountSen = Math.max(0, Math.round((subtotal - discountRM) * 100));
+  const maxByCap = loyalty ? Math.floor((goodsAfterDiscountSen * loyalty.maxRedeemBps) / 10000) : 0;
+  const maxByBalance = loyalty ? loyalty.balance * loyalty.senPerPoint : 0;
+  const pointsDiscountSen =
+    loyalty && usePoints && loyalty.balance >= loyalty.minRedeemPoints
+      ? Math.min(maxByBalance, maxByCap, goodsAfterDiscountSen)
+      : 0;
+  const pointsUsed =
+    loyalty && pointsDiscountSen > 0
+      ? Math.ceil(pointsDiscountSen / loyalty.senPerPoint)
+      : 0;
+  const pointsRM = pointsDiscountSen / 100;
+
   const freeShipping = subtotal - discountRM >= FREE_SHIPPING_THRESHOLD || !!discount?.freeShipping;
   const shipping = freeShipping ? 0 : FLAT_SHIPPING;
-  const total = Math.max(0, subtotal - discountRM + shipping);
+  const total = Math.max(0, subtotal - discountRM - pointsRM + shipping);
+
+  // What this order will earn once complete, at the shopper's current tier.
+  const pointsEarned = loyalty
+    ? Math.floor(
+        (Math.floor((subtotal - discountRM - pointsRM)) * loyalty.pointsPerRm * loyalty.multiplierBps) / 10000,
+      )
+    : 0;
 
   function applyCode() {
     const trimmed = code.trim();
@@ -85,6 +139,7 @@ export default function CheckoutForm({ defaultEmail = "", defaultName = "", defa
       const result = await placeOrder(cartRefs, {
         ...form,
         shippingMethod: freeShipping ? "Standard (free)" : "Standard",
+        redeemPoints: pointsUsed,
         discountCode: discount?.code ?? "",
       });
       // Success redirects server-side; only a failure returns here.
@@ -220,6 +275,38 @@ export default function CheckoutForm({ defaultEmail = "", defaultName = "", defa
           )}
           {codeMsg && <p className="mt-2 text-[12px] tracking-wide text-red-600">{codeMsg}</p>}
 
+          {/* Kalima Club points */}
+          {loyalty && (
+            <div className="mt-4 border border-navy/10 bg-cream-50 px-4 py-3">
+              {loyalty.balance < loyalty.minRedeemPoints ? (
+                <p className="text-[12px] tracking-wide text-navy-400">
+                  You have {loyalty.balance} Kalima Club point{loyalty.balance === 1 ? "" : "s"} —{" "}
+                  {loyalty.minRedeemPoints} needed to redeem.
+                </p>
+              ) : (
+                <label className="flex cursor-pointer items-start gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={usePoints}
+                    onChange={(e) => setUsePoints(e.target.checked)}
+                    className="mt-0.5 accent-navy"
+                  />
+                  <span className="text-[13px] leading-relaxed tracking-wide text-navy">
+                    Use my {loyalty.balance} points
+                    <span className="text-navy-400">
+                      {" "}— saves {formatRM(Math.min(maxByBalance, maxByCap, goodsAfterDiscountSen) / 100)} on this order
+                    </span>
+                    {usePoints && pointsUsed < loyalty.balance && (
+                      <span className="mt-0.5 block text-[11px] text-navy-400">
+                        {pointsUsed} points used · {loyalty.balance - pointsUsed} kept for next time
+                      </span>
+                    )}
+                  </span>
+                </label>
+              )}
+            </div>
+          )}
+
           <dl className="mt-5 space-y-2 border-t border-navy/10 pt-4 text-[13px]">
             <div className="flex justify-between text-navy-400">
               <dt>Subtotal</dt><dd>{formatRM(subtotal)}</dd>
@@ -227,6 +314,11 @@ export default function CheckoutForm({ defaultEmail = "", defaultName = "", defa
             {discountRM > 0 && (
               <div className="flex justify-between text-emerald-700">
                 <dt>Code {discount?.code}</dt><dd>−{formatRM(discountRM)}</dd>
+              </div>
+            )}
+            {pointsRM > 0 && (
+              <div className="flex justify-between text-emerald-700">
+                <dt>Kalima Club ({pointsUsed} pts)</dt><dd>−{formatRM(pointsRM)}</dd>
               </div>
             )}
             <div className="flex justify-between text-navy-400">
@@ -237,6 +329,15 @@ export default function CheckoutForm({ defaultEmail = "", defaultName = "", defa
               <dd className="font-display text-xl">{formatRM(total)}</dd>
             </div>
           </dl>
+
+          {loyalty && pointsEarned > 0 && (
+            <p className="mt-3 text-[12px] tracking-wide text-navy-400">
+              Earns {pointsEarned} Kalima Club point{pointsEarned === 1 ? "" : "s"}
+              {loyalty.multiplierBps > 10000 &&
+                ` at ${(loyalty.multiplierBps / 10000).toFixed(1)}× ${loyalty.tierName}`}
+              {" "}once your order is complete.
+            </p>
+          )}
 
           {error && (
             <p className="mt-4 border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">{error}</p>
