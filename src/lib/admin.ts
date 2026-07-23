@@ -594,3 +594,37 @@ export async function getSenderSettings(): Promise<SenderSettings> {
     senderState: data.sender_state,
   };
 }
+
+/* ---- Campaigns ---------------------------------------------------------- */
+
+export type CampaignRow = {
+  id: string; name: string; channel: string; subject: string | null; body: string;
+  segment: Record<string, unknown>; status: string;
+  totalCount: number; sentCount: number; failedCount: number;
+  sentAt: string | null; createdAt: string;
+};
+
+export async function listCampaigns(): Promise<CampaignRow[]> {
+  const { data, error } = await db()
+    .from("campaigns")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw new Error(`listCampaigns failed: ${error.message}`);
+  return (data ?? []).map((c) => ({
+    id: c.id, name: c.name, channel: c.channel, subject: c.subject, body: c.body,
+    segment: (c.segment ?? {}) as Record<string, unknown>, status: c.status,
+    totalCount: c.total_count, sentCount: c.sent_count, failedCount: c.failed_count,
+    sentAt: c.sent_at, createdAt: c.created_at,
+  }));
+}
+
+/** Subscriber counts for the composer's context line. */
+export async function getSubscriberStats(): Promise<{ active: number; optedOut: number }> {
+  const client = db();
+  const [{ count: active }, { count: optedOut }] = await Promise.all([
+    client.from("newsletter_subscribers").select("id", { count: "exact", head: true }).is("unsubscribed_at", null),
+    client.from("newsletter_subscribers").select("id", { count: "exact", head: true }).not("unsubscribed_at", "is", null),
+  ]);
+  return { active: active ?? 0, optedOut: optedOut ?? 0 };
+}
