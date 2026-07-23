@@ -66,6 +66,26 @@ export async function proxy(request: NextRequest) {
     }
   }
 
+  /*
+    Affiliate attribution: ?ref=slug drops a 30-day cookie, read at checkout and
+    stamped onto the order. Set last so it survives whichever response object
+    the Supabase cookie plumbing above ended up creating.
+
+    Not httpOnly-sensitive — it holds a public referral slug, not a secret — but
+    it is httpOnly anyway so page scripts can't rewrite someone else's
+    attribution. lax lets it survive the click-through from an external link.
+  */
+  const ref = request.nextUrl.searchParams.get("ref");
+  if (ref && /^[a-z0-9-]{1,64}$/i.test(ref)) {
+    response.cookies.set("kalima_ref", ref.toLowerCase(), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+    });
+  }
+
   return response;
 }
 
