@@ -5,13 +5,6 @@
   info. create_order reads shipping + free-shipping threshold + tax from it, so
   the shop owner controls the money rules without a deploy — still computed
   server-side, never trusted from the client.
-
-  Also relaxes the self-elevation guard so the service-role backend (the admin's
-  staff-management action) can change roles, while a customer's own JWT stays
-  blocked.
-
-  (This file is the schema/logic. The create_order recreation below carries the
-  full function body so a fresh replay produces the settings-aware version.)
 */
 create table store_settings (
   id                          int primary key default 1 check (id = 1),
@@ -21,7 +14,7 @@ create table store_settings (
   currency                    text not null default 'MYR',
   free_shipping_threshold_sen integer not null default 30000 check (free_shipping_threshold_sen >= 0),
   flat_shipping_sen           integer not null default 1000  check (flat_shipping_sen >= 0),
-  tax_rate_bps                integer not null default 0 check (tax_rate_bps between 0 and 10000),
+  tax_rate_bps                integer not null default 0 check (tax_rate_bps between 0 and 10000), -- basis points
   updated_at                  timestamptz not null default now()
 );
 insert into store_settings (id) values (1);
@@ -30,14 +23,22 @@ alter table store_settings enable row level security;
 create trigger store_settings_updated_at before update on store_settings
   for each row execute function set_updated_at();
 
+-- Store config is public-readable (shipping threshold + contact show on the
+-- storefront); only staff write.
 create policy "store settings are public" on store_settings for select using (true);
 create policy "staff manage store settings" on store_settings for all
   using ((select private.is_staff())) with check ((select private.is_staff()));
 grant select on store_settings to anon, authenticated;
 
+-- Orders gain a tax line (0 unless a tax rate is set).
 alter table orders add column tax_sen integer not null default 0 check (tax_sen >= 0);
 
--- Allow the service role (trusted server code) through the self-elevation guard.
+/*
+  The self-elevation guard blocked EVERY non-staff writer, including the
+  service-role backend the admin uses to change roles. Allow the service role
+  (trusted server code, key never in the browser) through — a customer's JWT is
+  'authenticated', not 'service_role', so they stay blocked.
+*/
 create or replace function private.protect_profile_role()
 returns trigger language plpgsql security definer set search_path = '' as $$
 begin

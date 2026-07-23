@@ -6,20 +6,9 @@
   triggers keep the two in sync. Roles are set server-side only — a customer
   can never elevate themselves (protect_profile_role below).
 
-  Admin bootstrap: role_grants is an allowlist keyed by email, checked at
-  signup, so an account can be elevated the moment it is created — before the
-  auth.users row exists. The grant rows themselves are DATA, seeded out of band
-  (not in this migration) so no personal email lands in a public repo:
-
-      insert into role_grants (email, role) values ('you@example.com', 'admin');
-
   Note: SECURITY DEFINER functions pin search_path = '', so every type and
   table inside their bodies is schema-qualified.
 */
-
--- private schema holds SECURITY DEFINER helpers, kept out of PostgREST's
--- exposed `public` schema. Created in the is_staff migration; harmless to re-assert.
-create schema if not exists private;
 
 create type user_role as enum ('customer', 'staff', 'admin', 'affiliate');
 
@@ -47,9 +36,7 @@ create table role_grants (
 
 alter table role_grants enable row level security;
 
--- BEFORE INSERT: stamp the role into raw_app_meta_data so it flows into the
--- JWT. Merges onto GoTrue's provider metadata rather than replacing it.
-create function private.handle_new_user_role()
+create function public.handle_new_user_role()
 returns trigger
 language plpgsql
 security definer
@@ -68,10 +55,9 @@ $$;
 
 create trigger on_auth_user_created_role
   before insert on auth.users
-  for each row execute function private.handle_new_user_role();
+  for each row execute function public.handle_new_user_role();
 
--- AFTER INSERT: create the profile from signup metadata + the role above.
-create function private.handle_new_user_profile()
+create function public.handle_new_user_profile()
 returns trigger
 language plpgsql
 security definer
@@ -92,12 +78,9 @@ $$;
 
 create trigger on_auth_user_created_profile
   after insert on auth.users
-  for each row execute function private.handle_new_user_profile();
+  for each row execute function public.handle_new_user_profile();
 
--- A non-staff user cannot change their own role. RLS is row-level, not
--- column-level, so without this a customer could PATCH profiles.role. Pins it
--- to the old value rather than erroring.
-create function private.protect_profile_role()
+create function public.protect_profile_role()
 returns trigger
 language plpgsql
 security definer
@@ -113,10 +96,9 @@ $$;
 
 create trigger protect_profile_role
   before update on profiles
-  for each row execute function private.protect_profile_role();
+  for each row execute function public.protect_profile_role();
 
--- When staff DO change a role, propagate it to the JWT claim (next refresh).
-create function private.sync_role_to_jwt()
+create function public.sync_role_to_jwt()
 returns trigger
 language plpgsql
 security definer
@@ -136,11 +118,9 @@ $$;
 
 create trigger sync_role_to_jwt
   after update on profiles
-  for each row execute function private.sync_role_to_jwt();
+  for each row execute function public.sync_role_to_jwt();
 
--- Admin helper to elevate/demote by id. Staff-gated; the update fires
--- sync_role_to_jwt. Used by the Phase 3 admin UI.
-create function private.set_user_role(target uuid, new_role public.user_role)
+create function public.set_user_role(target uuid, new_role public.user_role)
 returns void
 language plpgsql
 security definer
@@ -156,8 +136,8 @@ $$;
 
 grant select, update on profiles to authenticated;
 grant select, insert, update, delete on role_grants to authenticated;
+grant execute on function public.set_user_role(uuid, public.user_role) to authenticated;
 
--- Neither table is readable by anonymous visitors.
 revoke all on profiles from anon;
 revoke all on role_grants from anon;
 
