@@ -53,6 +53,7 @@ const NAV_SECTIONS: { heading: string; items: { label: string; to: string; end?:
     items: [
       { label: "Settings", to: "/admin/settings" },
       { label: "Staff & Roles", to: "/admin/staff" },
+      { label: "Audit Log", to: "/admin/audit" },
     ],
   },
 ];
