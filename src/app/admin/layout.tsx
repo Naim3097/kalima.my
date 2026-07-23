@@ -43,7 +43,7 @@ const NAV_SECTIONS: { heading: string; items: { label: string; to: string; end?:
   {
     heading: "Operations",
     items: [
-      { label: "Shipping · EasyParcel", to: "/admin/shipping", badge: "④" },
+      { label: "Shipping", to: "/admin/shipping" },
       { label: "Marketplace Sync", to: "/admin/sync", badge: "⑤" },
       { label: "Unified Inbox", to: "/admin/inbox", badge: "⑥" },
     ],

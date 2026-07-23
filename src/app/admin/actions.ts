@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser, isStaff, type Role } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 import { parseCsvRecords } from "@/lib/csv";
+import { getOrder } from "@/lib/admin";
+import { easyparcelClient, getShippingConfig } from "@/lib/shipping/config";
+import { getRatesForOrder, receiverFrom, senderFrom } from "@/lib/shipping/rates";
 import {
   CATEGORIES,
   parseBool,
@@ -206,6 +209,82 @@ export async function setVariantWeight(
   return { ok: true };
 }
 
+/*
+  Pickup address and EasyParcel toggles. The address is what the courier
+  collects from, so a wrong postcode here misprices every quote.
+*/
+export async function saveSenderSettings(input: {
+  easyparcelEnabled: boolean;
+  fallbackEnabled: boolean;
+  senderName: string;
+  senderPhone: string;
+  senderLine1: string;
+  senderLine2: string;
+  senderCity: string;
+  senderPostcode: string;
+  senderState: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (input.easyparcelEnabled) {
+    if (!input.senderPostcode.trim() || !input.senderState.trim()) {
+      return { error: "A pickup postcode and state are required to use EasyParcel." };
+    }
+    const { stateToIso } = await import("@/lib/shipping/states");
+    if (!stateToIso(input.senderState)) {
+      return { error: `"${input.senderState}" is not a recognised Malaysian state.` };
+    }
+  }
+
+  const { error } = await db.from("store_settings").update({
+    easyparcel_enabled: input.easyparcelEnabled,
+    shipping_fallback_enabled: input.fallbackEnabled,
+    sender_name: input.senderName.trim() || null,
+    sender_phone: input.senderPhone.trim() || null,
+    sender_line1: input.senderLine1.trim() || null,
+    sender_line2: input.senderLine2.trim() || null,
+    sender_city: input.senderCity.trim() || null,
+    sender_postcode: input.senderPostcode.trim() || null,
+    sender_state: input.senderState.trim() || null,
+  }).eq("id", 1);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "shipping.settings_updated", entityType: "settings", entityId: "shipping",
+    summary: `Shipping settings updated (EasyParcel ${input.easyparcelEnabled ? "on" : "off"})`,
+    meta: { easyparcelEnabled: input.easyparcelEnabled, postcode: input.senderPostcode },
+  });
+
+  revalidatePath("/admin/shipping");
+  return { ok: true };
+}
+
+/** Disconnects the EasyParcel account (clears stored tokens). */
+export async function disconnectEasyparcel(): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const { disconnect } = await import("@/lib/shipping/config");
+  await disconnect();
+  await logAudit(db, {
+    action: "shipping.disconnected", entityType: "settings", entityId: "shipping",
+    summary: "EasyParcel account disconnected",
+  });
+  revalidatePath("/admin/shipping");
+  return { ok: true };
+}
+
+/** Wallet balance for the Settings screen, in sen. */
+export async function getEasyparcelWallet(): Promise<{ balanceSen: number } | { error: string }> {
+  try { await assertStaff(); } catch { return { error: "Not authorized." }; }
+  try {
+    const client = await easyparcelClient();
+    return { balanceSen: await client.getWalletBalanceSen() };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not reach EasyParcel." };
+  }
+}
+
 /* ---- Shipments ---------------------------------------------------------- */
 
 const SHIPMENT_STATUSES = new Set([
@@ -279,6 +358,123 @@ export async function saveShipment(input: {
   revalidatePath(`/admin/orders/${input.reference}`);
   revalidatePath("/account");
   return { ok: true };
+}
+
+/*
+  Books a parcel with EasyParcel and writes the AWB back.
+
+  This spends real money from the merchant wallet, so it carries the two guards
+  the reference integration documents as missing:
+
+  1. IDEMPOTENCY. The shipment row is claimed with a conditional update
+     (pending -> booking) BEFORE the API call. A second concurrent click loses
+     the race and stops, instead of booking a second parcel and debiting the
+     wallet twice.
+  2. WALLET PRE-CHECK. An empty wallet produces "top up", not a raw upstream
+     error, and costs nothing.
+
+  If the API call fails the claim is released so the parcel can be retried.
+*/
+export async function bookShipment(input: {
+  reference: string;
+  shipmentId: string;
+  serviceId: string;
+  collectionDate?: string;
+}): Promise<ActionResult & { trackingNo?: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+
+  const order = await getOrder(input.reference);
+  if (!order) return { error: "Order not found." };
+
+  const cfg = await getShippingConfig();
+  const { weightGrams, options, unavailable } = await getRatesForOrder(input.reference);
+  if (unavailable) return { error: unavailable };
+
+  const chosen = options.find((o) => o.serviceId === input.serviceId);
+  if (!chosen) return { error: "That courier option is no longer available — refresh the rates." };
+
+  // (2) Wallet pre-check: cheaper to ask than to fail mid-booking.
+  try {
+    const client = await easyparcelClient();
+    const balanceSen = await client.getWalletBalanceSen();
+    if (balanceSen < chosen.amountSen) {
+      return {
+        error: `EasyParcel wallet is short — balance ${(balanceSen / 100).toFixed(2)} MYR, ` +
+          `this booking costs ${(chosen.amountSen / 100).toFixed(2)} MYR. Top up and try again.`,
+      };
+    }
+  } catch {
+    // A wallet endpoint failure must not block a booking that would succeed.
+  }
+
+  // (1) Claim the row first. Only one caller can move pending -> booking.
+  const { data: claimed, error: claimErr } = await db
+    .from("shipments")
+    .update({ status: "booked", provider: "easyparcel" })
+    .eq("id", input.shipmentId)
+    .eq("status", "pending")
+    .select("id")
+    .maybeSingle();
+  if (claimErr) return { error: claimErr.message };
+  if (!claimed) return { error: "This parcel is already booked or is being booked right now." };
+
+  const release = async (msg: string): Promise<ActionResult> => {
+    await db.from("shipments")
+      .update({ status: "pending", provider: "manual" })
+      .eq("id", input.shipmentId);
+    return { error: msg };
+  };
+
+  try {
+    const client = await easyparcelClient();
+    const result = await client.submitOrder({
+      reference: order.reference,
+      serviceId: input.serviceId,
+      collectionDate: input.collectionDate,
+      sender: senderFrom(cfg),
+      receiver: receiverFrom(order.shippingAddress ?? {}, order.phone),
+      totalWeightKg: Math.max(weightGrams / 1000, 0.5),
+      parcelValue: order.totalSen / 100,
+      content: order.items.map((i) => `${i.productName} x${i.qty}`).join(", ").slice(0, 200),
+    });
+
+    await db.from("shipments").update({
+      provider: "easyparcel",
+      provider_ref: result.shipmentId,
+      courier: result.courierName ?? chosen.courierName,
+      tracking_no: result.trackingNo,
+      cost_sen: result.priceSen || chosen.amountSen,
+      weight_grams: weightGrams,
+      status: "booked",
+      shipped_at: new Date().toISOString(),
+    }).eq("id", input.shipmentId);
+
+    if (order.status === "paid") {
+      await db.from("orders").update({ status: "fulfilled" }).eq("reference", input.reference);
+    }
+
+    await logAudit(db, {
+      action: "shipment.booked",
+      entityType: "order",
+      entityId: input.reference,
+      summary:
+        `Booked ${result.courierName ?? chosen.courierName} for ${input.reference}` +
+        `${result.trackingNo ? ` — AWB ${result.trackingNo}` : ""}` +
+        ` (${((result.priceSen || chosen.amountSen) / 100).toFixed(2)} MYR)`,
+      meta: { shipmentId: result.shipmentId, serviceId: input.serviceId, costSen: result.priceSen },
+    });
+
+    revalidatePath(`/admin/orders/${input.reference}`);
+    revalidatePath("/admin/orders");
+    revalidatePath("/account");
+    return { ok: true, trackingNo: result.trackingNo ?? undefined };
+  } catch (e) {
+    return await release(
+      e instanceof Error ? e.message : "EasyParcel booking failed — the parcel was not booked.",
+    );
+  }
 }
 
 export async function deleteShipment(id: string, reference: string): Promise<ActionResult> {
