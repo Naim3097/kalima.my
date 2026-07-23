@@ -285,6 +285,101 @@ export async function getEasyparcelWallet(): Promise<{ balanceSen: number } | { 
   }
 }
 
+/* ---- Campaigns ---------------------------------------------------------- */
+
+export type SegmentInput = {
+  buyersOnly?: boolean;
+  minSpentSen?: number;
+  activeWithinDays?: number;
+  inactiveForDays?: number;
+};
+
+/** Audience size for the composer, so staff see who they are about to mail. */
+export async function previewAudience(
+  segment: SegmentInput,
+): Promise<{ count: number; sample: string[] } | { error: string }> {
+  try { await assertStaff(); } catch { return { error: "Not authorized." }; }
+  try {
+    const { resolveAudience } = await import("@/lib/messaging/audience");
+    const list = await resolveAudience(segment);
+    return { count: list.length, sample: list.slice(0, 5).map((r) => r.email) };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not resolve the audience." };
+  }
+}
+
+export async function saveCampaign(input: {
+  id?: string; name: string; subject: string; body: string; segment: SegmentInput;
+}): Promise<ActionResult & { id?: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!input.name.trim()) return { error: "Give the campaign a name." };
+  if (!input.body.trim()) return { error: "The message body can't be empty." };
+
+  const row = {
+    name: input.name.trim(),
+    subject: input.subject.trim() || input.name.trim(),
+    body: input.body,
+    segment: input.segment,
+    channel: "email" as const,
+  };
+
+  const { data, error } = input.id
+    ? await db.from("campaigns").update(row).eq("id", input.id).select("id").single()
+    : await db.from("campaigns").insert(row).select("id").single();
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: input.id ? "campaign.updated" : "campaign.created",
+    entityType: "campaign", entityId: data.id as string,
+    summary: `Campaign "${row.name}" ${input.id ? "updated" : "created"}`,
+    meta: { segment: input.segment },
+  });
+
+  revalidatePath("/admin/campaigns");
+  return { ok: true, id: data.id as string };
+}
+
+/*
+  Sends a campaign. This mails real customers, so it is deliberately a separate,
+  explicit action from saving — and the underlying pipeline claims the campaign
+  (draft -> sending) before the first message, so a double click cannot mail the
+  whole list twice.
+*/
+export async function sendCampaignNow(
+  campaignId: string,
+): Promise<ActionResult & { report?: { total: number; sent: number; failed: number } }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { sendCampaign } = await import("@/lib/messaging/send");
+  const result = await sendCampaign(campaignId);
+  if ("error" in result) return { error: result.error };
+
+  await logAudit(db, {
+    action: "campaign.sent", entityType: "campaign", entityId: campaignId,
+    summary: `Campaign sent — ${result.sent} delivered, ${result.failed} failed of ${result.total}`,
+    meta: { ...result },
+  });
+
+  revalidatePath("/admin/campaigns");
+  return { ok: true, report: result };
+}
+
+export async function deleteCampaign(id: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const { error } = await db.from("campaigns").delete().eq("id", id).eq("status", "draft");
+  if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "campaign.deleted", entityType: "campaign", entityId: id,
+    summary: "Draft campaign deleted",
+  });
+  revalidatePath("/admin/campaigns");
+  return { ok: true };
+}
+
 /* ---- Shipments ---------------------------------------------------------- */
 
 const SHIPMENT_STATUSES = new Set([
