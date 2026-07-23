@@ -366,3 +366,24 @@ export async function fetchMyOrders(): Promise<
     }[],
   }));
 }
+
+/*
+  Awards Kalima Club points for a completed order.
+
+  Called when an order reaches 'completed' — the shipping webhook on delivery,
+  or a manual status change. Earning on completion rather than payment means
+  points for goods still inside the return window are never handed out and then
+  clawed back. Idempotent at the database level, so a replayed delivery push is
+  harmless.
+*/
+export async function awardLoyaltyPoints(orderId: string): Promise<void> {
+  const { error } = await admin().rpc("award_loyalty_points", { p_order_id: orderId });
+  // Loyalty is bookkeeping on top of the sale — never fail the sale for it.
+  if (error) console.error("awardLoyaltyPoints failed:", error.message);
+}
+
+/** Reverses an order's points when it is refunded. Idempotent. */
+export async function revokeLoyaltyPoints(orderId: string): Promise<void> {
+  const { error } = await admin().rpc("revoke_loyalty_points", { p_order_id: orderId });
+  if (error) console.error("revokeLoyaltyPoints failed:", error.message);
+}
