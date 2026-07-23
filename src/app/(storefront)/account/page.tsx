@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { getCurrentUser } from "@/lib/auth";
 import { fetchMyOrders } from "@/lib/commerce";
+import { courierName, trackingLink } from "@/lib/couriers";
 import { signOut } from "@/app/auth/actions";
 import ChangePasswordForm from "@/components/account/ChangePasswordForm";
 
@@ -169,6 +170,14 @@ export default async function AccountPage({
                 .map((i) => `${i.product_name} (${i.size}) × ${i.qty}`)
                 .join(", ");
               const delivered = o.status === "completed" || o.status === "fulfilled";
+              // The first parcel with a usable tracking link — customers care
+              // about "where is it", not about our shipment rows.
+              const tracked = o.shipments
+                .map((sh) => ({
+                  ...sh,
+                  href: trackingLink(sh.courier, sh.tracking_no, sh.tracking_url),
+                }))
+                .find((sh) => sh.href);
               return (
                 <div key={o.reference} className="flex flex-wrap items-center justify-between gap-4 border border-navy/10 bg-white px-5 py-4">
                   <div>
@@ -177,6 +186,22 @@ export default async function AccountPage({
                       {new Date(o.created_at).toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" })}
                       {itemsLine && ` · ${itemsLine}`}
                     </p>
+                    {tracked && (
+                      <p className="mt-1 text-[12px] tracking-wide">
+                        <a
+                          href={tracked.href as string}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-navy underline underline-offset-2 hover:text-navy-400"
+                        >
+                          Track parcel
+                        </a>
+                        <span className="text-navy-400">
+                          {" "}· {courierName(tracked.courier) ?? "Courier"}
+                          {tracked.tracking_no ? ` ${tracked.tracking_no}` : ""}
+                        </span>
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-6">
                     <span className="text-[14px] text-navy">{formatRM(o.total_sen / 100)}</span>

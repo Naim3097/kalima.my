@@ -175,6 +175,129 @@ export async function refundOrder(input: {
   return { ok: true };
 }
 
+/*
+  Parcel weight for a variant, in grams.
+
+  Courier rates are priced on weight, so this is a prerequisite for any live
+  rate quote. It was previously reachable only through the CSV import, which
+  made it invisible to anyone editing a single product.
+*/
+export async function setVariantWeight(
+  variantId: string, weightGrams: number, productSlug: string,
+): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!Number.isInteger(weightGrams) || weightGrams < 0) {
+    return { error: "Weight must be a whole number of grams, 0 or more." };
+  }
+
+  const { error } = await db
+    .from("product_variants").update({ weight_grams: weightGrams }).eq("id", variantId);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "variant.weight_set", entityType: "variant", entityId: variantId,
+    summary: `Variant weight set to ${weightGrams} g on ${productSlug}`,
+    meta: { weightGrams, productSlug },
+  });
+
+  revalidateProduct(productSlug);
+  return { ok: true };
+}
+
+/* ---- Shipments ---------------------------------------------------------- */
+
+const SHIPMENT_STATUSES = new Set([
+  "pending", "booked", "in_transit", "delivered", "returned", "cancelled",
+]);
+
+/*
+  Records a parcel against an order.
+
+  Provider is 'manual' — a counter-dropped parcel — until EasyParcel's API is
+  wired, at which point a booking writes the same row with provider set and a
+  label URL attached. Marking a shipment as sent also moves the order to
+  'fulfilled', because in practice those are one action for the packer.
+*/
+export async function saveShipment(input: {
+  reference: string;
+  id?: string;
+  courier: string;
+  trackingNo: string;
+  status: string;
+  weightGrams: number;
+  costSen: number;
+  notes: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!SHIPMENT_STATUSES.has(input.status)) return { error: "Unknown shipment status." };
+  if (input.weightGrams < 0 || input.costSen < 0) return { error: "Weight and cost can't be negative." };
+
+  const { data: order, error: readErr } = await db
+    .from("orders").select("id, status").eq("reference", input.reference).maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!order) return { error: "Order not found." };
+
+  const shipped = ["booked", "in_transit", "delivered"].includes(input.status);
+  const row = {
+    order_id: order.id as string,
+    courier: input.courier.trim() || null,
+    tracking_no: input.trackingNo.trim() || null,
+    status: input.status,
+    weight_grams: input.weightGrams,
+    cost_sen: input.costSen,
+    notes: input.notes.trim() || null,
+    shipped_at: shipped ? new Date().toISOString() : null,
+    delivered_at: input.status === "delivered" ? new Date().toISOString() : null,
+  };
+
+  const { error } = input.id
+    ? await db.from("shipments").update(row).eq("id", input.id)
+    : await db.from("shipments").insert(row);
+  if (error) return { error: error.message };
+
+  // Dispatching a parcel and fulfilling the order are one action in practice.
+  if (shipped && order.status === "paid") {
+    await db.from("orders").update({ status: "fulfilled" }).eq("id", order.id as string);
+  }
+
+  await logAudit(db, {
+    action: input.id ? "shipment.updated" : "shipment.created",
+    entityType: "order",
+    entityId: input.reference,
+    summary:
+      `Shipment ${input.id ? "updated" : "added"} for ${input.reference}` +
+      `${input.trackingNo.trim() ? ` — ${input.courier} ${input.trackingNo.trim()}` : ""}` +
+      ` (${input.status})`,
+    meta: { courier: input.courier, trackingNo: input.trackingNo, status: input.status },
+  });
+
+  revalidatePath("/admin/orders");
+  revalidatePath(`/admin/orders/${input.reference}`);
+  revalidatePath("/account");
+  return { ok: true };
+}
+
+export async function deleteShipment(id: string, reference: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { error } = await db.from("shipments").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "shipment.deleted", entityType: "order", entityId: reference,
+    summary: `Shipment removed from ${reference}`, meta: { shipmentId: id },
+  });
+
+  revalidatePath(`/admin/orders/${reference}`);
+  revalidatePath("/account");
+  return { ok: true };
+}
+
 /* ---- Discounts ---------------------------------------------------------- */
 
 export async function saveDiscount(input: {

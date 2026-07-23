@@ -3,9 +3,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Card, CardHeader, Pill, Table, Td, Tr } from "@/components/admin/ui";
 import { RefundPanel } from "@/components/admin/RefundPanel";
+import { ShipmentPanel } from "@/components/admin/ShipmentPanel";
 import StatusUpdater from "@/components/admin/StatusUpdater";
 import { Button } from "@/components/ui/button";
-import { getOrder } from "@/lib/admin";
+import { getOrder, getOrderWeightGrams, listShipments } from "@/lib/admin";
 import { formatRM } from "@/lib/format";
 
 const dateFmt = new Intl.DateTimeFormat("en-MY", {
@@ -40,7 +41,11 @@ export default async function AdminOrderDetailPage({
   params: Promise<{ reference: string }>;
 }) {
   const { reference } = await params;
-  const order = await getOrder(reference);
+  const [order, shipments, weightGrams] = await Promise.all([
+    getOrder(reference),
+    listShipments(reference),
+    getOrderWeightGrams(reference),
+  ]);
   if (!order) notFound();
 
   const addr = order.shippingAddress ?? {};
@@ -78,6 +83,12 @@ export default async function AdminOrderDetailPage({
           <StatusUpdater reference={order.reference} status={order.status} />
         </div>
       </Card>
+
+      <ShipmentPanel
+        reference={order.reference}
+        shipments={shipments}
+        suggestedWeightGrams={weightGrams}
+      />
 
       <RefundPanel
         reference={order.reference}
