@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getPaymentProvider } from "@/lib/payments";
-import { markOrderPaid, refundOrderFromWebhook, resolveWebhookOrder } from "@/lib/commerce";
+import {
+  attributeReferral,
+  markOrderPaid,
+  refundOrderFromWebhook,
+  resolveWebhookOrder,
+} from "@/lib/commerce";
 import { sendPaymentConfirmedEmail } from "@/lib/email";
 
 /*
@@ -77,6 +82,8 @@ export async function POST(request: Request) {
   // Side effects exactly once — only on the transition to paid, not on retries.
   if (outcome.status === "paid") {
     await sendPaymentConfirmedEmail(order.reference, order.email).catch(() => {});
+    // Affiliate commission accrues on a settled sale, not on a placed order.
+    await attributeReferral(order.id);
   }
 
   return NextResponse.json({ received: true });

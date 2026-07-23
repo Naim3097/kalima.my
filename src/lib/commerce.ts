@@ -1,5 +1,7 @@
 import "server-only";
 
+import { cookies } from "next/headers";
+
 import { createAdminClient, createClient } from "@/lib/supabase/server";
 
 /*
@@ -148,7 +150,26 @@ export async function createOrder(params: {
     p_discount_code: params.discountCode ?? null,
   });
   if (error) throw new Error(`createOrder failed: ${error.message}`);
-  return data as CreateOrderResult;
+  const result = data as CreateOrderResult;
+
+  /*
+    Stamp the affiliate referral slug from the ?ref cookie the proxy set.
+
+    Done as a follow-up update rather than a create_order parameter so the money
+    function's signature stays untouched — attribution is bookkeeping layered on
+    top of the sale, and must never be able to fail the sale itself.
+  */
+  try {
+    const jar = await cookies();
+    const ref = jar.get("kalima_ref")?.value;
+    if (ref) {
+      await admin().from("orders").update({ affiliate_ref: ref }).eq("id", result.order_id);
+    }
+  } catch {
+    // An unattributed order is a bookkeeping loss, not a failed checkout.
+  }
+
+  return result;
 }
 
 /** Guest-safe order lookup for the confirmation page (email must match). */
@@ -185,6 +206,20 @@ export async function markOrderPaid(params: {
   });
   if (error) throw new Error(`markOrderPaid failed: ${error.message}`);
   return data as { status: string; reference: string };
+}
+
+/*
+  Records affiliate commission for an order that has just become paid.
+
+  Called after markOrderPaid, never at checkout — an abandoned or failed order
+  must not earn anyone a commission. The underlying function is idempotent and
+  carries the fraud guards (self-purchase, one-per-order, approved-only), so a
+  retried webhook is harmless.
+*/
+export async function attributeReferral(orderId: string): Promise<void> {
+  const { error } = await admin().rpc("attribute_referral", { p_order_id: orderId });
+  // Commission bookkeeping must never break a payment confirmation.
+  if (error) console.error("attributeReferral failed:", error.message);
 }
 
 /*
