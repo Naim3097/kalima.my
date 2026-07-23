@@ -44,6 +44,42 @@ async function assertStaff() {
 
 export type ActionResult = { ok: true } | { error: string };
 
+/*
+  Appends one row to the audit trail. getCurrentUser is cache()-wrapped, so
+  resolving the actor here costs nothing on top of the assertStaff call the
+  action already made.
+
+  Logging must never break the mutation it describes: a failure here is
+  swallowed, because refusing a legitimate edit over a bookkeeping error is the
+  worse outcome. Call this only AFTER the write succeeds, so the trail records
+  what actually happened rather than what was attempted.
+*/
+async function logAudit(
+  db: ReturnType<typeof createAdminClient>,
+  entry: {
+    action: string;
+    entityType: string;
+    entityId?: string | null;
+    summary: string;
+    meta?: Record<string, unknown>;
+  },
+): Promise<void> {
+  try {
+    const current = await getCurrentUser();
+    await db?.from("admin_audit_log").insert({
+      actor_id: current?.user.id ?? null,
+      actor_email: current?.user.email ?? null,
+      action: entry.action,
+      entity_type: entry.entityType,
+      entity_id: entry.entityId ?? null,
+      summary: entry.summary,
+      meta: entry.meta ?? null,
+    });
+  } catch {
+    // Deliberately ignored — see above.
+  }
+}
+
 // Statuses staff may set by hand. 'paid' is deliberately excluded — that
 // transition belongs to the payment webhook only.
 const SETTABLE = new Set(["fulfilled", "completed", "cancelled", "refunded"]);
@@ -62,6 +98,14 @@ export async function updateOrderStatus(reference: string, status: string): Prom
 
   const { error } = await db.from("orders").update(patch).eq("reference", reference);
   if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "order.status_changed",
+    entityType: "order",
+    entityId: reference,
+    summary: `Order ${reference} marked ${status}`,
+    meta: { status },
+  });
 
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${reference}`);
@@ -112,6 +156,14 @@ export async function saveDiscount(input: {
     return { error: error.message.includes("unique") ? "That code already exists." : error.message };
   }
 
+  await logAudit(db, {
+    action: input.id ? "discount.updated" : "discount.created",
+    entityType: "discount",
+    entityId: input.id ?? code,
+    summary: `Discount ${code} ${input.id ? "updated" : "created"}`,
+    meta: { ...row },
+  });
+
   revalidatePath("/admin/discounts");
   return { ok: true };
 }
@@ -123,8 +175,18 @@ export async function toggleDiscount(id: string, active: boolean): Promise<Actio
   } catch {
     return { error: "Not authorized." };
   }
-  const { error } = await db.from("discount_codes").update({ active }).eq("id", id);
+  const { data, error } = await db
+    .from("discount_codes").update({ active }).eq("id", id).select("code").single();
   if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "discount.toggled",
+    entityType: "discount",
+    entityId: id,
+    summary: `Discount ${data?.code ?? id} ${active ? "enabled" : "disabled"}`,
+    meta: { active },
+  });
+
   revalidatePath("/admin/discounts");
   return { ok: true };
 }
@@ -177,6 +239,15 @@ export async function saveProduct(input: ProductInput): Promise<ActionResult & {
   if (error) {
     return { error: error.message.includes("unique") ? "That slug is already in use." : error.message };
   }
+
+  await logAudit(db, {
+    action: input.id ? "product.updated" : "product.created",
+    entityType: "product",
+    entityId: slug,
+    summary: `Product "${name}" ${input.id ? "updated" : "created"}`,
+    meta: { priceSen: input.priceSen, published: input.published },
+  });
+
   revalidateProduct(slug);
   return { ok: true, slug };
 }
@@ -217,6 +288,14 @@ export async function addVariant(input: {
     if (adjErr) return { error: adjErr.message };
   }
 
+  await logAudit(db, {
+    action: "variant.created",
+    entityType: "variant",
+    entityId: sku,
+    summary: `Variant ${sku} (${input.colorName} / ${input.size}) added to ${input.productSlug}`,
+    meta: { productSlug: input.productSlug, initialStock: input.initialStock },
+  });
+
   revalidateProduct(input.productSlug);
   return { ok: true };
 }
@@ -225,6 +304,10 @@ export async function deleteVariant(id: string, productSlug: string): Promise<Ac
   let db;
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
 
+  // Read the SKU first — after the delete there is nothing left to name it by.
+  const { data: existing } = await db
+    .from("product_variants").select("sku").eq("id", id).maybeSingle();
+
   // A variant that appears in an order is FK-restricted — surface that clearly.
   const { error } = await db.from("product_variants").delete().eq("id", id);
   if (error) {
@@ -232,6 +315,15 @@ export async function deleteVariant(id: string, productSlug: string): Promise<Ac
       ? "Can't delete a variant that appears in an order."
       : error.message };
   }
+
+  await logAudit(db, {
+    action: "variant.deleted",
+    entityType: "variant",
+    entityId: (existing?.sku as string | undefined) ?? id,
+    summary: `Variant ${existing?.sku ?? id} deleted from ${productSlug}`,
+    meta: { productSlug },
+  });
+
   revalidateProduct(productSlug);
   return { ok: true };
 }
@@ -250,6 +342,15 @@ export async function adjustStock(
   if (error) {
     return { error: error.message.includes("below zero") ? "That would take stock below zero." : error.message };
   }
+
+  await logAudit(db, {
+    action: "stock.adjusted",
+    entityType: "variant",
+    entityId: variantId,
+    summary: `Stock ${delta > 0 ? "+" : ""}${delta} on ${productSlug} → ${data as number} (${reason || "no reason given"})`,
+    meta: { delta, reason, newStock: data as number, productSlug },
+  });
+
   revalidateProduct(productSlug);
   return { ok: true, newStock: data as number };
 }
@@ -499,6 +600,17 @@ export async function importCatalogCsv(
     revalidateProduct(slug);
   }
 
+  await logAudit(db, {
+    action: "catalog.imported",
+    entityType: "catalog",
+    entityId: null,
+    summary:
+      `CSV import — ${summary.productsCreated} products added, ${summary.productsUpdated} updated, ` +
+      `${summary.variantsCreated} variants added, ${summary.variantsUpdated} updated, ` +
+      `${summary.stockAdjusted} stock adjustments`,
+    meta: { ...summary },
+  });
+
   return { ok: true, summary };
 }
 
@@ -568,6 +680,11 @@ export async function attachProductImage(input: {
   });
   if (error) return { error: error.message };
 
+  await logAudit(db, {
+    action: "image.added", entityType: "product", entityId: input.productSlug,
+    summary: `Image added to ${input.productSlug}`, meta: { path: input.path },
+  });
+
   revalidateProduct(input.productSlug);
   return { ok: true };
 }
@@ -584,6 +701,12 @@ export async function updateProductImage(input: {
     .update({ alt: input.alt?.trim() || null, color_name: input.colorName?.trim() || null })
     .eq("id", input.imageId);
   if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "image.updated", entityType: "product", entityId: input.productSlug,
+    summary: `Image details updated on ${input.productSlug}`,
+    meta: { imageId: input.imageId, colorName: input.colorName ?? null },
+  });
 
   revalidateProduct(input.productSlug);
   return { ok: true };
@@ -610,6 +733,11 @@ export async function deleteProductImage(
   const path = row?.storage_path as string | null | undefined;
   if (path) await db.storage.from(IMAGE_BUCKET).remove([path]).catch(() => {});
 
+  await logAudit(db, {
+    action: "image.deleted", entityType: "product", entityId: productSlug,
+    summary: `Image removed from ${productSlug}`, meta: { imageId, path },
+  });
+
   revalidateProduct(productSlug);
   return { ok: true };
 }
@@ -630,6 +758,11 @@ export async function reorderProductImages(
   );
   const failed = results.find((r) => r.error);
   if (failed?.error) return { error: failed.error.message };
+
+  await logAudit(db, {
+    action: "image.reordered", entityType: "product", entityId: productSlug,
+    summary: `Image order changed on ${productSlug}`, meta: { count: orderedIds.length },
+  });
 
   revalidateProduct(productSlug);
   return { ok: true };
@@ -654,6 +787,12 @@ export async function saveAnnouncement(input: {
     ? await db.from("announcements").update(row).eq("id", input.id)
     : await db.from("announcements").insert(row);
   if (error) return { error: error.message };
+  await logAudit(db, {
+    action: input.id ? "announcement.updated" : "announcement.created",
+    entityType: "cms", entityId: input.id ?? null,
+    summary: `Announcement ${input.id ? "updated" : "created"}: "${row.text}"`,
+    meta: { active: input.active },
+  });
   revalidatePath("/admin/cms");
   revalidateStorefront();
   return { ok: true };
@@ -664,6 +803,10 @@ export async function deleteAnnouncement(id: string): Promise<ActionResult> {
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
   const { error } = await db.from("announcements").delete().eq("id", id);
   if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "announcement.deleted", entityType: "cms", entityId: id,
+    summary: "Announcement deleted",
+  });
   revalidatePath("/admin/cms");
   revalidateStorefront();
   return { ok: true };
@@ -696,6 +839,12 @@ export async function saveHeroSlide(input: {
     ? await db.from("hero_slides").update(row).eq("id", input.id)
     : await db.from("hero_slides").insert(row);
   if (error) return { error: error.message };
+  await logAudit(db, {
+    action: input.id ? "hero_slide.updated" : "hero_slide.created",
+    entityType: "cms", entityId: input.id ?? null,
+    summary: `Hero slide ${input.id ? "updated" : "created"}: "${row.title}"`,
+    meta: { active: input.active },
+  });
   revalidatePath("/admin/cms");
   revalidateStorefront();
   return { ok: true };
@@ -706,6 +855,10 @@ export async function deleteHeroSlide(id: string): Promise<ActionResult> {
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
   const { error } = await db.from("hero_slides").delete().eq("id", id);
   if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "hero_slide.deleted", entityType: "cms", entityId: id,
+    summary: "Hero slide deleted",
+  });
   revalidatePath("/admin/cms");
   revalidateStorefront();
   return { ok: true };
@@ -728,6 +881,12 @@ export async function saveContentPage(input: {
   if (error) {
     return { error: error.message.includes("unique") ? "That slug is already in use." : error.message };
   }
+  await logAudit(db, {
+    action: input.id ? "page.updated" : "page.created",
+    entityType: "cms", entityId: slug,
+    summary: `Content page "${row.title}" ${input.id ? "updated" : "created"}`,
+    meta: { published: input.published },
+  });
   revalidatePath("/admin/cms");
   revalidatePath(`/pages/${slug}`);
   return { ok: true, slug };
@@ -761,6 +920,14 @@ export async function saveSettings(input: {
   }).eq("id", 1);
 
   if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "settings.updated", entityType: "settings", entityId: "store",
+    summary: "Store settings updated",
+    meta: {
+      freeShippingThresholdSen: input.freeShippingThresholdSen,
+      flatShippingSen: input.flatShippingSen, taxRateBps: input.taxRateBps,
+    },
+  });
   revalidatePath("/admin/settings");
   revalidatePath("/", "layout"); // storefront reads shipping threshold for display
   return { ok: true };
@@ -784,6 +951,10 @@ export async function setUserRole(userId: string, role: string): Promise<ActionR
   // propagates to the user's JWT claim on their next refresh.
   const { error } = await db.from("profiles").update({ role }).eq("id", userId);
   if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "user.role_changed", entityType: "user", entityId: userId,
+    summary: `Role changed to ${role}`, meta: { role },
+  });
   revalidatePath("/admin/staff");
   return { ok: true };
 }
@@ -797,6 +968,10 @@ export async function addRoleGrant(email: string, role: string): Promise<ActionR
 
   const { error } = await db.from("role_grants").upsert({ email: clean, role }, { onConflict: "email" });
   if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "role_grant.added", entityType: "user", entityId: clean,
+    summary: `${clean} pre-authorised as ${role}`, meta: { role },
+  });
   revalidatePath("/admin/staff");
   return { ok: true };
 }
@@ -806,6 +981,10 @@ export async function removeRoleGrant(email: string): Promise<ActionResult> {
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
   const { error } = await db.from("role_grants").delete().eq("email", email);
   if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "role_grant.removed", entityType: "user", entityId: email,
+    summary: `${email} removed from the access allowlist`,
+  });
   revalidatePath("/admin/staff");
   return { ok: true };
 }

@@ -397,3 +397,58 @@ export async function listDiscounts(): Promise<DiscountRow[]> {
     maxRedemptions: d.max_redemptions, redeemedCount: d.redeemed_count, active: d.active, endsAt: d.ends_at,
   }));
 }
+
+/* ---- Audit log ---------------------------------------------------------- */
+
+export type AuditEntry = {
+  id: string;
+  actorEmail: string | null;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+  summary: string;
+  createdAt: string;
+};
+
+export type AuditFilters = { entityType?: string; actorEmail?: string };
+
+/*
+  The back-office trail, newest first. Capped at 200 rows — this is a "what
+  just happened" screen, not an archive; the table itself keeps everything.
+*/
+export async function listAuditLog(filters: AuditFilters = {}): Promise<AuditEntry[]> {
+  let q = db()
+    .from("admin_audit_log")
+    .select("id, actor_email, action, entity_type, entity_id, summary, created_at")
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (filters.entityType) q = q.eq("entity_type", filters.entityType);
+  if (filters.actorEmail) q = q.eq("actor_email", filters.actorEmail);
+
+  const { data, error } = await q;
+  if (error) throw new Error(`listAuditLog failed: ${error.message}`);
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    actorEmail: r.actor_email,
+    action: r.action,
+    entityType: r.entity_type,
+    entityId: r.entity_id,
+    summary: r.summary,
+    createdAt: r.created_at,
+  }));
+}
+
+/** Distinct entity types and actors present in the log, for the filter chips. */
+export async function getAuditFacets(): Promise<{ entityTypes: string[]; actors: string[] }> {
+  const { data, error } = await db()
+    .from("admin_audit_log")
+    .select("entity_type, actor_email")
+    .order("created_at", { ascending: false })
+    .limit(1000);
+  if (error) throw new Error(`getAuditFacets failed: ${error.message}`);
+  return {
+    entityTypes: [...new Set((data ?? []).map((r) => r.entity_type as string))].sort(),
+    actors: [...new Set((data ?? []).map((r) => r.actor_email as string).filter(Boolean))].sort(),
+  };
+}
