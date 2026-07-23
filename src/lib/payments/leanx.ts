@@ -130,9 +130,9 @@ async function fetchServices(paymentType: "WEB_PAYMENT" | "DIGITAL_PAYMENT"): Pr
   const kind = paymentType === "WEB_PAYMENT" ? "fpx" : "ewallet";
   const parsed = parseServices(json, paymentType);
   // TEMP diagnostic — confirm the live service-object shape, then remove.
-  if (process.env.LEANX_DEBUG_SERVICES === "1") {
+  {
     const sample = (json?.data as unknown) ?? json;
-    console.log(`[leanx] ${paymentType} raw sample:`, JSON.stringify(sample).slice(0, 1200));
+    console.log(`[leanx] ${paymentType} raw sample:`, JSON.stringify(sample).slice(0, 1500));
     console.log(`[leanx] ${paymentType} parsed[0]:`, JSON.stringify(parsed[0] ?? null));
   }
   return parsed.map((s) => ({ ...s, kind }));
