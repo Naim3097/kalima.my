@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPaymentProvider } from "@/lib/payments";
-import { markOrderPaid, resolveWebhookOrder } from "@/lib/commerce";
+import { markOrderPaid, refundOrderFromWebhook, resolveWebhookOrder } from "@/lib/commerce";
 import { sendPaymentConfirmedEmail } from "@/lib/email";
 
 /*
@@ -29,6 +29,25 @@ export async function POST(request: Request) {
   } catch {
     // Bad signature or malformed payload — do not leak details, do not process.
     return NextResponse.json({ error: "Invalid webhook" }, { status: 401 });
+  }
+
+  // A refund raised in the LeanX dashboard arrives here as a `refunded` event.
+  // It must be acted on, not just acknowledged: the goods have to go back to
+  // stock. refund_order is idempotent, so retries are harmless.
+  if (result.status === "refunded") {
+    const target = await resolveWebhookOrder(result.providerRef, result.orderReference);
+    if (!target) return NextResponse.json({ received: true, note: "order not found" });
+    try {
+      const outcome = await refundOrderFromWebhook({
+        orderId: target.id,
+        amountSen: result.amountSen ?? target.total_sen,
+        reason: "gateway refund",
+      });
+      return NextResponse.json({ received: true, status: outcome.status });
+    } catch {
+      // Never 500 at a gateway: that just triggers an endless retry storm.
+      return NextResponse.json({ received: true, note: "refund could not be applied" });
+    }
   }
 
   if (!result.paid) {

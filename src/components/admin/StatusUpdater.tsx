@@ -6,9 +6,15 @@ import { updateOrderStatus } from "@/app/admin/actions";
 import type { OrderStatus } from "@/lib/admin";
 
 /*
-  Manual status controls for an order. 'paid' is never offered here — that
-  transition belongs to the payment webhook. The action revalidates the page,
-  so a successful update refreshes the detail view on its own.
+  Manual status controls for an order. Two transitions are deliberately absent:
+
+  - 'paid' belongs to the payment webhook.
+  - 'refunded' belongs to the Refund panel, which returns the goods to stock
+    through the ledger. Offering it here as a bare status flip meant a refund
+    silently left inventory understated forever.
+
+  The action revalidates the page, so a successful update refreshes the detail
+  view on its own.
 */
 
 type Action = { label: string; status: OrderStatus; variant?: "kalima" | "kalimaOutline" };
@@ -17,8 +23,6 @@ function actionsFor(status: OrderStatus): Action[] {
   const out: Action[] = [];
   if (status === "paid") out.push({ label: "Mark fulfilled", status: "fulfilled", variant: "kalima" });
   if (status === "fulfilled") out.push({ label: "Mark completed", status: "completed", variant: "kalima" });
-  if (["paid", "fulfilled", "completed"].includes(status))
-    out.push({ label: "Mark refunded", status: "refunded", variant: "kalimaOutline" });
   if (!["completed", "cancelled", "refunded"].includes(status))
     out.push({ label: "Cancel order", status: "cancelled", variant: "kalimaOutline" });
   return out;

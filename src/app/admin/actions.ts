@@ -80,9 +80,11 @@ async function logAudit(
   }
 }
 
-// Statuses staff may set by hand. 'paid' is deliberately excluded — that
-// transition belongs to the payment webhook only.
-const SETTABLE = new Set(["fulfilled", "completed", "cancelled", "refunded"]);
+// Statuses staff may set by hand. Two are deliberately excluded: 'paid'
+// belongs to the payment webhook, and 'refunded' belongs to refundOrder, which
+// also returns the goods to stock. Allowing it here made a refund a bare label
+// change that left inventory permanently understated.
+const SETTABLE = new Set(["fulfilled", "completed", "cancelled"]);
 
 export async function updateOrderStatus(reference: string, status: string): Promise<ActionResult> {
   if (!SETTABLE.has(status)) return { error: "That status can't be set manually." };
@@ -109,6 +111,67 @@ export async function updateOrderStatus(reference: string, status: string): Prom
 
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${reference}`);
+  return { ok: true };
+}
+
+/*
+  Records a refund and returns the goods to stock.
+
+  The MONEY is moved in the LeanX dashboard — LeanX publishes no refund API, so
+  nothing here can move it for you. This records what happened on our side:
+  status, refunded amount, payment row, and the stock coming back through the
+  ledger. If LeanX later pushes a `refunded` webhook for the same order, the
+  underlying function is idempotent and will not restock twice.
+*/
+export async function refundOrder(input: {
+  reference: string;
+  amountSen: number;
+  restock: boolean;
+  reason: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: order, error: readErr } = await db
+    .from("orders").select("id, total_sen, status").eq("reference", input.reference).maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!order) return { error: "Order not found." };
+
+  if (!Number.isInteger(input.amountSen) || input.amountSen <= 0) {
+    return { error: "Enter a refund amount greater than zero." };
+  }
+  if (input.amountSen > (order.total_sen as number)) {
+    return { error: "Refund can't exceed the order total." };
+  }
+
+  const { data, error } = await db.rpc("refund_order", {
+    p_order_id: order.id as string,
+    p_amount_sen: input.amountSen,
+    p_restock: input.restock,
+    p_reason: input.reason,
+  });
+  if (error) {
+    return { error: error.message.includes("only a settled order")
+      ? "Only a paid or fulfilled order can be refunded."
+      : error.message };
+  }
+
+  const result = data as { status: string };
+  await logAudit(db, {
+    action: "order.refunded",
+    entityType: "order",
+    entityId: input.reference,
+    summary: result.status === "already_refunded"
+      ? `Order ${input.reference} was already refunded — no change`
+      : `Order ${input.reference} refunded ${(input.amountSen / 100).toFixed(2)} MYR` +
+        `${input.restock ? " (stock returned)" : " (stock not returned)"}` +
+        `${input.reason.trim() ? ` — ${input.reason.trim()}` : ""}`,
+    meta: { amountSen: input.amountSen, restock: input.restock, reason: input.reason, result: result.status },
+  });
+
+  revalidatePath("/admin/orders");
+  revalidatePath(`/admin/orders/${input.reference}`);
+  revalidateProduct(); // stock changed, so the storefront catalog is stale
   return { ok: true };
 }
 

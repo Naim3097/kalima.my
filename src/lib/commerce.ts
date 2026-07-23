@@ -188,6 +188,28 @@ export async function markOrderPaid(params: {
 }
 
 /*
+  Applies a gateway-initiated refund (the merchant refunded in the LeanX
+  dashboard and LeanX pushed a `refunded` webhook). Returns the goods to stock
+  through the ledger and flips the order, exactly as the admin action does.
+
+  Idempotent at the database level, so LeanX's retries are harmless.
+*/
+export async function refundOrderFromWebhook(params: {
+  orderId: string;
+  amountSen: number;
+  reason?: string;
+}): Promise<{ status: string; reference: string }> {
+  const { data, error } = await admin().rpc("refund_order", {
+    p_order_id: params.orderId,
+    p_amount_sen: params.amountSen,
+    p_restock: true,
+    p_reason: params.reason ?? "gateway refund",
+  });
+  if (error) throw new Error(`refundOrderFromWebhook failed: ${error.message}`);
+  return data as { status: string; reference: string };
+}
+
+/*
   The order fields the payment step needs, gated by matching email (guest-safe).
   Returns null unless the order exists and belongs to that email.
 */
