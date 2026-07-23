@@ -37,7 +37,7 @@ const NAV_SECTIONS: { heading: string; items: { label: string; to: string; end?:
     items: [
       { label: "Broadcasts", to: "/admin/campaigns" },
       { label: "Affiliates", to: "/admin/affiliates" },
-      { label: "Kalima Club", to: "/admin/loyalty", badge: "③" },
+      { label: "Kalima Club", to: "/admin/loyalty" },
     ],
   },
   {

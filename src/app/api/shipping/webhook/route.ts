@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { awardLoyaltyPoints } from "@/lib/commerce";
 
 /*
   EasyParcel shipment status pushes.
@@ -93,10 +94,16 @@ export async function POST(request: Request) {
     // A delivered parcel completes the order — but never downgrade one that has
     // already been refunded or cancelled.
     if (mapped === "delivered") {
-      await db.from("orders")
+      const { data: completed } = await db.from("orders")
         .update({ status: "completed" })
         .eq("id", shipment.order_id as string)
-        .in("status", ["paid", "fulfilled"]);
+        .in("status", ["paid", "fulfilled"])
+        .select("id")
+        .maybeSingle();
+
+      // Points earn on completion, and only for an order this push actually
+      // completed — so a repeated delivery notice cannot re-award.
+      if (completed) await awardLoyaltyPoints(completed.id as string);
     }
 
     return NextResponse.json({ received: true, status: mapped ?? raw });
