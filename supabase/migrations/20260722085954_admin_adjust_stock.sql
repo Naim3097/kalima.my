@@ -3,8 +3,6 @@
   Every inventory change goes through the stock_movements ledger (§4.2) — never
   a bare update. Atomic + oversell-guarded; positive delta = restock, negative =
   correction. service_role only (called from a staff-gated server action).
-
-  The enum literal is cast explicitly because the function pins search_path=''.
 */
 create function public.adjust_stock(p_variant_id uuid, p_delta integer, p_reason text)
 returns integer
@@ -31,7 +29,7 @@ begin
   insert into public.stock_movements (product_variant_id, type, qty_delta, reason)
   values (
     p_variant_id,
-    (case when p_delta > 0 then 'restock' else 'adjustment' end)::public.stock_movement_type,
+    case when p_delta > 0 then 'restock' else 'adjustment' end,
     p_delta,
     coalesce(nullif(trim(p_reason), ''), 'manual adjustment')
   );
