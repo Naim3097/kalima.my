@@ -245,6 +245,139 @@ export async function adjustStock(
   return { ok: true, newStock: data as number };
 }
 
+/* ---- Product images ----------------------------------------------------- */
+
+const IMAGE_BUCKET = "product-images";
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/avif"]);
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+const EXT_BY_TYPE: Record<string, string> = {
+  "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/avif": "avif",
+};
+
+/*
+  Mints a short-lived signed upload URL so the browser PUTs the file straight
+  to Storage. Keeping the bytes out of the server action avoids the request
+  body limit entirely and means the browser never holds write credentials —
+  the token is scoped to this one object key.
+*/
+export async function createImageUploadUrl(
+  productId: string, contentType: string, sizeBytes: number,
+): Promise<{ path: string; token: string } | { error: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!ALLOWED_IMAGE_TYPES.has(contentType)) return { error: "Use a JPEG, PNG, WebP or AVIF image." };
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return { error: "That file looks empty." };
+  if (sizeBytes > MAX_IMAGE_BYTES) return { error: "Images must be 5 MB or smaller." };
+
+  // Random key — never trust the client's filename for the object path.
+  const path = `${productId}/${crypto.randomUUID()}.${EXT_BY_TYPE[contentType]}`;
+  const { data, error } = await db.storage.from(IMAGE_BUCKET).createSignedUploadUrl(path);
+  if (error) return { error: error.message };
+  return { path: data.path, token: data.token };
+}
+
+/*
+  Records an uploaded object as a product image. Called after the browser's
+  PUT succeeds; appends to the end of the current order.
+*/
+export async function attachProductImage(input: {
+  productId: string; productSlug: string; path: string;
+  alt?: string; colorName?: string | null;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  // Verify the object really exists before we point a row at it.
+  const { data: pub } = db.storage.from(IMAGE_BUCKET).getPublicUrl(input.path);
+  if (!pub?.publicUrl) return { error: "Could not resolve the uploaded image." };
+
+  const { data: last } = await db
+    .from("product_images")
+    .select("position")
+    .eq("product_id", input.productId)
+    .order("position", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { error } = await db.from("product_images").insert({
+    product_id: input.productId,
+    url: pub.publicUrl,
+    storage_path: input.path,
+    alt: input.alt?.trim() || null,
+    color_name: input.colorName?.trim() || null,
+    position: ((last?.position as number | undefined) ?? -1) + 1,
+  });
+  if (error) return { error: error.message };
+
+  revalidateProduct(input.productSlug);
+  return { ok: true };
+}
+
+/* Alt text / colour scope for an existing image. */
+export async function updateProductImage(input: {
+  imageId: string; productSlug: string; alt?: string; colorName?: string | null;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { error } = await db
+    .from("product_images")
+    .update({ alt: input.alt?.trim() || null, color_name: input.colorName?.trim() || null })
+    .eq("id", input.imageId);
+  if (error) return { error: error.message };
+
+  revalidateProduct(input.productSlug);
+  return { ok: true };
+}
+
+/* Removes the row and, when it came from Storage, the underlying file. */
+export async function deleteProductImage(
+  imageId: string, productSlug: string,
+): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: row, error: readErr } = await db
+    .from("product_images")
+    .select("storage_path")
+    .eq("id", imageId)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+
+  const { error } = await db.from("product_images").delete().eq("id", imageId);
+  if (error) return { error: error.message };
+
+  // Best-effort cleanup — a stranded object must never fail the delete.
+  const path = row?.storage_path as string | null | undefined;
+  if (path) await db.storage.from(IMAGE_BUCKET).remove([path]).catch(() => {});
+
+  revalidateProduct(productSlug);
+  return { ok: true };
+}
+
+/*
+  Persists a drag-sorted order. Position drives which shot is the hero (lowest
+  wins), so this is the ordering the storefront reads.
+*/
+export async function reorderProductImages(
+  orderedIds: string[], productSlug: string,
+): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  if (!orderedIds.length) return { ok: true };
+
+  const results = await Promise.all(
+    orderedIds.map((id, i) => db.from("product_images").update({ position: i }).eq("id", id)),
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) return { error: failed.error.message };
+
+  revalidateProduct(productSlug);
+  return { ok: true };
+}
+
 /* ---- CMS ---------------------------------------------------------------- */
 
 // Storefront surfaces the CMS drives — revalidated on every content edit.

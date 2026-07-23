@@ -331,21 +331,44 @@ export type EditVariant = {
   priceSen: number | null; stockOnHand: number; colorPosition: number; position: number;
 };
 
+/*
+  A product photo. `colorName` null = the product-level shot (the PLP/PDP hero,
+  lowest position wins); a colour scope makes it the swatch-click image for
+  that colourway. `path` is the storage object key, kept so the file can be
+  removed from the bucket when the row is deleted.
+*/
+export type EditImage = {
+  id: string; url: string; path: string | null; alt: string | null;
+  colorName: string | null; position: number;
+};
+
 export type ProductForEdit = {
   id: string; slug: string; name: string; description: string | null; fabric: string | null;
   category: "women" | "men" | "accessories"; priceSen: number;
   bestSeller: boolean; newArrival: boolean; tone: string; published: boolean;
   variants: EditVariant[];
+  images: EditImage[];
 };
 
 export async function getProductForEdit(slug: string): Promise<ProductForEdit | null> {
   const { data, error } = await db()
     .from("products")
-    .select("*, product_variants(id, sku, color_name, color_hex, size, price_sen, stock_on_hand, color_position, position)")
+    .select("*, product_variants(id, sku, color_name, color_hex, size, price_sen, stock_on_hand, color_position, position), product_images(id, url, storage_path, alt, color_name, position)")
     .eq("slug", slug)
     .maybeSingle();
   if (error) throw new Error(`getProductForEdit failed: ${error.message}`);
   if (!data) return null;
+
+  const images: EditImage[] = (data.product_images ?? [])
+    .map((i: Record<string, unknown>) => ({
+      id: i.id as string,
+      url: i.url as string,
+      path: (i.storage_path as string | null) ?? null,
+      alt: (i.alt as string | null) ?? null,
+      colorName: (i.color_name as string | null) ?? null,
+      position: i.position as number,
+    }))
+    .sort((a: EditImage, b: EditImage) => a.position - b.position);
 
   const variants = (data.product_variants ?? [])
     .map((v: Record<string, unknown>) => ({
@@ -359,7 +382,7 @@ export async function getProductForEdit(slug: string): Promise<ProductForEdit | 
   return {
     id: data.id, slug: data.slug, name: data.name, description: data.description, fabric: data.fabric,
     category: data.category, priceSen: data.price_sen, bestSeller: data.best_seller,
-    newArrival: data.new_arrival, tone: data.tone, published: data.published, variants,
+    newArrival: data.new_arrival, tone: data.tone, published: data.published, variants, images,
   };
 }
 
