@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { addVariant, adjustStock, deleteVariant } from "@/app/admin/actions";
+import { addVariant, adjustStock, deleteVariant, setVariantWeight } from "@/app/admin/actions";
 import { Card, CardHeader, Table, Td, Tr } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,7 +26,7 @@ export function VariantEditor({ productId, productSlug, variants }: Props) {
   return (
     <Card>
       <CardHeader title={`${variants.length} variants`} />
-      <Table head={["SKU", "Colour", "Size", "Price", "Stock", "Adjust stock", ""]}>
+      <Table head={["SKU", "Colour", "Size", "Price", "Weight (g)", "Stock", "Adjust stock", ""]}>
         {variants.map((v) => (
           <VariantRow key={v.id} variant={v} productSlug={productSlug} />
         ))}
@@ -40,6 +40,21 @@ function VariantRow({ variant, productSlug }: { variant: EditVariant; productSlu
   const [pending, startTransition] = useTransition();
   const [delta, setDelta] = useState("");
   const [reason, setReason] = useState("");
+
+  // Saved on blur — weight is a set-and-forget field, not worth a button.
+  function saveWeight(raw: string) {
+    const grams = Math.round(Number(raw));
+    if (!Number.isFinite(grams) || grams < 0) {
+      toast.error("Weight must be 0 or more grams.");
+      return;
+    }
+    if (grams === variant.weightGrams) return;
+    startTransition(async () => {
+      const res = await setVariantWeight(variant.id, grams, productSlug);
+      if ("error" in res) toast.error(res.error);
+      else toast.success(`Weight set to ${grams} g.`);
+    });
+  }
 
   function apply() {
     const d = Number(delta);
@@ -86,6 +101,18 @@ function VariantRow({ variant, productSlug }: { variant: EditVariant; productSlu
       <Td>{variant.size}</Td>
       <Td className="text-navy-400">
         {variant.priceSen != null ? formatRM(variant.priceSen / 100) : "base"}
+      </Td>
+      <Td>
+        {/* Courier rates price on weight, so this is editable inline. */}
+        <Input
+          type="number"
+          step={1}
+          min={0}
+          defaultValue={variant.weightGrams}
+          onBlur={(e) => saveWeight(e.target.value)}
+          className="h-8 w-20 text-[12px]"
+          aria-label={`Weight in grams for ${variant.sku}`}
+        />
       </Td>
       <Td className={variant.stockOnHand <= 10 ? "font-medium text-red-700" : ""}>
         {variant.stockOnHand}

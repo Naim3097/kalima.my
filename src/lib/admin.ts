@@ -331,7 +331,8 @@ export async function listContentPages(): Promise<AdminContentPage[]> {
 
 export type EditVariant = {
   id: string; sku: string; colorName: string; colorHex: string; size: string;
-  priceSen: number | null; stockOnHand: number; colorPosition: number; position: number;
+  priceSen: number | null; stockOnHand: number; weightGrams: number;
+  colorPosition: number; position: number;
 };
 
 /*
@@ -356,7 +357,7 @@ export type ProductForEdit = {
 export async function getProductForEdit(slug: string): Promise<ProductForEdit | null> {
   const { data, error } = await db()
     .from("products")
-    .select("*, product_variants(id, sku, color_name, color_hex, size, price_sen, stock_on_hand, color_position, position), product_images(id, url, storage_path, alt, color_name, position)")
+    .select("*, product_variants(id, sku, color_name, color_hex, size, price_sen, stock_on_hand, weight_grams, color_position, position), product_images(id, url, storage_path, alt, color_name, position)")
     .eq("slug", slug)
     .maybeSingle();
   if (error) throw new Error(`getProductForEdit failed: ${error.message}`);
@@ -378,6 +379,7 @@ export async function getProductForEdit(slug: string): Promise<ProductForEdit | 
       id: v.id as string, sku: v.sku as string, colorName: v.color_name as string,
       colorHex: v.color_hex as string, size: v.size as string,
       priceSen: (v.price_sen as number | null) ?? null, stockOnHand: v.stock_on_hand as number,
+      weightGrams: (v.weight_grams as number | null) ?? 0,
       colorPosition: v.color_position as number, position: v.position as number,
     }))
     .sort((a: EditVariant, b: EditVariant) => a.colorPosition - b.colorPosition || a.position - b.position);
@@ -503,4 +505,59 @@ export async function getOrdersForPacking(opts: {
         : null,
     };
   });
+}
+
+/* ---- Shipments ---------------------------------------------------------- */
+
+export type ShipmentStatus =
+  | "pending" | "booked" | "in_transit" | "delivered" | "returned" | "cancelled";
+
+export type Shipment = {
+  id: string;
+  provider: string;
+  courier: string | null;
+  trackingNo: string | null;
+  trackingUrl: string | null;
+  labelUrl: string | null;
+  status: ShipmentStatus;
+  weightGrams: number;
+  costSen: number;
+  notes: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+  createdAt: string;
+};
+
+export async function listShipments(orderReference: string): Promise<Shipment[]> {
+  const { data, error } = await db()
+    .from("shipments")
+    .select("*, orders!inner(reference)")
+    .eq("orders.reference", orderReference)
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(`listShipments failed: ${error.message}`);
+  return (data ?? []).map((s) => ({
+    id: s.id, provider: s.provider, courier: s.courier,
+    trackingNo: s.tracking_no, trackingUrl: s.tracking_url, labelUrl: s.label_url,
+    status: s.status, weightGrams: s.weight_grams, costSen: s.cost_sen,
+    notes: s.notes, shippedAt: s.shipped_at, deliveredAt: s.delivered_at,
+    createdAt: s.created_at,
+  }));
+}
+
+/*
+  Total parcel weight for an order, summed from the variant weights. This is
+  what a courier rate quote is priced on, so a zero here means the catalog is
+  missing weights rather than that the parcel is weightless.
+*/
+export async function getOrderWeightGrams(orderReference: string): Promise<number> {
+  const { data, error } = await db()
+    .from("orders")
+    .select("reference, order_items(qty, product_variants(weight_grams))")
+    .eq("reference", orderReference)
+    .maybeSingle();
+  if (error) throw new Error(`getOrderWeightGrams failed: ${error.message}`);
+  return (data?.order_items ?? []).reduce((total: number, i: Record<string, unknown>) => {
+    const v = i.product_variants as { weight_grams?: number } | null;
+    return total + (i.qty as number) * (v?.weight_grams ?? 0);
+  }, 0);
 }

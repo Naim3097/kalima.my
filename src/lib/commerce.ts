@@ -298,6 +298,7 @@ export async function fetchMyOrders(): Promise<
     total_sen: number;
     created_at: string;
     items: { product_name: string; color_name: string; size: string; qty: number }[];
+    shipments: { courier: string | null; tracking_no: string | null; tracking_url: string | null; status: string }[];
   }[]
 > {
   const supabase = await createClient();
@@ -306,7 +307,7 @@ export async function fetchMyOrders(): Promise<
   const { data, error } = await supabase
     .from("orders")
     .select(
-      "reference, status, total_sen, created_at, order_items(product_name, color_name, size, qty)",
+      "reference, status, total_sen, created_at, order_items(product_name, color_name, size, qty), shipments(courier, tracking_no, tracking_url, status)",
     )
     .order("created_at", { ascending: false });
 
@@ -321,6 +322,12 @@ export async function fetchMyOrders(): Promise<
       color_name: string;
       size: string;
       qty: number;
+    }[],
+    shipments: (o.shipments ?? []) as {
+      courier: string | null;
+      tracking_no: string | null;
+      tracking_url: string | null;
+      status: string;
     }[],
   }));
 }
