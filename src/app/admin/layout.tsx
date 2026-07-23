@@ -72,9 +72,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   }
 
   return (
-    <div className="flex min-h-screen bg-cream">
+    <div className="flex min-h-screen bg-cream print:block print:min-h-0 print:bg-white">
       {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col bg-navy-900 lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col bg-navy-900 lg:flex print:hidden">
         <Link href="/" className="flex items-center gap-3 border-b border-white/10 px-6 py-5">
           <Image src="/brand/kalima-mark-white.png" alt="Kalima" width={36} height={36} className="h-9 w-auto" />
           <div>
@@ -113,9 +113,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       </aside>
 
       {/* Main */}
-      <div className="flex min-h-screen flex-1 flex-col lg:pl-60">
+      <div className="flex min-h-screen flex-1 flex-col lg:pl-60 print:pl-0">
         {/* Mobile nav — the sidebar is desktop-only */}
-        <div className="sticky top-0 z-30 bg-navy-900 lg:hidden">
+        <div className="sticky top-0 z-30 bg-navy-900 lg:hidden print:hidden">
           <div className="flex items-center gap-3 px-4 pt-3">
             <Link href="/" className="flex items-center gap-2">
               <Image src="/brand/kalima-mark-white.png" alt="Kalima" width={24} height={24} className="h-6 w-auto" />
@@ -141,7 +141,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
 
         <DemoPreviewBanner />
 
-        <main className="flex-1 px-4 py-6 lg:px-6 lg:py-8">{children}</main>
+        <main className="flex-1 px-4 py-6 lg:px-6 lg:py-8 print:p-0">{children}</main>
       </div>
     </div>
   );

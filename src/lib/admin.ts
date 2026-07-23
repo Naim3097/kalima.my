@@ -150,7 +150,7 @@ export async function listOrders(filter?: { status?: OrderStatus; q?: string }):
 
 export type OrderDetail = {
   reference: string; email: string; phone: string | null; status: OrderStatus;
-  subtotalSen: number; discountSen: number; shippingSen: number; totalSen: number;
+  subtotalSen: number; discountSen: number; shippingSen: number; taxSen: number; totalSen: number;
   discountCode: string | null; shippingMethod: string | null;
   shippingAddress: Record<string, string> | null;
   createdAt: string; paidAt: string | null;
@@ -171,7 +171,8 @@ export async function getOrder(reference: string): Promise<OrderDetail | null> {
   const pay = (o.payments ?? [])[0];
   return {
     reference: o.reference, email: o.email, phone: o.phone, status: o.status,
-    subtotalSen: o.subtotal_sen, discountSen: o.discount_sen, shippingSen: o.shipping_sen, totalSen: o.total_sen,
+    subtotalSen: o.subtotal_sen, discountSen: o.discount_sen, shippingSen: o.shipping_sen,
+    taxSen: o.tax_sen ?? 0, totalSen: o.total_sen,
     discountCode: o.discount_code, shippingMethod: o.shipping_method, shippingAddress: o.shipping_address,
     createdAt: o.created_at, paidAt: o.paid_at,
     items: (o.order_items ?? []).map((i: Record<string, unknown>) => ({
@@ -451,4 +452,52 @@ export async function getAuditFacets(): Promise<{ entityTypes: string[]; actors:
     entityTypes: [...new Set((data ?? []).map((r) => r.entity_type as string))].sort(),
     actors: [...new Set((data ?? []).map((r) => r.actor_email as string).filter(Boolean))].sort(),
   };
+}
+
+/* ---- Packing slips ------------------------------------------------------ */
+
+/*
+  Orders for the printable packing slips, in the order they were placed.
+
+  Either an explicit list of references, or every order in a status (the daily
+  "print everything I need to pack" run). Capped so an accidental unfiltered
+  print can't try to render the entire order history.
+*/
+export async function getOrdersForPacking(opts: {
+  references?: string[];
+  status?: OrderStatus;
+  limit?: number;
+}): Promise<OrderDetail[]> {
+  let q = db()
+    .from("orders")
+    .select("*, order_items(*), payments(provider, provider_ref, status, amount_sen)")
+    .order("created_at", { ascending: true })
+    .limit(opts.limit ?? 100);
+
+  if (opts.references?.length) q = q.in("reference", opts.references);
+  else if (opts.status) q = q.eq("status", opts.status);
+  else return [];
+
+  const { data, error } = await q;
+  if (error) throw new Error(`getOrdersForPacking failed: ${error.message}`);
+
+  return (data ?? []).map((o) => {
+    const pay = (o.payments ?? [])[0];
+    return {
+      reference: o.reference, email: o.email, phone: o.phone, status: o.status,
+      subtotalSen: o.subtotal_sen, discountSen: o.discount_sen, shippingSen: o.shipping_sen,
+      taxSen: o.tax_sen ?? 0, totalSen: o.total_sen,
+      discountCode: o.discount_code, shippingMethod: o.shipping_method,
+      shippingAddress: o.shipping_address,
+      createdAt: o.created_at, paidAt: o.paid_at,
+      items: (o.order_items ?? []).map((i: Record<string, unknown>) => ({
+        productName: i.product_name as string, colorName: i.color_name as string,
+        size: i.size as string, sku: i.variant_sku as string, qty: i.qty as number,
+        unitSen: i.unit_price_sen as number, lineSen: i.line_total_sen as number,
+      })),
+      payment: pay
+        ? { provider: pay.provider, providerRef: pay.provider_ref, status: pay.status, amountSen: pay.amount_sen }
+        : null,
+    };
+  });
 }

@@ -155,7 +155,7 @@ export function DemoNote({ children }: { children: ReactNode }) {
 /** The persistent "Demo preview" banner shown above every back-office page. */
 export function DemoPreviewBanner() {
   return (
-    <div className="border-b border-amber-300/60 bg-amber-50 px-4 py-2.5 lg:px-6">
+    <div className="border-b border-amber-300/60 bg-amber-50 px-4 py-2.5 lg:px-6 print:hidden">
       <p className="text-[12px] tracking-wide text-amber-900">
         <span className="font-semibold uppercase tracking-wider">Demo preview</span> — sample data for client
         walkthrough. Numbered modules ①–⑥ are the client&apos;s requested features; live integrations arrive in

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import OrdersBrowser from "@/components/admin/OrdersBrowser";
+import { Button } from "@/components/ui/button";
 import { Card, CardHeader, Pill, Table, Td, Tr } from "@/components/admin/ui";
 import { listOrders, type OrderStatus } from "@/lib/admin";
 import { formatRM } from "@/lib/format";
@@ -32,11 +33,17 @@ export default async function AdminOrdersPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-3xl text-navy">Orders</h1>
-        <p className="mt-1 text-[13px] tracking-wide text-navy-400">
-          Web + marketplace orders in one list. Filter by status or search a reference or customer email.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl text-navy">Orders</h1>
+          <p className="mt-1 text-[13px] tracking-wide text-navy-400">
+            Web + marketplace orders in one list. Filter by status or search a reference or customer email.
+          </p>
+        </div>
+        {/* The morning run: every paid-but-unshipped order, one slip per sheet. */}
+        <Button asChild variant="kalimaOutline" size="editorial">
+          <Link href="/admin/orders/packing-slips?status=paid">Print packing slips</Link>
+        </Button>
       </div>
 
       <OrdersBrowser status={status as OrderStatus | undefined} q={q} />
