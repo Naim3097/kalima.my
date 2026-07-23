@@ -52,6 +52,9 @@ export async function proxy(request: NextRequest) {
   const needsAuth =
     pathname === "/account" ||
     pathname.startsWith("/account/") ||
+    // The affiliate portal shows earnings, so it is never public.
+    pathname === "/affiliate" ||
+    pathname.startsWith("/affiliate/") ||
     pathname === "/reset-password";
 
   if (needsAdmin || needsAuth) {

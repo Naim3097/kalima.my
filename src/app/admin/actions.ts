@@ -285,6 +285,121 @@ export async function getEasyparcelWallet(): Promise<{ balanceSen: number } | { 
   }
 }
 
+/* ---- Affiliates --------------------------------------------------------- */
+
+const AFFILIATE_STATUSES = new Set(["pending", "approved", "suspended"]);
+
+/*
+  Approve, suspend, and set commission.
+
+  Approval is the gate every downstream fraud guard depends on — a pending or
+  suspended affiliate accrues nothing — so it is deliberately a staff-only
+  action and is audit-logged with who did it.
+*/
+export async function updateAffiliate(input: {
+  id: string;
+  status?: string;
+  commissionBps?: number;
+  discountCode?: string;
+  payoutNote?: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const patch: Record<string, unknown> = {};
+
+  if (input.status !== undefined) {
+    if (!AFFILIATE_STATUSES.has(input.status)) return { error: "Unknown status." };
+    patch.status = input.status;
+  }
+  if (input.commissionBps !== undefined) {
+    if (!Number.isInteger(input.commissionBps) || input.commissionBps < 0 || input.commissionBps > 10000) {
+      return { error: "Commission must be between 0% and 100%." };
+    }
+    patch.commission_bps = input.commissionBps;
+  }
+  if (input.discountCode !== undefined) {
+    patch.discount_code = input.discountCode.trim().toUpperCase() || null;
+  }
+  if (input.payoutNote !== undefined) patch.payout_note = input.payoutNote.trim() || null;
+
+  if (!Object.keys(patch).length) return { ok: true };
+
+  const { data, error } = await db
+    .from("affiliates").update(patch).eq("id", input.id).select("name, status").single();
+  if (error) {
+    return { error: error.message.includes("unique") ? "That discount code is already assigned." : error.message };
+  }
+
+  await logAudit(db, {
+    action: "affiliate.updated", entityType: "affiliate", entityId: input.id,
+    summary: `Affiliate ${data.name} updated${input.status ? ` — ${input.status}` : ""}`,
+    meta: patch,
+  });
+
+  revalidatePath("/admin/affiliates");
+  revalidatePath("/affiliate");
+  return { ok: true };
+}
+
+/*
+  Records a payout and settles the referrals it covers.
+
+  Only referrals that are past their hold period are settled — paying inside the
+  return window is exactly what the hold exists to prevent. Clawed-back rows are
+  never included. The payout row and the referral rows are written together so
+  the ledger and the payment history cannot disagree.
+*/
+export async function recordAffiliatePayout(input: {
+  affiliateId: string;
+  reference: string;
+  note: string;
+}): Promise<ActionResult & { amountSen?: number; count?: number }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const nowIso = new Date().toISOString();
+
+  // Payable = past hold, not paid, not clawed back.
+  const { data: due, error: dueErr } = await db
+    .from("affiliate_referrals")
+    .select("id, commission_sen")
+    .eq("affiliate_id", input.affiliateId)
+    .in("status", ["pending", "approved"])
+    .lte("hold_until", nowIso);
+  if (dueErr) return { error: dueErr.message };
+
+  if (!due?.length) return { error: "Nothing is payable yet — commission is still within its hold period." };
+
+  const amountSen = due.reduce((sum, r) => sum + (r.commission_sen as number), 0);
+  if (amountSen <= 0) return { error: "Payable balance is zero." };
+
+  const { data: payout, error: payErr } = await db.from("affiliate_payouts").insert({
+    affiliate_id: input.affiliateId,
+    amount_sen: amountSen,
+    reference: input.reference.trim() || null,
+    note: input.note.trim() || null,
+  }).select("id").single();
+  if (payErr) return { error: payErr.message };
+
+  const { error: settleErr } = await db
+    .from("affiliate_referrals")
+    .update({ status: "paid", paid_at: nowIso, payout_id: payout.id as string })
+    .in("id", due.map((r) => r.id as string));
+  if (settleErr) return { error: settleErr.message };
+
+  await logAudit(db, {
+    action: "affiliate.paid_out", entityType: "affiliate", entityId: input.affiliateId,
+    summary: `Paid ${(amountSen / 100).toFixed(2)} MYR across ${due.length} referral(s)` +
+      `${input.reference.trim() ? ` — ref ${input.reference.trim()}` : ""}`,
+    meta: { amountSen, count: due.length, reference: input.reference },
+  });
+
+  revalidatePath("/admin/affiliates");
+  revalidatePath("/affiliate");
+  return { ok: true, amountSen, count: due.length };
+}
+
 /* ---- Campaigns ---------------------------------------------------------- */
 
 export type SegmentInput = {

@@ -1,127 +1,86 @@
 import type { Metadata } from "next";
-import { Card, CardHeader, StatCard, Pill, DemoNote } from "@/components/admin/ui";
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { AFFILIATES } from "@/data/demo";
+import { AffiliateControls } from "@/components/admin/AffiliateControls";
+import { Card, CardHeader, Chip } from "@/components/admin/ui";
+import { listAffiliates } from "@/lib/affiliate";
 import { formatRM } from "@/lib/format";
 
 export const metadata: Metadata = {
   title: "Affiliates · Admin",
-  description:
-    "Unique codes + trackable links for every ambassador. Commission accrues only on paid orders, with clawback on refunds.",
+  description: "Affiliate approvals, commission rates and payouts.",
 };
 
-const HEAD = [
-  "Affiliate",
-  "Code",
-  "Link",
-  "Clicks",
-  "Orders",
-  "Sales",
-  "Commission (10%)",
-  "Status",
-  "",
-];
+/*
+  Replaces the Phase 3 demo mock-up.
 
-export default function AdminAffiliatesPage() {
+  Balances are derived from the referral ledger, never stored on the affiliate
+  row — a running total that can drift from the rows it summarises is how people
+  get paid twice.
+*/
+export default async function AdminAffiliatesPage() {
+  const affiliates = await listAffiliates();
+  const pendingCount = affiliates.filter((a) => a.status === "pending").length;
+
   return (
     <div className="space-y-6">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="font-display text-3xl text-navy">Affiliates ②</h1>
-          <p className="mt-1 text-[13px] tracking-wide text-navy-400">
-            Unique codes + trackable links for every ambassador. Commission accrues only on paid orders, with
-            clawback on refunds.
+      <div>
+        <h1 className="font-display text-3xl text-navy">Affiliates</h1>
+        <p className="mt-1 text-[13px] tracking-wide text-navy-400">
+          Commission accrues only on paid orders, is held for 14 days against returns,
+          and is reversed automatically if the order is refunded.
+        </p>
+      </div>
+
+      {pendingCount > 0 && (
+        <div className="rounded border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-[13px] tracking-wide text-amber-900">
+            {pendingCount} application{pendingCount === 1 ? "" : "s"} waiting for review.
+            A pending affiliate earns nothing until approved.
           </p>
         </div>
-        <Button variant="kalima" size="editorial" className="cursor-pointer px-5 py-2.5 transition-colors">
-          + Invite Affiliate
-        </Button>
-      </div>
+      )}
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <StatCard label="Active affiliates" value="3" sub="1 application pending" />
-        <StatCard label="Affiliate sales (30d)" value="RM109,820" sub="23% of total revenue" />
-        <StatCard label="Commission owed" value="RM10,982" sub="At default 10% rate" />
-        <StatCard label="Avg conversion" value="4.9%" sub="Clicks → paid orders" accent="up" />
-      </div>
+      {affiliates.length === 0 ? (
+        <Card>
+          <CardHeader title="No affiliates yet" />
+          <p className="text-[13px] tracking-wide text-navy-400">
+            People apply at <code>/affiliate</code>. Approve them here and they get a
+            referral link and, optionally, a discount code.
+          </p>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {affiliates.map((a) => (
+            <Card key={a.id}>
+              <CardHeader title={a.name} action={<Chip>{a.status}</Chip>} />
+              <div className="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-[12px] tracking-wide text-navy-400">
+                <span>{a.email}</span>
+                <span>?ref={a.slug}</span>
+                <span>{a.stats.clicks} clicks</span>
+                <span>{a.stats.orders} orders</span>
+              </div>
 
-      <Card>
-        <CardHeader
-          title="Affiliate partners"
-          action={
-            <span className="text-[12px] text-navy-400">
-              Attribution: code at checkout, or ?ref= link (30-day cookie)
-            </span>
-          }
-        />
-        <Table className="text-left text-[13px]">
-          <TableHeader>
-            <TableRow className="border-navy/10 hover:bg-transparent">
-              {HEAD.map((h, i) => (
-                <TableHead
-                  key={h || `blank-${i}`}
-                  className="label-caps h-auto px-5 py-3 !text-[10px] font-medium text-navy-400"
-                >
-                  {h}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody className="divide-y divide-navy/5 text-navy">
-            {AFFILIATES.map((a) => (
-              <TableRow key={a.code} className="border-b-0 hover:bg-cream-50">
-                <TableCell className="px-5 py-3.5 font-medium">{a.name}</TableCell>
-                <TableCell className="px-5 py-3.5">
-                  <code className="rounded bg-navy-100 px-2 py-1 text-[12px] text-navy">{a.code}</code>
-                </TableCell>
-                <TableCell className="px-5 py-3.5 text-navy-400">
-                  kalima.my/?ref={a.code.toLowerCase()}
-                </TableCell>
-                <TableCell className="px-5 py-3.5">{a.clicks.toLocaleString()}</TableCell>
-                <TableCell className="px-5 py-3.5">{a.orders}</TableCell>
-                <TableCell className="px-5 py-3.5">{formatRM(a.sales)}</TableCell>
-                <TableCell className="px-5 py-3.5 font-medium">{formatRM(a.commission)}</TableCell>
-                <TableCell className="px-5 py-3.5">
-                  <Pill value={a.status} />
-                </TableCell>
-                <TableCell className="px-5 py-3.5">
-                  {a.status === "active" ? (
-                    <Button
-                      variant="kalimaOutline"
-                      size="editorial"
-                      className="cursor-pointer border-navy/30 px-3 py-1.5 transition-colors"
-                    >
-                      Mark payout
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="kalima"
-                      size="editorial"
-                      className="cursor-pointer px-3 py-1.5 transition-colors"
-                    >
-                      Approve
-                    </Button>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Card>
+              <div className="mb-4 grid gap-3 sm:grid-cols-4">
+                {([
+                  ["Held", a.stats.pendingSen, "in return window"],
+                  ["Payable", a.stats.payableSen, "cleared"],
+                  ["Paid", a.stats.paidSen, "to date"],
+                  ["Reversed", a.stats.clawedBackSen, "refunded orders"],
+                ] as [string, number, string][]).map(([label, sen, hint]) => (
+                  <div key={label} className="rounded border border-navy-100 px-3 py-2">
+                    <p className="label-caps text-[10px] text-navy-400">{label}</p>
+                    <p className="mt-0.5 text-[15px] tabular-nums text-navy">
+                      {formatRM(sen / 100)}
+                    </p>
+                    <p className="text-[10px] tracking-wide text-navy-300">{hint}</p>
+                  </div>
+                ))}
+              </div>
 
-      <DemoNote>
-        Demo preview of Phase 6. Affiliates get their own portal (see /affiliate on the storefront) with live stats
-        and marketing assets. Fraud guards: self-purchase block, 14-day commission hold matching the return window,
-        one attribution per order.
-      </DemoNote>
+              <AffiliateControls affiliate={a} />
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
