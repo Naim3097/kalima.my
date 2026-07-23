@@ -51,6 +51,8 @@ export async function placeOrder(
     state: string;
     shippingMethod: string;
     discountCode: string;
+    /** Points the shopper wants to spend; clamped server-side. */
+    redeemPoints?: number;
   },
 ): Promise<PlaceOrderState> {
   if (!cart.length) return { error: "Your bag is empty." };
@@ -93,6 +95,8 @@ export async function placeOrder(
     },
     shippingMethod: form.shippingMethod,
     discountCode: form.discountCode.trim() || undefined,
+    // A request, not a price — the database clamps it against the real balance.
+    redeemPoints: form.redeemPoints,
   });
 
   // Order-received email (no-op until Resend is configured).

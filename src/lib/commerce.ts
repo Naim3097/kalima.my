@@ -79,6 +79,8 @@ export type CreateOrderResult = {
   order_id: string;
   reference: string;
   total_sen: number;
+  loyalty_points_used?: number;
+  loyalty_discount_sen?: number;
 };
 
 export type OrderView = {
@@ -136,6 +138,12 @@ export async function createOrder(params: {
   address: OrderAddress;
   shippingMethod: string;
   discountCode?: string;
+  /*
+    Points the shopper asked to spend. Only a REQUEST — create_order clamps it
+    against their real balance and the scheme's limits, and computes what it is
+    worth. Nothing here decides a price.
+  */
+  redeemPoints?: number;
 }): Promise<CreateOrderResult> {
   const auth = await createClient();
   const userId = auth ? (await auth.auth.getUser()).data.user?.id ?? null : null;
@@ -148,6 +156,7 @@ export async function createOrder(params: {
     p_address: params.address,
     p_shipping_method: params.shippingMethod,
     p_discount_code: params.discountCode ?? null,
+    p_redeem_points: Math.max(0, Math.trunc(params.redeemPoints ?? 0)),
   });
   if (error) throw new Error(`createOrder failed: ${error.message}`);
   const result = data as CreateOrderResult;
