@@ -76,12 +76,13 @@ function parseServices(data: unknown, paymentType: string): { id: string; name: 
   return [];
 }
 
-// LeanX has used different keys for the human-readable name across account
-// types / API versions. Try the documented one first, then known aliases,
-// before falling back to the id so the picker is never blank.
+// The human-readable name key varies by account/API version. Live sandbox
+// returns `name` ("Affin Bank"); the guide documented `payment_service_name`.
+// Try both plus known aliases, falling back to the id so the picker is never
+// blank. (Verified against a live list-payment-services response.)
 const NAME_KEYS = [
-  "payment_service_name",
   "name",
+  "payment_service_name",
   "display_name",
   "bank_name",
   "bank_display_name",
@@ -94,48 +95,68 @@ function pickName(o: Record<string, unknown>): string {
   for (const k of NAME_KEYS) {
     const v = o[k];
     if (typeof v === "string" && v.trim() && v.trim() !== String(o.payment_service_id)) {
-      return v.trim();
+      return v.trim().replace(/ B2B$/i, "");
     }
   }
   return String(o.payment_service_id ?? "");
+}
+
+// Active unless a status field explicitly says otherwise. Live responses carry
+// `record_status` ("Active") / `record_status_id` (1); older shapes use
+// `status`. Absent → treat as active (the request already filters active).
+function isActive(o: Record<string, unknown>): boolean {
+  const s = o.status ?? o.payment_status ?? o.record_status ?? o.payment_service_status;
+  if (s === undefined || s === null || s === "") return true;
+  const v = String(s).toLowerCase();
+  return v === "active" || v === "1" || v === "true";
 }
 
 function normaliseList(arr: unknown[]): { id: string; name: string }[] {
   return arr
     .map((s) => {
       const o = s as Record<string, unknown>;
-      return {
-        id: String(o.payment_service_id ?? ""),
-        name: pickName(o),
-        status: o.status,
-      };
+      return { id: String(o.payment_service_id ?? ""), name: pickName(o), ok: isActive(o) };
     })
-    .filter((s) => s.id && (s.status === undefined || String(s.status).toLowerCase() === "active"))
+    .filter((s) => s.id && s.ok)
     .map(({ id, name }) => ({ id, name }));
 }
 
-async function fetchServices(paymentType: "WEB_PAYMENT" | "DIGITAL_PAYMENT"): Promise<PaymentService[]> {
+// One list-payment-services call for a given type + payment model.
+async function fetchServicesForModel(
+  paymentType: "WEB_PAYMENT" | "DIGITAL_PAYMENT",
+  model: 1 | 2,
+): Promise<{ id: string; name: string }[]> {
   const res = await fetch(`${HOST}/api/v1/merchant/list-payment-services`, {
     method: "POST",
     headers: headers(),
     body: JSON.stringify({
       payment_type: paymentType,
       payment_status: "active",
-      payment_model_reference_id: 1, // B2C / individual
+      payment_model_reference_id: model, // 1 = B2C / individual, 2 = B2B / corporate
     }),
     cache: "no-store",
   });
   const json = await res.json();
   if (json.response_code !== SUCCESS) return [];
+  return parseServices(json, paymentType);
+}
+
+// Query both payment models and merge — some banks only surface under B2B
+// (matches the proven reference integration). Dedup by payment_service_id.
+async function fetchServices(paymentType: "WEB_PAYMENT" | "DIGITAL_PAYMENT"): Promise<PaymentService[]> {
   const kind = paymentType === "WEB_PAYMENT" ? "fpx" : "ewallet";
-  const parsed = parseServices(json, paymentType);
-  // TEMP diagnostic — confirm the live service-object shape, then remove.
-  if (process.env.LEANX_DEBUG_SERVICES === "1") {
-    const sample = (json?.data as unknown) ?? json;
-    console.log(`[leanx] ${paymentType} raw sample:`, JSON.stringify(sample).slice(0, 1200));
-    console.log(`[leanx] ${paymentType} parsed[0]:`, JSON.stringify(parsed[0] ?? null));
+  const [b2c, b2b] = await Promise.all([
+    fetchServicesForModel(paymentType, 1),
+    fetchServicesForModel(paymentType, 2),
+  ]);
+  const seen = new Set<string>();
+  const merged: PaymentService[] = [];
+  for (const s of [...b2c, ...b2b]) {
+    if (seen.has(s.id)) continue;
+    seen.add(s.id);
+    merged.push({ ...s, kind });
   }
-  return parsed.map((s) => ({ ...s, kind }));
+  return merged;
 }
 
 /*
