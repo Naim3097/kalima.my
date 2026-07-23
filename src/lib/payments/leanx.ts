@@ -33,6 +33,18 @@ export function leanxConfigured(): boolean {
 
 const SUCCESS = 2000; // LeanX success sentinel on every response
 
+// TEMP diagnostic — returns the raw LeanX list-payment-services response so we
+// can see the exact service-object field names. Remove after fixing the parser.
+export async function debugRawServiceList(): Promise<unknown> {
+  const res = await fetch(`${HOST}/api/v1/merchant/list-payment-services`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "auth-token": AUTH_TOKEN },
+    body: JSON.stringify({ payment_type: "WEB_PAYMENT", payment_status: "active", payment_model_reference_id: 1 }),
+    cache: "no-store",
+  });
+  return res.json();
+}
+
 /** Auth is a plain `auth-token` header — never `Authorization: Bearer`. */
 function headers(): HeadersInit {
   return { "Content-Type": "application/json", "auth-token": AUTH_TOKEN };
