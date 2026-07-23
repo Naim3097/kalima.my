@@ -76,13 +76,37 @@ function parseServices(data: unknown, paymentType: string): { id: string; name: 
   return [];
 }
 
+// LeanX has used different keys for the human-readable name across account
+// types / API versions. Try the documented one first, then known aliases,
+// before falling back to the id so the picker is never blank.
+const NAME_KEYS = [
+  "payment_service_name",
+  "name",
+  "display_name",
+  "bank_name",
+  "bank_display_name",
+  "channel_name",
+  "title",
+  "label",
+] as const;
+
+function pickName(o: Record<string, unknown>): string {
+  for (const k of NAME_KEYS) {
+    const v = o[k];
+    if (typeof v === "string" && v.trim() && v.trim() !== String(o.payment_service_id)) {
+      return v.trim();
+    }
+  }
+  return String(o.payment_service_id ?? "");
+}
+
 function normaliseList(arr: unknown[]): { id: string; name: string }[] {
   return arr
     .map((s) => {
       const o = s as Record<string, unknown>;
       return {
         id: String(o.payment_service_id ?? ""),
-        name: String(o.payment_service_name ?? o.payment_service_id ?? ""),
+        name: pickName(o),
         status: o.status,
       };
     })
@@ -104,7 +128,14 @@ async function fetchServices(paymentType: "WEB_PAYMENT" | "DIGITAL_PAYMENT"): Pr
   const json = await res.json();
   if (json.response_code !== SUCCESS) return [];
   const kind = paymentType === "WEB_PAYMENT" ? "fpx" : "ewallet";
-  return parseServices(json, paymentType).map((s) => ({ ...s, kind }));
+  const parsed = parseServices(json, paymentType);
+  // TEMP diagnostic — confirm the live service-object shape, then remove.
+  if (process.env.LEANX_DEBUG_SERVICES === "1") {
+    const sample = (json?.data as unknown) ?? json;
+    console.log(`[leanx] ${paymentType} raw sample:`, JSON.stringify(sample).slice(0, 1200));
+    console.log(`[leanx] ${paymentType} parsed[0]:`, JSON.stringify(parsed[0] ?? null));
+  }
+  return parsed.map((s) => ({ ...s, kind }));
 }
 
 /*
