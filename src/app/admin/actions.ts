@@ -360,6 +360,30 @@ export async function saveShipment(input: {
   return { ok: true };
 }
 
+export type CourierRate = {
+  serviceId: string; serviceName: string; courierName: string; amountSen: number;
+};
+
+/*
+  Live courier rates for the booking picker. Staff-only: this spends the
+  merchant's API quota and reveals Kalima's own cost prices.
+*/
+export async function fetchCourierRates(
+  reference: string,
+): Promise<{ rates: CourierRate[]; weightGrams: number } | { error: string }> {
+  try { await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { options, weightGrams, unavailable } = await getRatesForOrder(reference);
+  if (unavailable) return { error: unavailable };
+  return {
+    weightGrams,
+    rates: options.map((o) => ({
+      serviceId: o.serviceId, serviceName: o.serviceName,
+      courierName: o.courierName, amountSen: o.amountSen,
+    })),
+  };
+}
+
 /*
   Books a parcel with EasyParcel and writes the AWB back.
 

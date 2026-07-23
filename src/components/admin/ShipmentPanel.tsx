@@ -3,7 +3,13 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { deleteShipment, saveShipment } from "@/app/admin/actions";
+import {
+  bookShipment,
+  deleteShipment,
+  fetchCourierRates,
+  saveShipment,
+  type CourierRate,
+} from "@/app/admin/actions";
 import { Card, CardHeader, Chip } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -57,6 +63,12 @@ export function ShipmentPanel({
   const [costRm, setCostRm] = useState("");
   const [notes, setNotes] = useState("");
 
+  // EasyParcel booking state, scoped to the parcel being booked.
+  const [bookingFor, setBookingFor] = useState<string | null>(null);
+  const [rates, setRates] = useState<CourierRate[] | null>(null);
+  const [ratesError, setRatesError] = useState<string | null>(null);
+  const [chosenService, setChosenService] = useState("");
+
   function startNew() {
     setEditing(null);
     setCourier("jnt");
@@ -105,6 +117,37 @@ export function ShipmentPanel({
       if ("error" in res) toast.error(res.error);
       else {
         toast.success("Shipment removed.");
+        router.refresh();
+      }
+    });
+  }
+
+  /* ---- EasyParcel booking ---- */
+
+  function loadRates(s: Shipment) {
+    setBookingFor(s.id);
+    setRates(null);
+    setRatesError(null);
+    startTransition(async () => {
+      const res = await fetchCourierRates(reference);
+      if ("error" in res) setRatesError(res.error);
+      else {
+        setRates(res.rates);
+        // Cheapest is the usual choice, so pre-select it.
+        setChosenService(res.rates[0]?.serviceId ?? "");
+      }
+    });
+  }
+
+  function book(shipmentId: string) {
+    if (!chosenService) return toast.error("Pick a courier first.");
+    startTransition(async () => {
+      const res = await bookShipment({ reference, shipmentId, serviceId: chosenService });
+      if ("error" in res) toast.error(res.error);
+      else {
+        toast.success(res.trackingNo ? `Booked — AWB ${res.trackingNo}` : "Parcel booked.");
+        setBookingFor(null);
+        setRates(null);
         router.refresh();
       }
     });
@@ -190,6 +233,82 @@ export function ShipmentPanel({
                   {s.provider !== "manual" ? ` · ${s.provider}` : ""}
                   {s.notes ? ` · ${s.notes}` : ""}
                 </p>
+
+                {/* Only an un-booked parcel can be sent to EasyParcel. */}
+                {s.status === "pending" && (
+                  <div className="mt-3 border-t border-navy-100 pt-3">
+                    {bookingFor !== s.id ? (
+                      <Button
+                        type="button"
+                        variant="kalimaOutline"
+                        size="editorial"
+                        disabled={pending}
+                        onClick={() => loadRates(s)}
+                      >
+                        Book with EasyParcel
+                      </Button>
+                    ) : ratesError ? (
+                      <div>
+                        <p className="text-[12px] tracking-wide text-red-800">{ratesError}</p>
+                        <button
+                          type="button"
+                          onClick={() => setBookingFor(null)}
+                          className="label-caps mt-2 text-[11px] text-navy-400 hover:text-navy"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    ) : !rates ? (
+                      <p className="text-[12px] tracking-wide text-navy-400">Fetching rates…</p>
+                    ) : (
+                      <div className="space-y-3">
+                        <p className="text-[11px] tracking-wide text-navy-400">
+                          Kalima&apos;s cost, charged to the EasyParcel wallet — cheapest first.
+                        </p>
+                        <ul className="space-y-1.5">
+                          {rates.map((r) => (
+                            <li key={r.serviceId}>
+                              <label className="flex cursor-pointer items-center justify-between gap-3 rounded border border-navy-100 px-3 py-2 text-[13px] hover:border-navy-400">
+                                <span className="flex items-center gap-2">
+                                  <input
+                                    type="radio"
+                                    name={`courier-${s.id}`}
+                                    value={r.serviceId}
+                                    checked={chosenService === r.serviceId}
+                                    onChange={() => setChosenService(r.serviceId)}
+                                  />
+                                  <span>{r.courierName}</span>
+                                  <span className="text-navy-400">{r.serviceName}</span>
+                                </span>
+                                <span className="tabular-nums">{formatRM(r.amountSen / 100)}</span>
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="kalima"
+                            size="editorial"
+                            disabled={pending}
+                            onClick={() => book(s.id)}
+                          >
+                            {pending ? "Booking…" : "Confirm booking"}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="kalimaOutline"
+                            size="editorial"
+                            disabled={pending}
+                            onClick={() => setBookingFor(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </li>
             );
           })}
