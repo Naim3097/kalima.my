@@ -5,7 +5,7 @@ import { getCurrentUser, isStaff, type Role } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 import { parseCsvRecords } from "@/lib/csv";
 import { getOrder } from "@/lib/admin";
-import { awardLoyaltyPoints, revokeLoyaltyPoints } from "@/lib/commerce";
+import { awardLoyaltyPoints } from "@/lib/commerce";
 import { easyparcelClient, getShippingConfig } from "@/lib/shipping/config";
 import { getRatesForOrder, receiverFrom, senderFrom } from "@/lib/shipping/rates";
 import {
@@ -166,9 +166,6 @@ export async function refundOrder(input: {
       ? "Only a paid or fulfilled order can be refunded."
       : error.message };
   }
-
-  // A refunded sale gives back its points as well as its stock and commission.
-  await revokeLoyaltyPoints(order.id as string);
 
   const result = data as { status: string };
   await logAudit(db, {
