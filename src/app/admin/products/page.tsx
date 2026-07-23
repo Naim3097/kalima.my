@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CatalogTransfer } from "@/components/admin/CatalogTransfer";
 import { Card, CardHeader, Pill, Table, Td, Tr } from "@/components/admin/ui";
 import ProductImage from "@/components/brand/ProductImage";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,8 @@ export default async function AdminProductsPage() {
           <Link href="/admin/products/new">+ Add Product</Link>
         </Button>
       </div>
+
+      <CatalogTransfer />
 
       <Card>
         <CardHeader title={`${products.length} products`} />

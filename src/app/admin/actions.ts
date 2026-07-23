@@ -3,6 +3,15 @@
 import { revalidatePath } from "next/cache";
 import { getCurrentUser, isStaff, type Role } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
+import { parseCsvRecords } from "@/lib/csv";
+import {
+  CATEGORIES,
+  parseBool,
+  rmToSen,
+  slugify,
+  toInt,
+  type CsvCategory,
+} from "@/lib/catalog-csv";
 
 const ROLES: Role[] = ["customer", "staff", "admin", "affiliate"];
 
@@ -122,8 +131,8 @@ export async function toggleDiscount(id: string, active: boolean): Promise<Actio
 
 /* ---- Products ----------------------------------------------------------- */
 
-const slugify = (s: string) =>
-  s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+// slugify lives in @/lib/catalog-csv so the editor and the CSV importer derive
+// slugs identically.
 
 export type ProductInput = {
   id?: string;
@@ -243,6 +252,254 @@ export async function adjustStock(
   }
   revalidateProduct(productSlug);
   return { ok: true, newStock: data as number };
+}
+
+/* ---- Catalog CSV import ------------------------------------------------- */
+
+export type ImportSummary = {
+  productsCreated: number;
+  productsUpdated: number;
+  variantsCreated: number;
+  variantsUpdated: number;
+  stockAdjusted: number;
+  errors: { row: number; message: string }[];
+};
+
+/*
+  Bulk catalog import — one row per variant, product columns repeated (the
+  shape the export route emits, so a round-trip works).
+
+  Two rules this must not break:
+  - money is parsed from ringgit into integer sen at the boundary; sen is the
+    only thing that reaches the database
+  - stock is NEVER written directly. New variants seed through adjust_stock and
+    existing ones move by a computed delta, so every unit is accounted for in
+    the stock_movements ledger exactly as a manual adjustment would be.
+
+  Validation runs over the whole file first: if any row is malformed nothing is
+  written, so a typo on line 40 can't leave the catalog half-imported.
+*/
+export async function importCatalogCsv(
+  csvText: string,
+): Promise<(ActionResult & { summary?: ImportSummary }) | { error: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const records = parseCsvRecords(csvText);
+  if (!records.length) return { error: "That file has no data rows." };
+
+  const errors: { row: number; message: string }[] = [];
+  type Parsed = {
+    row: number; slug: string; name: string; description: string; fabric: string;
+    category: CsvCategory; priceSen: number; bestSeller: boolean; newArrival: boolean;
+    tone: string; published: boolean;
+    sku: string; colorName: string; colorHex: string; size: string;
+    variantPriceSen: number | null; weightGrams: number; stock: number | null;
+  };
+  const parsed: Parsed[] = [];
+
+  records.forEach((r, i) => {
+    const row = i + 2; // +1 for the header, +1 for 1-based lines
+    const name = r.name ?? "";
+    const slug = slugify(r.slug || name);
+    if (!slug) {
+      errors.push({ row, message: "Needs a slug or a name." });
+      return;
+    }
+    if (!name) {
+      errors.push({ row, message: "Product name is required." });
+      return;
+    }
+    const category = (r.category || "women").toLowerCase() as CsvCategory;
+    if (!CATEGORIES.includes(category)) {
+      errors.push({ row, message: `Category must be one of ${CATEGORIES.join(", ")}.` });
+      return;
+    }
+    const priceSen = rmToSen(r.price_rm ?? "");
+    if (priceSen === null || Number.isNaN(priceSen)) {
+      errors.push({ row, message: "price_rm must be a number." });
+      return;
+    }
+    const variantPriceSen = rmToSen(r.variant_price_rm ?? "");
+    if (Number.isNaN(variantPriceSen)) {
+      errors.push({ row, message: "variant_price_rm must be a number or blank." });
+      return;
+    }
+    const weightGrams = toInt(r.weight_grams ?? "", 0);
+    if (Number.isNaN(weightGrams)) {
+      errors.push({ row, message: "weight_grams must be a whole number." });
+      return;
+    }
+    const stockRaw = (r.stock ?? "").trim();
+    const stock = stockRaw === "" ? null : toInt(stockRaw, 0);
+    if (stock !== null && Number.isNaN(stock)) {
+      errors.push({ row, message: "stock must be a whole number of 0 or more." });
+      return;
+    }
+    const colorName = (r.color_name ?? "").trim();
+    const size = (r.size ?? "").trim();
+    // A row may describe the product only (no variant); but a half-filled
+    // variant is a typo we should catch rather than silently drop.
+    if ((colorName && !size) || (!colorName && size)) {
+      errors.push({ row, message: "A variant needs both color_name and size." });
+      return;
+    }
+
+    parsed.push({
+      row, slug, name, description: r.description ?? "", fabric: r.fabric ?? "",
+      category, priceSen, bestSeller: parseBool(r.best_seller ?? "", false),
+      newArrival: parseBool(r.new_arrival ?? "", false),
+      tone: (r.tone ?? "").trim() || "#383c61",
+      published: parseBool(r.published ?? "", true),
+      sku: (r.sku ?? "").trim().toUpperCase(), colorName,
+      colorHex: (r.color_hex ?? "").trim() || "#cccccc",
+      size, variantPriceSen, weightGrams, stock,
+    });
+  });
+
+  if (errors.length) {
+    return { error: `Nothing was imported — ${errors.length} row(s) need fixing.`, summary: {
+      productsCreated: 0, productsUpdated: 0, variantsCreated: 0, variantsUpdated: 0,
+      stockAdjusted: 0, errors: errors.slice(0, 25),
+    } } as ActionResult & { summary: ImportSummary };
+  }
+
+  const summary: ImportSummary = {
+    productsCreated: 0, productsUpdated: 0, variantsCreated: 0,
+    variantsUpdated: 0, stockAdjusted: 0, errors: [],
+  };
+
+  // Group rows by product so each product is written once.
+  const groups = new Map<string, Parsed[]>();
+  for (const p of parsed) {
+    const list = groups.get(p.slug);
+    if (list) list.push(p);
+    else groups.set(p.slug, [p]);
+  }
+
+  for (const [slug, rows] of groups) {
+    const head = rows[0];
+    const productRow = {
+      name: head.name, slug,
+      description: head.description.trim() || null,
+      fabric: head.fabric.trim() || null,
+      category: head.category,
+      price_sen: head.priceSen,
+      best_seller: head.bestSeller,
+      new_arrival: head.newArrival,
+      tone: head.tone,
+      published: head.published,
+    };
+
+    const { data: existing } = await db
+      .from("products").select("id").eq("slug", slug).maybeSingle();
+
+    let productId: string;
+    if (existing?.id) {
+      const { error } = await db.from("products").update(productRow).eq("id", existing.id);
+      if (error) { summary.errors.push({ row: head.row, message: error.message }); continue; }
+      productId = existing.id as string;
+      summary.productsUpdated += 1;
+    } else {
+      const { data, error } = await db
+        .from("products").insert(productRow).select("id").single();
+      if (error || !data) {
+        summary.errors.push({ row: head.row, message: error?.message ?? "Insert failed" });
+        continue;
+      }
+      productId = data.id as string;
+      summary.productsCreated += 1;
+    }
+
+    // Existing variants, to decide insert vs update and to compute stock deltas.
+    const { data: current } = await db
+      .from("product_variants")
+      .select("id, sku, color_name, size, stock_on_hand, color_position, position")
+      .eq("product_id", productId);
+    const byKey = new Map<string, Record<string, unknown>>();
+    for (const v of current ?? []) {
+      byKey.set(`sku:${(v.sku as string).toUpperCase()}`, v);
+      byKey.set(`cs:${(v.color_name as string).toLowerCase()}|${(v.size as string).toLowerCase()}`, v);
+    }
+
+    // Colour/size ordering follows first appearance in the file.
+    const colorOrder = new Map<string, number>();
+    let nextPosition = (current ?? []).length;
+
+    for (const r of rows) {
+      if (!r.colorName || !r.size) continue; // product-only row
+
+      const sku = r.sku ||
+        `KLM-${slug}-${r.colorName}-${r.size}`.toUpperCase().replace(/[^A-Z0-9-]+/g, "");
+      const match =
+        byKey.get(`sku:${sku.toUpperCase()}`) ??
+        byKey.get(`cs:${r.colorName.toLowerCase()}|${r.size.toLowerCase()}`);
+
+      if (!colorOrder.has(r.colorName.toLowerCase())) {
+        colorOrder.set(r.colorName.toLowerCase(), colorOrder.size);
+      }
+
+      if (match) {
+        const { error } = await db.from("product_variants").update({
+          sku,
+          color_name: r.colorName,
+          color_hex: r.colorHex,
+          size: r.size,
+          price_sen: r.variantPriceSen,
+          weight_grams: r.weightGrams,
+        }).eq("id", match.id as string);
+        if (error) { summary.errors.push({ row: r.row, message: error.message }); continue; }
+        summary.variantsUpdated += 1;
+
+        // Stock moves by delta, through the ledger — never a direct write.
+        if (r.stock !== null) {
+          const delta = r.stock - (match.stock_on_hand as number);
+          if (delta !== 0) {
+            const { error: adjErr } = await db.rpc("adjust_stock", {
+              p_variant_id: match.id as string, p_delta: delta, p_reason: "CSV import",
+            });
+            if (adjErr) summary.errors.push({ row: r.row, message: adjErr.message });
+            else summary.stockAdjusted += 1;
+          }
+        }
+      } else {
+        const { data: inserted, error } = await db.from("product_variants").insert({
+          product_id: productId,
+          sku,
+          color_name: r.colorName,
+          color_hex: r.colorHex,
+          size: r.size,
+          price_sen: r.variantPriceSen,
+          weight_grams: r.weightGrams,
+          stock_on_hand: 0, // seeded through the ledger below
+          color_position: colorOrder.get(r.colorName.toLowerCase()) ?? 0,
+          position: nextPosition++,
+        }).select("id").single();
+        if (error || !inserted) {
+          summary.errors.push({
+            row: r.row,
+            message: error?.message.includes("unique")
+              ? `SKU ${sku} or that colour/size already exists.`
+              : (error?.message ?? "Insert failed"),
+          });
+          continue;
+        }
+        summary.variantsCreated += 1;
+
+        if (r.stock && r.stock > 0) {
+          const { error: adjErr } = await db.rpc("adjust_stock", {
+            p_variant_id: inserted.id as string, p_delta: r.stock, p_reason: "CSV import",
+          });
+          if (adjErr) summary.errors.push({ row: r.row, message: adjErr.message });
+          else summary.stockAdjusted += 1;
+        }
+      }
+    }
+
+    revalidateProduct(slug);
+  }
+
+  return { ok: true, summary };
 }
 
 /* ---- Product images ----------------------------------------------------- */
