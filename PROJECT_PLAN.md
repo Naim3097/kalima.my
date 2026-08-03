@@ -19,7 +19,7 @@
 > | 5 — Messaging & broadcast | 🟡 **Email done** · WhatsApp not built (Meta verification) |
 > | 6 — Affiliate program | ✅ **Done** |
 > | 7 — Loyalty / Kalima Club | ✅ **Done** |
-> | 8 — Marketplace stock sync | 🎬 **Demo mock-up** — gated on Shopee/TikTok app approval |
+> | 8 — Marketplace stock sync | 🟡 **Engine built** — Shopee/TikTok adapters await app approval |
 > | 9 — Unified inbox | 🎬 **Demo mock-up** — gated on Shopee/TikTok/Meta approval |
 > | 10 — QA, SEO & launch | ⛔ **Not started** |
 >
@@ -158,7 +158,7 @@ actually landed.*
 | 2 | Affiliate code | ✅ Fully feasible | ✅ Live | Native build: unique codes + referral links, click & order attribution, commission ledger, payout tracking, affiliate portal. | 6 |
 | 3 | Loyalty / membership | ✅ Fully feasible | ✅ Live | Native build: points ledger, tier system ("Kalima Club": e.g. Member/Gold/Platinum), earn on purchase, redeem at checkout, birthday rewards. | 7 |
 | 4 | Link postage to EasyParcel | ✅ Fully feasible | 🟡 Built; needs API credentials | EasyParcel Individual/Marketplace API: live rate quotes at checkout, one-click consignment booking from admin, AWB label PDF, tracking webhooks → auto customer notification. | 4 |
-| 5 | Stock sync with Shopee & TikTok Shop | ✅ Feasible (approval-gated) | 🎬 Not started — apps not applied for | Shopee Open Platform API + TikTok Shop Open Platform API. SKU mapping table, near-real-time stock push on our sales, webhook-driven stock pull on marketplace sales. Requires developer app approval on both platforms (lead time). | 8 |
+| 5 | Stock sync with Shopee & TikTok Shop | ✅ Feasible (approval-gated) | 🟡 Engine built; adapters await approval | Shopee Open Platform API + TikTok Shop Open Platform API. SKU mapping table, near-real-time stock push on our sales, webhook-driven stock pull on marketplace sales. Requires developer app approval on both platforms (lead time). | 8 |
 | 6 | Read TikTok / IG / Shopee messages in one place | ✅ Feasible (approval-gated) | 🎬 Not started — approvals not applied for | **Shopee:** ✅ chat API via Open Platform. **TikTok Shop:** ✅ customer-service conversation API for approved apps. **TikTok organic DMs:** ✅ **Business Messaging API** — Kalima's TikTok account is a Business account, which unlocks send/receive of organic TikTok DMs (48h reply window). **Instagram + FB Page:** ✅ via Meta's Messenger API for Instagram — requires Meta App Review + IG professional account linked to a FB Page. **WhatsApp:** ✅ Cloud API (already integrated in Phase 5). Only gap: TikTok *personal/creator* DMs (no API on any platform) — not relevant here, since Kalima runs a Business account. | 9 |
 
 **Honest summary for the client:** items 1–6 boleh buat semua. Item 6 (unified inbox) covers Shopee chat, TikTok **Shop** buyer chat, **TikTok organic DMs** (Kalima's TikTok is a Business account, so the TikTok Business Messaging API applies), Instagram DM + Facebook Page (lepas Meta approval), and WhatsApp — semua dalam satu inbox, reply terus dari sana. The only thing with no API anywhere is TikTok *personal/creator* DMs, which does not apply to a Business account. This is beyond what EasyStore offers at any tier, and no third-party vendor sells this exact channel mix (see [INTEGRATION_STRATEGY.md §2⑥](./INTEGRATION_STRATEGY.md)).
@@ -299,7 +299,7 @@ commission, `unique(order_id)`), `affiliate_payouts`
 > | `/admin/affiliates` | **② Affiliate program** — approve/suspend, rates, discount code, payouts | ✅ live |
 > | `/admin/loyalty` | **③ Loyalty** — outstanding liability, earn/redeem rules, tiers | ✅ live |
 > | `/admin/shipping` | **④ EasyParcel** — connection status, pickup address, rates, booking, AWB | ✅ built, needs credentials |
-> | `/admin/sync` | **⑤ Shopee & TikTok stock sync** | 🎬 demo mock-up (Phase 8) |
+> | `/admin/sync` | **⑤ Shopee & TikTok stock sync** — connections, SKU mapping, CSV import/export, activity | ✅ live; adapters pending |
 > | `/admin/inbox` | **⑥ Unified inbox** | 🎬 demo mock-up (Phase 9) |
 
 ### Phase 0 — Foundations & Project Setup
@@ -466,24 +466,66 @@ commission, `unique(order_id)`), `affiliate_payouts`
 ---
 
 ### Phase 8 — Marketplace Stock Sync (Shopee + TikTok Shop)
-**Status: 🎬 not started — demo mock-up only**
+**Status: 🟡 engine built and verified — Shopee/TikTok HTTP adapters await app approval**
 **Duration: ~2–3 weeks** — *client feature #5*
 
-> **Status:** `/admin/sync` is a demo mock-up reading from `src/data/demo.ts`. Nothing is wired.
-> ⚠️ **The platform app applications were meant to start during Phase 3 and have not been
-> submitted** — approval lead time is 1–4 weeks and is the critical path for this phase (§8).
-> Note that "Edge Function queue" below now means a Next route handler or Vercel cron; the project
+> **Everything that does not depend on a vendor's API contract is built, verified and live.**
+> Shopee and TikTok have issued no credentials and publish no sandbox reachable without one, so
+> their HTTP clients are deliberate stubs behind the `ChannelAdapter` seam in
+> `src/lib/channels/`. When a credential lands, the remaining work is one adapter file rather
+> than a feature — the same approach Phase 4 groundwork took with EasyParcel.
+>
+> ⚠️ **The platform applications were meant to start during Phase 3 and STILL have not been
+> submitted.** 1–4 weeks of approval each, and they are now the only thing between this engine
+> and a working sync (§8).
+>
+> Note that "Edge Function queue" below means a Next route handler on a Vercel cron; the project
 > uses no Supabase Edge Functions (§4.1).
 
-- [ ] **Platform apps** — register on Shopee Open Platform & TikTok Shop Partner Center (client authorizes their shops via OAuth; tokens stored encrypted in `channel_connections`)
-- [ ] **SKU mapping** — admin UI to link Kalima variants ↔ Shopee item/model IDs ↔ TikTok SKU IDs (auto-match by SKU string + manual override); unmapped-listing report
-- [ ] **Outbound sync (site sale → marketplaces)** — on our stock change, push new qty to both platforms via Edge Function queue (debounced, retried, logged)
-- [ ] **Inbound sync (marketplace sale → site)** — Shopee/TikTok order webhooks decrement `stock_on_hand` via ledger; `pg_cron` reconciliation poll every 15 min as safety net
-- [ ] **Marketplace orders visibility** — imported into `channel_orders`, shown in admin orders list with channel badge (fulfilment stays in Shopee/TikTok seller centers — they mandate their own logistics)
-- [ ] **Conflict policy** — website DB is source of truth; oversell alarm if marketplace sells below safety stock; optional per-channel stock buffer (e.g. hold back 2 units)
-- [ ] **Sync health dashboard** — last sync per channel, error queue, manual re-sync button
+- [ ] **Platform apps** — ⛔ **client action, outstanding.** `channel_connections` is built and
+      sealed (RLS on, no policies, explicit revoke — service-role only), and the staff-gated OAuth
+      connect/callback routes are live at `/api/channels/[channel]/{connect,callback}`. `state`
+      carries no identity; identity is re-derived from the staff session.
+- [x] **SKU mapping** — `/admin/sync` maps variants to marketplace listings, with a per-listing
+      safety buffer, a pause switch, and an unmapped report driven by lines that actually arrived
+      in marketplace orders. Bulk mapping is by **seller-centre CSV import matched on SKU only** —
+      fuzzy-matching a product name would silently point a listing at the wrong variant, and every
+      future push would then be wrong in both directions.
+- [x] **Outbound sync** — an `AFTER INSERT` trigger on `stock_movements` enqueues a push for every
+      mapped listing, so all five stock paths are covered rather than five call sites anyone could
+      forget. Jobs carry **no quantity** — they are an intent to resync, which is what lets a
+      partial unique index collapse rapid movements into one push. Drained by `/api/channels/sync`
+      on a once-a-minute Vercel cron, claiming with `for update skip locked`, exponential backoff
+      to six attempts. *Pushes themselves no-op until an adapter exists.*
+- [x] **Inbound sync** — `/api/channels/[channel]/webhook` verifies the signature through the
+      adapter (fail-closed: an unwired adapter returns false, never true) and calls
+      `record_channel_sale`, which is idempotent on `(channel, external_order_id)` and decrements
+      through the ledger with `origin_channel` set as a loop guard. ⛔ *The 15-minute
+      reconciliation poll is not built — it needs an adapter to poll against.*
+- [x] **Marketplace orders visibility** — imported into `channel_orders`, shown on `/admin/sync`.
+      Deliberately **not** in `orders`: both platforms mandate their own fulfilment and refunds, so
+      an imported row could never be shipped or refunded here, and keeping it separate means
+      `refund_order`, `award_loyalty_points` and `attribute_referral` cannot reach it.
+- [x] **Conflict policy** — website DB is the source of truth. Per-listing safety buffer honoured
+      by one shared, unit-tested quantity rule. Oversell is **clamped, not refused**:
+      `stock_on_hand` carries `check (>= 0)` and a marketplace sale has already happened, so the
+      decrement is capped at what we hold, `applied_qty` records the shortfall, and an `oversell`
+      is logged at level `error`.
+- [x] **Sync health dashboard** — queued/running/failed counts, per-channel connection state with
+      the real reason a channel is unavailable, unmapped report, recent marketplace orders, and a
+      live activity log. Manual re-sync goes through the same debounced queue so pressing it cannot
+      stampede a rate limit.
+- [x] **Usable before any approval** — CSV export of per-listing quantities using the same rule the
+      automated push will use, so the manual and automatic paths can never disagree. With the
+      listing import, that completes a working loop today: seller centre → import mappings → export
+      stock → bulk upload.
 
-**Exit criteria:** a sale on any of the 3 channels updates stock on the other 2 within ~1 minute (webhook path) / 15 min worst case (poll path).
+**Exit criteria:** ⛔ **not yet met** — needs a real sale on one channel to move stock on the other
+two, which requires the platform apps. Everything up to that boundary is verified: the trigger fires
+on all five stock paths, 11 rapid movements collapse to one job per channel, the loop guard holds in
+both directions, two concurrent workers claim 20 jobs with zero overlap, backoff escalates to
+'failed' at six attempts, `record_channel_sale` is idempotent and clamps an oversell, both endpoints
+fail closed, and the CSV export honours the safety buffer exactly.
 
 ---
 
@@ -544,7 +586,7 @@ commission, `unique(order_id)`), `affiliate_payouts`
 | 5 | Messaging/broadcast | 1–2 wk | Wk 13 | 🟡 email done · WhatsApp blocked on Meta |
 | 6 | Affiliate | 1–2 wk | Wk 15 | ✅ done |
 | 7 | Loyalty/membership | 1–2 wk | Wk 17 | ✅ done |
-| 8 | Shopee + TikTok sync | 2–3 wk | Wk 20 | 🎬 not started — apps not yet applied for |
+| 8 | Shopee + TikTok sync | 2–3 wk | Wk 20 | 🟡 engine built — apps still not applied for |
 | 9 | Unified inbox | 2–3 wk | Wk 23 | 🎬 not started — approvals not yet applied for |
 | 10 | QA & launch | 1–2 wk | **Wk 24–25 (~6 months full scope)** | ⛔ not started |
 

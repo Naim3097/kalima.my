@@ -2,12 +2,17 @@
 
 Custom e-commerce platform for Kalima (Timeless Modest Luxury). Next.js + Supabase.
 
-**Build status:** Phases 0–7 are built and running against the live database — storefront, auth,
+**Build status:** Phases 0–8 are built and running against the live database — storefront, auth,
 checkout with LeanX (FPX + e-wallets), the full admin back office, EasyParcel booking and tracking,
-segmented email broadcasts, the affiliate program and Kalima Club loyalty. Phases 8 (marketplace
-stock sync) and 9 (unified inbox) are still demo mock-ups, both gated on external platform
-approvals. See [PROJECT_PLAN.md](./PROJECT_PLAN.md) for the phase-by-phase breakdown, and
-[Feature status](#feature-status) below for what that means route by route.
+segmented email broadcasts, the affiliate program, Kalima Club loyalty, and the marketplace
+stock-sync engine. Phase 9 (unified inbox) is still a demo mock-up.
+
+Phase 8's engine is complete — ledger trigger, debounced job queue, worker, inbound webhook and
+admin screen — but Shopee and TikTok have issued no credentials, so their HTTP adapters are
+deliberate stubs behind a provider seam. Until then the CSV import/export pair on `/admin/sync`
+gives the client a working manual loop. See [PROJECT_PLAN.md](./PROJECT_PLAN.md) for the
+phase-by-phase breakdown, and [Feature status](#feature-status) below for what that means route by
+route.
 
 ## Stack
 
@@ -41,9 +46,9 @@ src/
     providers.tsx        # TanStack Query client boundary
     globals.css          # Brand tokens: Kalima Navy #383C61 scale, cream/beige, type
     (storefront)/        # Storefront route group — shared header/footer/overlays shell
-    admin/               # Back office (live, except /admin/sync and /admin/inbox)
+    admin/               # Back office (live, except /admin/inbox)
     api/                 # Route handlers: products, collections, admin resources,
-                         #   payments/webhook, shipping/{connect,callback,webhook}
+                         #   payments/webhook, shipping/*, channels/* (OAuth, webhook, sync)
     auth/                # Sign-in/up/out server actions + email-confirmation callback
     checkout/actions.ts  # placeOrder — resolves the cart, calls create_order
   components/
@@ -54,13 +59,14 @@ src/
     admin/               # Admin shell + back-office widgets
   data/catalog.ts        # Types, seed fallback, nav + hero slides (client-safe)
   data/catalog.queries.ts# Supabase-backed catalog fetchers (server-only)
-  data/demo.ts           # Sample datasets — now only /admin/sync and /admin/inbox
+  data/demo.ts           # Sample datasets — now only /admin/inbox
   lib/supabase/          # Browser, public (session-less), server + admin clients
   lib/commerce.ts        # Typed access to the order RPCs (server-only, admin client)
   lib/admin.ts           # Back-office read models + staff-gated mutations
   lib/payments/          # PaymentProvider seam + LeanX (bills, services, webhook verify)
   lib/shipping/          # EasyParcel client, OAuth tokens, rates, MY state → ISO codes
   lib/messaging/         # Audience segmentation (PDPA-gated) + campaign send pipeline
+  lib/channels/          # Marketplace/messaging seam: adapters, tokens, sync worker
   lib/affiliate.ts       # Referral ledger reads, application, payouts
   lib/loyalty.ts         # Points ledger reads, tier resolution, liability
   lib/email/             # Resend transactional templates
@@ -136,11 +142,11 @@ colour × size **variant matrix**, which `mapProduct()` collapses back into the 
 | WhatsApp Cloud API | same tables (`campaign_channel` enum has `whatsapp`) | 5 | ⛔ not built — blocked on Meta Business verification |
 | Affiliate engine | `src/lib/affiliate.ts`, `/affiliate` + `/admin/affiliates` | 6 | ✅ live |
 | Loyalty ("Kalima Club") | `src/lib/loyalty.ts`, `/kalima-club` + `/admin/loyalty` | 7 | ✅ live |
-| Shopee / TikTok Shop sync | `src/app/admin/sync/` | 8 | 🎬 demo mock-up — gated on platform app approval |
+| Marketplace stock sync | `src/lib/channels/`, `/admin/sync` | 8 | 🟡 engine live; Shopee/TikTok adapters await platform approval |
 | Unified inbox | `src/app/admin/inbox/` | 9 | 🎬 demo mock-up — gated on Shopee/TikTok/Meta approval |
 
-The two remaining demo screens read from `src/data/demo.ts` and carry a "Demo preview" badge —
-replace the data source, keep the UI.
+`/admin/inbox` is the last screen reading from `src/data/demo.ts` — replace the data source, keep
+the UI.
 
 **Env-gated behaviour.** Integrations are null-until-configured and never fake success:
 

@@ -125,34 +125,6 @@ export const COURIER_QUOTES = [
   { courier: "DHL eCommerce", eta: "2–4 days", price: 12.9 },
 ];
 
-// ---- Marketplace sync ----
-export type SyncRow = {
-  sku: string;
-  product: string;
-  image?: string;
-  web: number;
-  shopee: number | null;
-  tiktok: number | null;
-  synced: boolean;
-};
-
-export const SYNC_ROWS: SyncRow[] = [
-  { sku: "KLM-MC-BLS-M", product: "Maya Chiffon — Blush Floral, M", image: "/products/maya-chiffon.jpg", web: 24, shopee: 24, tiktok: 24, synced: true },
-  { sku: "KLM-BD-MRN-S", product: "Bella Dress — Maroon, S", image: "/products/bella-dress.jpg", web: 8, shopee: 8, tiktok: 8, synced: true },
-  { sku: "KLM-AS-NOR-M", product: "Amanda Sparkle — Noir, M", image: "/products/amanda-sparkle.jpg", web: 15, shopee: 15, tiktok: 15, synced: true },
-  { sku: "KLM-RK-PCH-L", product: "Ruwa Kaftan — Peach Bloom, L", image: "/products/ruwa-kaftan.jpg", web: 11, shopee: 11, tiktok: null, synced: false },
-  { sku: "KLM-SD-IVR-M", product: "Sofea Dress — Ivory Floral, M", image: "/products/sofea-dress.jpg", web: 19, shopee: 19, tiktok: 19, synced: true },
-  { sku: "KLM-RI-NOR-F", product: "Stretchable Rayon Inner — Noir", web: 142, shopee: 140, tiktok: 142, synced: true },
-];
-
-export const SYNC_LOG = [
-  { time: "10:43", event: "Web order KLM-10248 → pushed stock −1 (Maya Chiffon M) to Shopee & TikTok", ok: true },
-  { time: "09:58", event: "Shopee order SPE-88121 webhook → stock −1 (Sofea Dress L) synced to Web & TikTok", ok: true },
-  { time: "09:15", event: "Reconciliation poll: 312 SKUs checked, 0 drift", ok: true },
-  { time: "08:47", event: "TikTok listing missing for KLM-RK-PCH-L — mapping needed", ok: false },
-  { time: "08:00", event: "Reconciliation poll: 312 SKUs checked, 1 drift corrected (Rayon Inner, Shopee −2)", ok: true },
-];
-
 // ---- Unified inbox ----
 export type InboxChannel = "shopee" | "tiktok" | "instagram" | "whatsapp";
 
