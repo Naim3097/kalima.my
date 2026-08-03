@@ -129,6 +129,41 @@ export async function storeConnection(
 }
 
 /*
+  Marks a channel connected when its credential lives in the ENVIRONMENT rather
+  than coming from an OAuth round trip.
+
+  WhatsApp Cloud API for a single business uses a permanent System User token,
+  so there is nothing to exchange, refresh or store. The row records identity
+  and connection state for the admin card; the token stays in the environment,
+  which means the database never holds it at all — strictly better than copying
+  it in for symmetry's sake.
+
+  The caller is expected to have VERIFIED the credential against the platform
+  first, so "connected" on the admin card means a real round trip succeeded.
+*/
+export async function markConnectedViaEnvironment(
+  channel: Channel,
+  info: { shopName: string | null; externalShopId: string | null; connectedBy: string | null },
+): Promise<void> {
+  const { error } = await admin().from("channel_connections").upsert(
+    {
+      channel,
+      shop_name: info.shopName,
+      external_shop_id: info.externalShopId,
+      access_token: null,
+      refresh_token: null,
+      token_expires_at: null,
+      status: "connected",
+      last_error: null,
+      connected_at: new Date().toISOString(),
+      connected_by: info.connectedBy,
+    },
+    { onConflict: "channel" },
+  );
+  if (error) throw new Error(`markConnectedViaEnvironment failed: ${error.message}`);
+}
+
+/*
   Clears the tokens rather than deleting the row, so the admin card keeps
   showing which platform this was and when it was last connected. A deleted row
   reads as "never set up", which is a different fact.

@@ -142,7 +142,8 @@ colour × size **variant matrix**, which `mapProduct()` collapses back into the 
 | Affiliate engine | `src/lib/affiliate.ts`, `/affiliate` + `/admin/affiliates` | 6 | ✅ live |
 | Loyalty ("Kalima Club") | `src/lib/loyalty.ts`, `/kalima-club` + `/admin/loyalty` | 7 | ✅ live |
 | Marketplace stock sync | `src/lib/channels/`, `/admin/sync` | 8 | 🟡 engine live; Shopee/TikTok adapters await platform approval |
-| Unified inbox | `src/lib/channels/inbox.ts`, `/admin/inbox` | 9 | 🟡 engine live; channel adapters await Meta/Shopee/TikTok approval |
+| Unified inbox — **WhatsApp** | `src/lib/channels/meta.ts`, `/admin/inbox` | 9 | ✅ adapter built — needs credentials only |
+| Unified inbox — IG / FB / Shopee / TikTok | `src/lib/channels/` | 9 | 🟡 engine live; adapters await platform approval |
 
 **There is no demo data left.** `src/data/demo.ts`, the `/api/admin/[resource]` fixture endpoint and
 the "Demo preview" banner have all been deleted — every screen reads the live database.

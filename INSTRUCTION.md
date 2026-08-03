@@ -11,6 +11,15 @@ real database. What is missing for each platform is two things:
 
 Nothing else in the codebase changes when a channel comes online.
 
+> ### ✅ WhatsApp's adapter is already written
+> `src/lib/channels/meta.ts` implements it: signature verification, the subscription handshake,
+> payload parsing and sending. 34 unit tests cover the parts that do not need the network, and the
+> full route was exercised with a signed payload end to end into the database.
+>
+> **What is left for WhatsApp is credentials, not code.** Work through §0 and §2.1–2.2, set the
+> five `META_*` variables, press **Connect WhatsApp** in the admin, and it is live. Instagram,
+> Facebook, Shopee and TikTok still need their adapters written.
+
 > **Read this first.** This guide is accurate about *Kalima's* side, because that is in this repo.
 > For the platforms' side it gives you the path, the vocabulary and the gotchas — but **every
 > endpoint path, parameter name and signature scheme must be read from the vendor's current docs at
@@ -72,8 +81,9 @@ messaging half is five methods:
 | `parseMessageWebhook(body)` | Normalise the payload into `InboundMessage[]` | throw on a payload with no messages — return `[]` |
 | `sendMessage(input)` | Deliver a reply | re-check the reply window; that is decided upstream |
 
-Start from `src/lib/channels/meta.ts` (or `shopee.ts` / `tiktok.ts`) — each is a stub that already
-documents what its real implementation needs.
+`src/lib/channels/meta.ts` is a **worked example** — WhatsApp is fully implemented there, and its
+signature and handshake helpers are shared with Instagram and Facebook. `shopee.ts` and `tiktok.ts`
+are still stubs that document what their implementations need.
 
 ### 1.2 Everything else is already wired
 
@@ -141,23 +151,23 @@ to a working inbox — and it is the highest-volume channel for a Malaysian bran
 
 ### 2.2 Environment variables
 
-Already scaffolded in `.env.example`:
+All five are in `.env.example`. The adapter reports itself configured only when **all** of them are
+set — a partial set would produce a channel that accepts messages it cannot answer.
 
 ```bash
 META_APP_ID=
-META_APP_SECRET=          # also the webhook signing key — see 2.4
+META_APP_SECRET=            # also the webhook signing key — see 2.4
 META_REDIRECT_URI=https://kalima.my/api/channels/whatsapp/callback
+META_VERIFY_TOKEN=          # a string YOU invent: openssl rand -hex 24
+META_WHATSAPP_PHONE_ID=     # the sending number's id
+META_WHATSAPP_TOKEN=        # permanent System User access token
 ```
 
-**You will need to add two more.** These are not in `.env.example` yet because their exact use
-depends on how you implement the adapter:
-
-```bash
-META_VERIFY_TOKEN=        # any random string you invent; you paste the SAME value into Meta
-META_WHATSAPP_PHONE_ID=   # the sending number's id
-```
-
-Generate the verify token with `openssl rand -hex 24`.
+**There is no OAuth step for WhatsApp.** Embedded Signup exists for providers onboarding many
+merchants; Kalima is one store with one WABA, so the credential is a permanent System User token in
+the environment — the same shape decision EasyParcel forced. `META_WHATSAPP_TOKEN` is never written
+to the database. Instead, **Connect WhatsApp** in the admin verifies the token against Graph API and
+records the connection, so "Connected" means a real round trip succeeded.
 
 ### 2.3 The webhook handshake
 
@@ -165,9 +175,9 @@ Meta verifies your URL with a **GET** carrying `hub.mode=subscribe`, `hub.verify
 `hub.challenge`. Your job: check the token matches `META_VERIFY_TOKEN`, then return
 `hub.challenge` **as the raw response body** with a 200.
 
-The route (`.../messages/webhook/route.ts`) already returns it as `text/plain`, which is required —
-wrapping it in JSON fails the handshake. Your `verifySubscription` just needs to compare the token
-and return the challenge string, or `null` to refuse.
+Already implemented (`verifyMetaSubscription`), and the route returns it as `text/plain`, which is
+required — wrapping it in JSON fails the handshake. Verified: the correct token echoes the raw
+challenge, a wrong one and a same-length wrong one are both refused 403.
 
 In the Meta dashboard: **WhatsApp → Configuration → Webhook**, set the callback URL to
 `https://kalima.my/api/channels/whatsapp/messages/webhook`, paste the verify token, then subscribe
@@ -175,26 +185,31 @@ to the **`messages`** field.
 
 ### 2.4 Signature verification
 
-Meta signs the raw body with HMAC-SHA256 using your **App Secret**, presented as the
-`x-hub-signature-256` header (format `sha256=<hex>`). Compare in constant time. Model it on the
-existing `verifyWebhook` in `src/lib/payments/leanx.ts`.
+Already implemented (`verifyMetaSignature`): HMAC-SHA256 over the raw body keyed on the **App
+Secret**, presented as `x-hub-signature-256: sha256=<hex>`, compared in constant time and failing
+closed on a missing secret, missing header, wrong prefix, wrong length or mismatch.
+
+Shared with Instagram and Facebook — same app, same secret — so when their App Review lands they
+need only their own parse and send.
 
 ### 2.5 Sending
 
-Replies go to the Cloud API's messages endpoint for your phone number id. Two things to get right:
+Implemented. `POST {phone_number_id}/messages` with `messaging_product: whatsapp`, pinned to Graph
+`v21.0` — pinned deliberately, so Meta cannot change the payload shape under a running store without
+a deploy. Meta's own error message is surfaced verbatim, because *"more than 24 hours have passed"*
+is worth showing a staff member rather than flattening to "send failed".
 
-- **The 24-hour rule.** Outside it, only pre-approved **template** messages are accepted. The
-  codebase already blocks free text at that boundary; templates are a separate feature and are not
-  built.
-- **Return the platform's message id** from `sendMessage`. It is stored on the row and is what makes
-  delivery/read receipts attributable later.
+- **The 24-hour rule** is enforced before the call is made. Outside it only pre-approved **template**
+  messages are accepted, and templates are not built.
+- The returned `wamid` is stored on the message row, which is what makes delivery receipts
+  attributable later.
 
 ### 2.6 Customer linking
 
-WhatsApp gives you the sender's phone in E.164 (`+60123456789`), which is exactly how
-`profiles.phone` stores it. Pass it as `contactPhone` in the `InboundMessage` and threads will
-auto-link to existing customers on first contact — the customer panel then shows their orders and
-Kalima Club standing beside the conversation.
+⚠️ **`wa_id` arrives WITHOUT the leading `+`** — `60123456789`, while `profiles.phone` stores
+`+60123456789`. The adapter normalises it. Without that one character the auto-link silently never
+matches and every WhatsApp thread shows an unknown sender, even for existing customers. Verified
+end to end: a signed payload linked to a real profile.
 
 ### 2.7 Test it
 

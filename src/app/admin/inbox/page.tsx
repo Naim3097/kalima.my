@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Card, CardHeader } from "@/components/admin/ui";
 import InboxPanes from "@/components/admin/InboxPanes";
+import ConnectWhatsApp from "@/components/admin/ConnectWhatsApp";
 import { getCannedReplies, getThread, listThreads } from "@/lib/channels/inbox";
 import { getChannelCards } from "@/lib/channels/admin";
 import { CHANNELS, CHANNEL_LABEL, REPLY_WINDOW_HOURS, channelDoes } from "@/lib/channels/types";
@@ -82,9 +83,15 @@ export default async function AdminInboxPage({
                     {hours === null ? "No reply window" : `${hours}-hour reply window`}
                   </p>
                 </div>
-                <p className="max-w-md text-right text-[12px] text-navy-300">
-                  {blocked ?? (status === "connected" ? "Connected" : "Not connected")}
-                </p>
+                <div className="flex max-w-md flex-col items-end gap-2">
+                  <p className="text-right text-[12px] text-navy-300">
+                    {blocked ?? (status === "connected" ? "Connected" : "Not connected")}
+                  </p>
+                  {/* Only WhatsApp: the others connect by OAuth, or not at all yet. */}
+                  {channel === "whatsapp" && !blocked && (
+                    <ConnectWhatsApp connected={status === "connected"} />
+                  )}
+                </div>
               </li>
             );
           })}

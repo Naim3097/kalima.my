@@ -8,7 +8,8 @@ import { getOrder } from "@/lib/admin";
 import { awardLoyaltyPoints } from "@/lib/commerce";
 import { easyparcelClient, getShippingConfig } from "@/lib/shipping/config";
 import { getRatesForOrder, receiverFrom, senderFrom } from "@/lib/shipping/rates";
-import { disconnectChannel } from "@/lib/channels/tokens";
+import { disconnectChannel, markConnectedViaEnvironment } from "@/lib/channels/tokens";
+import { verifyWhatsAppCredentials } from "@/lib/channels/meta";
 import { enqueueFullResync } from "@/lib/channels/sync";
 import { addNote, markRead, sendReply } from "@/lib/channels/inbox";
 import { channelDoes, isChannel } from "@/lib/channels/types";
@@ -1953,4 +1954,41 @@ export async function updateConversation(input: {
   });
   revalidatePath("/admin/inbox");
   return { ok: true };
+}
+
+/*
+  Connects WhatsApp.
+
+  Unlike the marketplaces there is no OAuth round trip: Cloud API for a single
+  business uses a permanent System User token from the environment. So this
+  verifies that token can actually see the configured phone number, then records
+  the connection. "Connected" on the admin card therefore means a real round
+  trip succeeded, not that someone pasted a value into an env file.
+*/
+export async function connectWhatsApp(): Promise<ActionResult & { number?: string | null }> {
+  let db;
+  let current;
+  try {
+    db = await assertStaff();
+    current = await getCurrentUser();
+  } catch {
+    return { error: "Not authorized." };
+  }
+
+  try {
+    const info = await verifyWhatsAppCredentials();
+    await markConnectedViaEnvironment("whatsapp", {
+      shopName: info.verifiedName ?? info.displayPhoneNumber,
+      externalShopId: info.phoneNumberId,
+      connectedBy: current?.user.id ?? null,
+    });
+    await logAudit(db, {
+      action: "channel.connected", entityType: "channel", entityId: "whatsapp",
+      summary: `WhatsApp connected (${info.displayPhoneNumber ?? info.phoneNumberId})`,
+    });
+    revalidatePath("/admin/inbox");
+    return { ok: true, number: info.displayPhoneNumber };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not verify the WhatsApp credentials." };
+  }
 }
