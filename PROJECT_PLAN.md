@@ -20,7 +20,7 @@
 > | 6 — Affiliate program | ✅ **Done** |
 > | 7 — Loyalty / Kalima Club | ✅ **Done** |
 > | 8 — Marketplace stock sync | 🟡 **Engine built** — Shopee/TikTok adapters await app approval |
-> | 9 — Unified inbox | 🎬 **Demo mock-up** — gated on Shopee/TikTok/Meta approval |
+> | 9 — Unified inbox | 🟡 **Engine built** — channel adapters await Meta/Shopee/TikTok approval |
 > | 10 — QA, SEO & launch | ⛔ **Not started** |
 >
 > The original plan assumed a Vite SPA and an undecided payment gateway. Both changed during the
@@ -159,7 +159,7 @@ actually landed.*
 | 3 | Loyalty / membership | ✅ Fully feasible | ✅ Live | Native build: points ledger, tier system ("Kalima Club": e.g. Member/Gold/Platinum), earn on purchase, redeem at checkout, birthday rewards. | 7 |
 | 4 | Link postage to EasyParcel | ✅ Fully feasible | 🟡 Built; needs API credentials | EasyParcel Individual/Marketplace API: live rate quotes at checkout, one-click consignment booking from admin, AWB label PDF, tracking webhooks → auto customer notification. | 4 |
 | 5 | Stock sync with Shopee & TikTok Shop | ✅ Feasible (approval-gated) | 🟡 Engine built; adapters await approval | Shopee Open Platform API + TikTok Shop Open Platform API. SKU mapping table, near-real-time stock push on our sales, webhook-driven stock pull on marketplace sales. Requires developer app approval on both platforms (lead time). | 8 |
-| 6 | Read TikTok / IG / Shopee messages in one place | ✅ Feasible (approval-gated) | 🎬 Not started — approvals not applied for | **Shopee:** ✅ chat API via Open Platform. **TikTok Shop:** ✅ customer-service conversation API for approved apps. **TikTok organic DMs:** ✅ **Business Messaging API** — Kalima's TikTok account is a Business account, which unlocks send/receive of organic TikTok DMs (48h reply window). **Instagram + FB Page:** ✅ via Meta's Messenger API for Instagram — requires Meta App Review + IG professional account linked to a FB Page. **WhatsApp:** ✅ Cloud API (already integrated in Phase 5). Only gap: TikTok *personal/creator* DMs (no API on any platform) — not relevant here, since Kalima runs a Business account. | 9 |
+| 6 | Read TikTok / IG / Shopee messages in one place | ✅ Feasible (approval-gated) | 🟡 Engine built; adapters await approval | **Shopee:** ✅ chat API via Open Platform. **TikTok Shop:** ✅ customer-service conversation API for approved apps. **TikTok organic DMs:** ✅ **Business Messaging API** — Kalima's TikTok account is a Business account, which unlocks send/receive of organic TikTok DMs (48h reply window). **Instagram + FB Page:** ✅ via Meta's Messenger API for Instagram — requires Meta App Review + IG professional account linked to a FB Page. **WhatsApp:** ✅ Cloud API (already integrated in Phase 5). Only gap: TikTok *personal/creator* DMs (no API on any platform) — not relevant here, since Kalima runs a Business account. | 9 |
 
 **Honest summary for the client:** items 1–6 boleh buat semua. Item 6 (unified inbox) covers Shopee chat, TikTok **Shop** buyer chat, **TikTok organic DMs** (Kalima's TikTok is a Business account, so the TikTok Business Messaging API applies), Instagram DM + Facebook Page (lepas Meta approval), and WhatsApp — semua dalam satu inbox, reply terus dari sana. The only thing with no API anywhere is TikTok *personal/creator* DMs, which does not apply to a Business account. This is beyond what EasyStore offers at any tier, and no third-party vendor sells this exact channel mix (see [INTEGRATION_STRATEGY.md §2⑥](./INTEGRATION_STRATEGY.md)).
 
@@ -300,7 +300,7 @@ commission, `unique(order_id)`), `affiliate_payouts`
 > | `/admin/loyalty` | **③ Loyalty** — outstanding liability, earn/redeem rules, tiers | ✅ live |
 > | `/admin/shipping` | **④ EasyParcel** — connection status, pickup address, rates, booking, AWB | ✅ built, needs credentials |
 > | `/admin/sync` | **⑤ Shopee & TikTok stock sync** — connections, SKU mapping, CSV import/export, activity | ✅ live; adapters pending |
-> | `/admin/inbox` | **⑥ Unified inbox** | 🎬 demo mock-up (Phase 9) |
+> | `/admin/inbox` | **⑥ Unified inbox** — threads, customer context, notes, canned replies, reply-window enforcement | ✅ live; adapters pending |
 
 ### Phase 0 — Foundations & Project Setup
 **Status: ✅ done — domain/DNS outstanding**
@@ -530,27 +530,50 @@ fail closed, and the CSV export honours the safety buffer exactly.
 ---
 
 ### Phase 9 — Unified Inbox (Shopee / TikTok / Instagram / WhatsApp)
-**Status: 🎬 not started — demo mock-up only**
+**Status: 🟡 engine built and verified — channel adapters await Meta/Shopee/TikTok approval**
 **Duration: ~2–3 weeks** — *client feature #6, the client's headline priority* · scope per feasibility matrix (§3)
 
-> **Status:** `/admin/inbox` is a demo mock-up — the 3-pane UI exists and reads from
-> `src/data/demo.ts`; no channel is connected. Gated on Shopee Open Platform, TikTok Shop Partner
-> Center, TikTok Business Messaging and Meta App Review, none of which have been applied for.
+> **Everything that does not depend on a vendor's API contract is built and live.** The schema,
+> ingestion route, reply-window enforcement, customer linking, notes, canned replies and the
+> three-pane admin all work against the real database. No channel is connected, so the honest
+> state of the screen today is an empty inbox that says which approval unlocks which channel.
+>
+> ⚠️ **None of the approvals have been applied for.** WhatsApp is the shortest path: it shares
+> the Meta Business verification Phase 5 broadcasts already need, so one application opens both.
+>
 > "Edge Functions" below means Next route handlers (§4.1).
 
-> **This is the "reply to everyone from one place" feature.** The client's focus is
-> unification and response, not outbound blasting — every incoming message from every
-> channel lands in one screen, each linked to the customer's orders and Kalima Club
-> profile, and staff reply without leaving the admin.
+- [ ] **Channels in scope** — ⛔ **client action, outstanding for every one.** Shopee chat ·
+      TikTok Shop buyer chat · TikTok organic DMs (Business Messaging, 48h window) · Instagram DM
+      and Facebook Page (post Meta App Review) · WhatsApp (shares Phase 5's Meta verification) ·
+      TikTok *personal/creator* DMs have no API anywhere and do not apply to a Business account.
+- [x] **Ingestion** — `/api/channels/[channel]/messages/webhook` normalizes into
+      `conversations`/`messages`, idempotent on `external_message_id` so a redelivery cannot
+      double-post or inflate the unread count. Signature checking is delegated to the adapter and
+      **fails closed**; the subscription handshake refuses too, so no live webhook can be pointed
+      at the app before it can handle the traffic. ⛔ *Media is stored as sent for now — mirroring
+      bytes into Storage needs a wired adapter to know what auth their CDN requires.*
+- [x] **Inbox UI** — three panes: thread list with channel badges and unread counts, the
+      conversation, and the customer's orders and Kalima Club standing beside it. Filters by
+      channel; assignment and open/snoozed/closed status. ⛔ *Supabase Realtime is not wired —
+      threads refresh on navigation. It is new ground in this codebase and deserves its own change
+      once there is live traffic to test against.*
+- [x] **Replies** — the reply window is enforced **server-side**, computed from `last_inbound_at`
+      by a unit-tested module and re-derived again inside the send path, because a page rendered an
+      hour ago can show an open composer for a window that has since closed. Outside it the
+      free-text box is disabled and states the reason. Per-channel hours are data, not a hardcoded
+      number: 24h Meta, 48h TikTok Business, none on Shopee.
+- [x] **Team features** — assignment, open/snoozed/closed, internal notes and canned replies.
+      A note is a message DIRECTION, not a flag, so it cannot reach a customer through any code
+      path; five starting replies are seeded and editable.
+- [ ] **Meta App Review** — ⛔ **outstanding**, for `instagram_business_manage_messages` and
+      `pages_messaging` (2–4 weeks). WhatsApp does not need it and comes first.
 
-- [ ] **Channels in scope:** Shopee chat ✅ · TikTok **Shop** buyer chat ✅ · **TikTok organic DMs** ✅ (Business Messaging API — Kalima runs a TikTok **Business** account, 48h reply window) · Instagram DM ✅ (post Meta App Review) · Facebook Page messages ✅ (same Meta track) · WhatsApp ✅ (infra already exists from Phase 5) · TikTok *personal/creator* DMs ❌ (no API anywhere — not applicable to a Business account)
-- [ ] **Ingestion** — per-channel webhook receivers (Edge Functions) normalize messages into `conversations`/`messages`; media attachments mirrored to Storage
-- [ ] **Inbox UI (admin)** — 3-pane layout: conversation list w/ channel badges & unread counts, thread view, reply composer; Supabase Realtime for live updates; filters by channel/assignee/unread; link conversation → customer profile & orders
-- [ ] **Replies** — send back through each channel's API (Shopee `send_message`, TikTok Shop CS reply, TikTok Business Messaging send, IG/Messenger send, WhatsApp send). Respect per-channel reply windows: IG/FB 24h, TikTok Business 48h, WhatsApp 24h + template fallback. Outside the window the composer disables free-text and surfaces the reason
-- [ ] **Team features** — assign conversation to staff, internal notes, canned replies/quick answers ("What's my order status?" → auto-context from linked order)
-- [ ] **Meta App Review** submission for `instagram_business_manage_messages` + `pages_messaging` (allow 2–4 weeks; feature ships Shopee + TikTok-first, Meta channels toggled on when approved)
-
-**Exit criteria:** messages from a test buyer on Shopee, TikTok Shop, TikTok organic DM, and Instagram all appear in one inbox and receive replies from it — each thread linked to the sender's customer record.
+**Exit criteria:** ⛔ **not yet met** — needs a real message from a test buyer, which requires the
+approvals. Everything up to that boundary is verified: inbound recording links a customer by phone
+and by email, a redelivered message id changes nothing, an outbound reply does not extend the reply
+window, a note does not advance the thread, both webhook entry points fail closed, and the admin
+renders an open window, a closed window and a no-window channel correctly from seeded threads.
 
 ---
 
@@ -587,7 +610,7 @@ fail closed, and the CSV export honours the safety buffer exactly.
 | 6 | Affiliate | 1–2 wk | Wk 15 | ✅ done |
 | 7 | Loyalty/membership | 1–2 wk | Wk 17 | ✅ done |
 | 8 | Shopee + TikTok sync | 2–3 wk | Wk 20 | 🟡 engine built — apps still not applied for |
-| 9 | Unified inbox | 2–3 wk | Wk 23 | 🎬 not started — approvals not yet applied for |
+| 9 | Unified inbox | 2–3 wk | Wk 23 | 🟡 engine built — approvals still not applied for |
 | 10 | QA & launch | 1–2 wk | **Wk 24–25 (~6 months full scope)** | ⛔ not started |
 
 **Where the project actually is:** phases 0–7 are delivered — roughly week 17 of the plan, i.e. the

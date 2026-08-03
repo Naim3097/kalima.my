@@ -6,7 +6,6 @@ import {
   AFFILIATES,
   TIERS,
   SHIPMENTS,
-  CONVERSATIONS,
   SALES_14D,
   CHANNEL_SPLIT,
 } from "@/data/demo";
@@ -26,10 +25,8 @@ const RESOURCES = {
   affiliates: () => AFFILIATES,
   loyalty: () => TIERS,
   shipments: () => SHIPMENTS,
-  // 'sync' is gone: Phase 8 landed, so /admin/sync reads the real tables and
-  // its fixtures were deleted. 'inbox' is the last one still backed by demo
-  // data, and goes the same way when Phase 9 lands.
-  inbox: () => CONVERSATIONS,
+  // 'sync' and 'inbox' are gone: Phases 8 and 9 landed, so both screens read
+  // the real tables and their fixtures were deleted.
   sales: () => SALES_14D,
   channels: () => CHANNEL_SPLIT,
 } as const;

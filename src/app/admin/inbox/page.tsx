@@ -1,17 +1,23 @@
 import type { Metadata } from "next";
-import dynamic from "next/dynamic";
-import { DemoNote } from "@/components/admin/ui";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardHeader } from "@/components/admin/ui";
+import InboxPanes from "@/components/admin/InboxPanes";
+import { getCannedReplies, getThread, listThreads } from "@/lib/channels/inbox";
+import { getChannelCards } from "@/lib/channels/admin";
+import { CHANNELS, CHANNEL_LABEL, REPLY_WINDOW_HOURS, channelDoes } from "@/lib/channels/types";
+import { connectBlockedReason } from "@/lib/channels/registry";
 
-/* Heaviest admin screen — the 3-pane inbox is split out of the initial payload. */
-const InboxPanes = dynamic(() => import("@/components/admin/InboxPanes"), {
-  loading: () => (
-    <>
-      <Skeleton className="h-10 w-full max-w-md" />
-      <Skeleton className="h-[480px] w-full" />
-    </>
-  ),
-});
+/*
+  Unified Inbox — driven by the live database.
+
+  Replaces the Phase 9 demo mock-up. No channel is connected yet, so the honest
+  state of this screen today is an empty inbox plus a plain statement of which
+  approval unlocks which channel. It does not pretend to have messages.
+
+  Rendered on the server so the reply window is computed there — see
+  lib/channels/reply-window. The composer must never derive it from a browser
+  clock.
+*/
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Inbox · Admin",
@@ -19,24 +25,76 @@ export const metadata: Metadata = {
     "Shopee chat, TikTok Shop chat, Instagram DM and WhatsApp — read and replied from one place, linked to orders.",
 };
 
-export default function AdminInboxPage() {
+const MESSAGING_CHANNELS = CHANNELS.filter((c) => channelDoes(c, "messaging"));
+
+export default async function AdminInboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ c?: string }>;
+}) {
+  const { c } = await searchParams;
+
+  const [threads, cannedReplies, cards] = await Promise.all([
+    listThreads(),
+    getCannedReplies(),
+    getChannelCards(),
+  ]);
+
+  const activeId = c ?? threads[0]?.id ?? null;
+  const detail = activeId ? await getThread(activeId) : null;
+
+  const connectedByChannel = new Map(cards.map((k) => [k.channel, k.status]));
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-3xl text-navy">Unified Inbox ⑥</h1>
         <p className="mt-1 text-[13px] tracking-wide text-navy-400">
-          Shopee chat, TikTok Shop chat, Instagram DM and WhatsApp — read and replied from one place, linked to
-          orders.
+          Shopee chat, TikTok Shop chat, Instagram DM and WhatsApp — read and replied from one
+          place, linked to orders and Kalima Club standing.
         </p>
       </div>
 
-      <InboxPanes />
+      <InboxPanes
+        threads={threads}
+        detail={detail ? { messages: detail.messages, customer: detail.customer } : null}
+        activeId={activeId}
+        cannedReplies={cannedReplies}
+      />
 
-      <DemoNote>
-        Demo preview of Phase 9. Scope: Shopee chat + TikTok Shop buyer chat + Instagram DM (after Meta App Review)
-        + WhatsApp. Heads-up — TikTok <em>personal/creator</em> DMs have no public API on any platform, so those
-        stay in the TikTok app. Replies respect each platform&apos;s messaging windows (e.g. IG/WhatsApp 24-hour rule).
-      </DemoNote>
+      <Card>
+        <CardHeader title="Channels" />
+        <p className="px-5 pb-3 text-[12px] text-navy-400">
+          Each channel needs its own approval before messages can arrive. WhatsApp is first: it
+          shares the Meta Business verification that Phase 5 broadcasts already require, so one
+          approval opens both.
+        </p>
+        <ul className="divide-y divide-navy/5 px-5 pb-4">
+          {MESSAGING_CHANNELS.map((channel) => {
+            const blocked = connectBlockedReason(channel);
+            const status = connectedByChannel.get(channel);
+            const hours = REPLY_WINDOW_HOURS[channel];
+            return (
+              <li key={channel} className="flex items-start justify-between gap-4 py-2.5 text-[13px]">
+                <div>
+                  <p className="text-navy">{CHANNEL_LABEL[channel]}</p>
+                  <p className="text-[11px] text-navy-300">
+                    {hours === null ? "No reply window" : `${hours}-hour reply window`}
+                  </p>
+                </div>
+                <p className="max-w-md text-right text-[12px] text-navy-300">
+                  {blocked ?? (status === "connected" ? "Connected" : "Not connected")}
+                </p>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="border-t border-navy/10 px-5 py-3 text-[12px] leading-relaxed text-navy-400">
+          TikTok <em>personal/creator</em> DMs have no public API on any platform and stay in the
+          TikTok app. That does not apply to Kalima, whose TikTok is a Business account — both
+          TikTok Shop buyer chat and organic DMs are covered.
+        </p>
+      </Card>
     </div>
   );
 }

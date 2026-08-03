@@ -10,6 +10,7 @@ import { easyparcelClient, getShippingConfig } from "@/lib/shipping/config";
 import { getRatesForOrder, receiverFrom, senderFrom } from "@/lib/shipping/rates";
 import { disconnectChannel } from "@/lib/channels/tokens";
 import { enqueueFullResync } from "@/lib/channels/sync";
+import { addNote, markRead, sendReply } from "@/lib/channels/inbox";
 import { channelDoes, isChannel } from "@/lib/channels/types";
 import {
   CATEGORIES,
@@ -1860,5 +1861,96 @@ export async function disconnectChannelAction(channel: string): Promise<ActionRe
     summary: `${channel} disconnected`,
   });
   revalidatePath("/admin/sync");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------------
+   Phase 9 — unified inbox
+   ------------------------------------------------------------------------ */
+
+/*
+  Send a reply.
+
+  Deliberately thin: every policy decision — is the window open, is the channel
+  connected, what happens when the platform rejects it — lives in
+  lib/channels/inbox.ts, so it cannot differ between this action and any other
+  caller added later. This layer does authorisation and revalidation only.
+*/
+export async function sendInboxReply(
+  conversationId: string,
+  body: string,
+): Promise<ActionResult> {
+  let current;
+  try {
+    await assertStaff();
+    current = await getCurrentUser();
+  } catch {
+    return { error: "Not authorized." };
+  }
+  if (!current) return { error: "Not authorized." };
+
+  const res = await sendReply({ conversationId, body, staffId: current.user.id });
+  if ("error" in res) return { error: res.error };
+
+  revalidatePath("/admin/inbox");
+  return { ok: true };
+}
+
+export async function addInboxNote(
+  conversationId: string,
+  body: string,
+): Promise<ActionResult> {
+  let current;
+  try {
+    await assertStaff();
+    current = await getCurrentUser();
+  } catch {
+    return { error: "Not authorized." };
+  }
+  if (!current) return { error: "Not authorized." };
+
+  const res = await addNote({ conversationId, body, staffId: current.user.id });
+  if ("error" in res) return { error: res.error };
+
+  revalidatePath("/admin/inbox");
+  return { ok: true };
+}
+
+export async function markInboxRead(conversationId: string): Promise<ActionResult> {
+  try { await assertStaff(); } catch { return { error: "Not authorized." }; }
+  await markRead(conversationId);
+  revalidatePath("/admin/inbox");
+  return { ok: true };
+}
+
+/*
+  Assignment and status.
+
+  Assigning to nobody is expressed as null rather than a sentinel, so "unassigned"
+  and "assigned to a deleted user" are the same state — which they are, since the
+  column is ON DELETE SET NULL.
+*/
+export async function updateConversation(input: {
+  conversationId: string;
+  assignedTo?: string | null;
+  status?: "open" | "snoozed" | "closed";
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const patch: Record<string, unknown> = {};
+  if (input.assignedTo !== undefined) patch.assigned_to = input.assignedTo || null;
+  if (input.status !== undefined) patch.status = input.status;
+  if (Object.keys(patch).length === 0) return { ok: true };
+
+  const { error } = await db.from("conversations").update(patch).eq("id", input.conversationId);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "conversation.updated", entityType: "conversation", entityId: input.conversationId,
+    summary: `Conversation ${input.status ? `set to ${input.status}` : "reassigned"}`,
+    meta: patch,
+  });
+  revalidatePath("/admin/inbox");
   return { ok: true };
 }

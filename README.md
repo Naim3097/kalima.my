@@ -5,7 +5,7 @@ Custom e-commerce platform for Kalima (Timeless Modest Luxury). Next.js + Supaba
 **Build status:** Phases 0–8 are built and running against the live database — storefront, auth,
 checkout with LeanX (FPX + e-wallets), the full admin back office, EasyParcel booking and tracking,
 segmented email broadcasts, the affiliate program, Kalima Club loyalty, and the marketplace
-stock-sync engine. Phase 9 (unified inbox) is still a demo mock-up.
+stock-sync engine and the unified inbox. No phase is a mock-up any more.
 
 Phase 8's engine is complete — ledger trigger, debounced job queue, worker, inbound webhook and
 admin screen — but Shopee and TikTok have issued no credentials, so their HTTP adapters are
@@ -46,7 +46,7 @@ src/
     providers.tsx        # TanStack Query client boundary
     globals.css          # Brand tokens: Kalima Navy #383C61 scale, cream/beige, type
     (storefront)/        # Storefront route group — shared header/footer/overlays shell
-    admin/               # Back office (live, except /admin/inbox)
+    admin/               # Back office — all screens on live data
     api/                 # Route handlers: products, collections, admin resources,
                          #   payments/webhook, shipping/*, channels/* (OAuth, webhook, sync)
     auth/                # Sign-in/up/out server actions + email-confirmation callback
@@ -59,14 +59,14 @@ src/
     admin/               # Admin shell + back-office widgets
   data/catalog.ts        # Types, seed fallback, nav + hero slides (client-safe)
   data/catalog.queries.ts# Supabase-backed catalog fetchers (server-only)
-  data/demo.ts           # Sample datasets — now only /admin/inbox
+  data/demo.ts           # Residual Phase 1 fixtures (dashboard series, /api/admin)
   lib/supabase/          # Browser, public (session-less), server + admin clients
   lib/commerce.ts        # Typed access to the order RPCs (server-only, admin client)
   lib/admin.ts           # Back-office read models + staff-gated mutations
   lib/payments/          # PaymentProvider seam + LeanX (bills, services, webhook verify)
   lib/shipping/          # EasyParcel client, OAuth tokens, rates, MY state → ISO codes
   lib/messaging/         # Audience segmentation (PDPA-gated) + campaign send pipeline
-  lib/channels/          # Marketplace/messaging seam: adapters, tokens, sync worker
+  lib/channels/          # Marketplace/messaging seam: adapters, tokens, sync worker, inbox
   lib/affiliate.ts       # Referral ledger reads, application, payouts
   lib/loyalty.ts         # Points ledger reads, tier resolution, liability
   lib/email/             # Resend transactional templates
@@ -143,10 +143,10 @@ colour × size **variant matrix**, which `mapProduct()` collapses back into the 
 | Affiliate engine | `src/lib/affiliate.ts`, `/affiliate` + `/admin/affiliates` | 6 | ✅ live |
 | Loyalty ("Kalima Club") | `src/lib/loyalty.ts`, `/kalima-club` + `/admin/loyalty` | 7 | ✅ live |
 | Marketplace stock sync | `src/lib/channels/`, `/admin/sync` | 8 | 🟡 engine live; Shopee/TikTok adapters await platform approval |
-| Unified inbox | `src/app/admin/inbox/` | 9 | 🎬 demo mock-up — gated on Shopee/TikTok/Meta approval |
+| Unified inbox | `src/lib/channels/inbox.ts`, `/admin/inbox` | 9 | 🟡 engine live; channel adapters await Meta/Shopee/TikTok approval |
 
-`/admin/inbox` is the last screen reading from `src/data/demo.ts` — replace the data source, keep
-the UI.
+Every admin screen now reads live data. `src/data/demo.ts` retains only the dashboard sample
+series and the fixtures behind `/api/admin/[resource]`, a Phase 1 leftover.
 
 **Env-gated behaviour.** Integrations are null-until-configured and never fake success:
 
