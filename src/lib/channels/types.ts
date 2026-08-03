@@ -131,12 +131,36 @@ export type TokenPair = {
   scopes?: string[] | null;
 };
 
+/** One listing's stock, as the worker hands it to an adapter. */
+export type StockPush = {
+  externalItemId: string;
+  externalModelId: string | null;
+  /** Already net of the safety buffer and floored at zero. */
+  qty: number;
+};
+
+/** A marketplace order, normalized out of whatever shape the platform sent. */
+export type ChannelOrderInput = {
+  externalOrderId: string;
+  status: string | null;
+  buyerName: string | null;
+  totalSen: number | null;
+  orderedAt: string | null;
+  items: {
+    externalItemId: string;
+    externalModelId: string | null;
+    qty: number;
+    unitPriceSen: number | null;
+  }[];
+};
+
 /*
   The contract every platform adapter satisfies.
 
-  Deliberately limited to the OAuth surface for now. Stock-push, order-pull and
-  message send/receive are added here as each phase lands and we know what the
-  real calls need — declaring speculative signatures for calls no code makes
+  Grows one phase at a time, and only once something calls it. The OAuth surface
+  came first because the connect flow needed it; stock push and webhook handling
+  arrive now because the worker and the inbound route need them. Message
+  send/receive lands with Phase 9. Declaring signatures for calls no code makes
   yet would be the same guess this seam exists to avoid.
 */
 export interface ChannelAdapter {
@@ -149,6 +173,34 @@ export interface ChannelAdapter {
   exchangeCode(code: string): Promise<TokenPair>;
   /** Trade a refresh token for a fresh pair. */
   refresh(refreshToken: string): Promise<TokenPair>;
+
+  /*
+    Set a listing's available quantity on the platform.
+
+    Absolute, never a delta: a delta assumes both sides agreed on the previous
+    figure, and the whole point of a reconciliation poll is that sometimes they
+    do not.
+  */
+  pushStock(push: StockPush): Promise<void>;
+
+  /*
+    Authenticate an inbound webhook against the RAW body.
+
+    Raw, because every platform signs the exact bytes it sent — re-serializing
+    parsed JSON changes key order and whitespace and invalidates the signature.
+    lib/payments/leanx.ts learned the same lesson.
+
+    Must return false rather than throw when the signature is absent or wrong,
+    so the route can answer 401 without leaking which of the two it was.
+  */
+  verifyWebhook(rawBody: string, headers: Headers): boolean;
+
+  /*
+    Normalize a verified webhook payload into orders. Returns an empty array for
+    payloads that are valid but carry no order (heartbeats, status pings), which
+    is not an error.
+  */
+  parseWebhook(body: unknown): ChannelOrderInput[];
 }
 
 /*
@@ -167,5 +219,13 @@ export function unwiredAdapter(channel: Channel): ChannelAdapter {
     authUrl: notConfigured,
     exchangeCode: notConfigured,
     refresh: notConfigured,
+    pushStock: notConfigured,
+    /*
+      FAILS CLOSED. An unwired adapter cannot authenticate anything, so it
+      authenticates nothing — returning true here would leave the inbound route
+      accepting unsigned payloads that move real stock.
+    */
+    verifyWebhook: () => false,
+    parseWebhook: notConfigured,
   };
 }
