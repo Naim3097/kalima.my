@@ -4,8 +4,19 @@ import { getCurrentUser, isStaff } from "@/lib/auth";
 import { drain } from "@/lib/channels/sync";
 
 /*
-  Drains the marketplace sync queue. Invoked by Vercel cron every minute, and by
-  staff from the admin screen.
+  Drains the marketplace sync queue. Invoked by the Vercel cron in vercel.json,
+  and by staff from the admin screen.
+
+  THE CRON IS DAILY (03:00), not every minute, because the project is on
+  Vercel's Hobby plan, which permits at most one cron run per day. A
+  sub-daily expression is rejected and fails the BUILD, not just the cron.
+
+  Daily is fine while no marketplace is connected — the drain is a no-op with
+  no ready channels. It is NOT fine once Shopee or TikTok go live: stock would
+  lag by up to 24 hours, which is how you oversell. Before connecting a
+  marketplace, either move to a plan allowing `* * * * *`, or drive this
+  endpoint from an external scheduler with the CRON_SECRET. The admin's
+  "Re-sync all" button works regardless and is the manual escape hatch.
 
   AUTHENTICATION, and why it fails closed. This endpoint pushes inventory
   figures to external marketplaces. An unauthenticated version would let anyone
