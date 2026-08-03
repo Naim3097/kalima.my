@@ -10,7 +10,7 @@ import {
   sendCampaignNow,
   type SegmentInput,
 } from "@/app/admin/actions";
-import { Card, CardHeader, Chip, Table, Td, Tr } from "@/components/admin/ui";
+import { Card, CardBody, CardHeader, Chip, Table, Td, Tr } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -111,6 +111,7 @@ export function CampaignManager({
             ) : undefined
           }
         />
+        <CardBody>
         <p className="text-[13px] tracking-wide text-navy-400">
           {subscriberStats.active} subscriber{subscriberStats.active === 1 ? " has" : "s have"} opted in
           {subscriberStats.optedOut > 0 && ` · ${subscriberStats.optedOut} opted out`}. Only people
@@ -191,15 +192,18 @@ export function CampaignManager({
             </div>
           </div>
         )}
+        </CardBody>
       </Card>
 
       <Card>
         <CardHeader title={`${campaigns.length} campaign${campaigns.length === 1 ? "" : "s"}`} />
         {campaigns.length === 0 ? (
-          <p className="text-[13px] tracking-wide text-navy-400">
-            No campaigns yet. Compose one above — it saves as a draft, and nothing sends
-            until you press Send.
-          </p>
+          <CardBody>
+            <p className="text-[13px] tracking-wide text-navy-400">
+              No campaigns yet. Compose one above — it saves as a draft, and nothing sends
+              until you press Send.
+            </p>
+          </CardBody>
         ) : (
           <Table head={["Campaign", "Status", "Result", ""]}>
             {campaigns.map((c) => (

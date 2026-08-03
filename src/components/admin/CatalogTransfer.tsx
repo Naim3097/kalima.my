@@ -4,7 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { importCatalogCsv, type ImportSummary } from "@/app/admin/actions";
-import { Card, CardHeader } from "@/components/admin/ui";
+import { Card, CardBody, CardHeader } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
 import { CSV_COLUMNS, CSV_TEMPLATE_ROW } from "@/lib/catalog-csv";
 import { toCsv } from "@/lib/csv";
@@ -94,6 +94,7 @@ export function CatalogTransfer() {
         onChange={(e) => onFile(e.target.files?.[0])}
       />
 
+      <CardBody>
       <p className="text-[13px] tracking-wide text-navy-400">
         One row per variant, product columns repeated. Export, edit in Excel or Google
         Sheets, then import the same file back. Matching is by <strong>slug</strong> for
@@ -126,6 +127,7 @@ export function CatalogTransfer() {
           </ul>
         </div>
       ) : null}
+      </CardBody>
     </Card>
   );
 }

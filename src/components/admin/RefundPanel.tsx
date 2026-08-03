@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { refundOrder } from "@/app/admin/actions";
-import { Card, CardHeader } from "@/components/admin/ui";
+import { Card, CardBody, CardHeader } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -86,6 +86,7 @@ export function RefundPanel({
         }
       />
 
+      <CardBody>
       <p className="text-[13px] tracking-wide text-navy-400">
         <strong className="text-navy">Move the money in LeanX first.</strong> LeanX has no
         refund API, so this records the refund on our side — it returns the goods to stock
@@ -151,6 +152,7 @@ export function RefundPanel({
           </div>
         </div>
       )}
+      </CardBody>
     </Card>
   );
 }

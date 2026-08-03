@@ -70,7 +70,7 @@ export default async function AuditLogPage({ searchParams }: Search) {
         />
 
         {(facets.entityTypes.length > 0 || facets.actors.length > 0) && (
-          <div className="mb-5 space-y-2">
+          <div className="px-5 py-4 space-y-2">
             {facets.entityTypes.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="label-caps mr-1 text-[10px] text-navy-300">Area</span>
