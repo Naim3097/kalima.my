@@ -26,7 +26,40 @@ import {
 */
 const STAFF_ROLES = new Set(["staff", "admin"]);
 
+/*
+  Every response leaves through here, so the indexing policy is applied in one
+  place instead of at each `return` — a branch added later cannot forget it.
+*/
 export async function proxy(request: NextRequest) {
+  return applyIndexingPolicy(await route(request));
+}
+
+/*
+  Keep staging and preview deployments out of search results.
+
+  staging.kalima.my serves the same catalogue as the real shop. Indexed, it
+  competes with kalima.my for its own product pages and leaves a public copy of
+  work in progress in Google's cache.
+
+  X-Robots-Tag rather than a robots.txt Disallow, which would be the wrong
+  tool and actively counterproductive: Disallow stops crawlers fetching the
+  page, so they never see a noindex, and Google will still list a URL it has
+  been forbidden to read if anything links to it. The header has to be served
+  ON a crawlable response to work.
+
+  Keyed on VERCEL_ENV — "production" only on the live deployment, "preview" for
+  branch and preview URLs, unset locally. So production is untouched and
+  everything else is excluded by default, including preview URLs nobody
+  remembered to think about.
+*/
+function applyIndexingPolicy(response: NextResponse): NextResponse {
+  if (process.env.VERCEL_ENV !== "production") {
+    response.headers.set("x-robots-tag", "noindex, nofollow");
+  }
+  return response;
+}
+
+async function route(request: NextRequest): Promise<NextResponse> {
   const { pathname } = request.nextUrl;
   // Resolved once: whether the shop is closed, and whether this particular
   // path is one of the few that stays reachable regardless.
