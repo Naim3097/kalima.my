@@ -85,7 +85,7 @@ export default function MobileMenu() {
               { label: "My Account", href: "/account" },
               { label: "Wishlist", href: "/wishlist" },
               { label: "Stores", href: "/pages/stores" },
-              { label: "Back Office (demo)", href: "/admin" },
+              { label: "Back Office", href: "/admin" },
             ].map((l) => (
               <li key={l.href}>
                 <Link

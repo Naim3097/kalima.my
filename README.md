@@ -59,7 +59,6 @@ src/
     admin/               # Admin shell + back-office widgets
   data/catalog.ts        # Types, seed fallback, nav + hero slides (client-safe)
   data/catalog.queries.ts# Supabase-backed catalog fetchers (server-only)
-  data/demo.ts           # Residual Phase 1 fixtures (dashboard series, /api/admin)
   lib/supabase/          # Browser, public (session-less), server + admin clients
   lib/commerce.ts        # Typed access to the order RPCs (server-only, admin client)
   lib/admin.ts           # Back-office read models + staff-gated mutations
@@ -145,8 +144,8 @@ colour × size **variant matrix**, which `mapProduct()` collapses back into the 
 | Marketplace stock sync | `src/lib/channels/`, `/admin/sync` | 8 | 🟡 engine live; Shopee/TikTok adapters await platform approval |
 | Unified inbox | `src/lib/channels/inbox.ts`, `/admin/inbox` | 9 | 🟡 engine live; channel adapters await Meta/Shopee/TikTok approval |
 
-Every admin screen now reads live data. `src/data/demo.ts` retains only the dashboard sample
-series and the fixtures behind `/api/admin/[resource]`, a Phase 1 leftover.
+**There is no demo data left.** `src/data/demo.ts`, the `/api/admin/[resource]` fixture endpoint and
+the "Demo preview" banner have all been deleted — every screen reads the live database.
 
 **Env-gated behaviour.** Integrations are null-until-configured and never fake success:
 
@@ -201,10 +200,8 @@ The rules every phase follows — worth knowing before changing anything downstr
 
 Carried openly rather than hidden in the phase list:
 
-- **`/account` is half-real.** The identity block and order history read from the session and the
-  database, but the Kalima Club card, points history, address book and preferences are still
-  hardcoded — the real member view lives at `/kalima-club`. The page's demo badge is also stale
-  (it says orders are demo; they are not).
+- **No saved address book.** The delivery address is captured at checkout each time; `/account`
+  says so rather than showing a placeholder. The `addresses` table exists but nothing writes to it.
 - **Checkout's free-shipping *display* threshold** is the client-side default in
   `src/stores/cart.ts`; the *charged* total is server-authoritative from `store_settings`. Wiring
   the live threshold into the estimate is a small follow-up.

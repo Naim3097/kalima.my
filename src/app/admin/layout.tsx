@@ -3,12 +3,11 @@ import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import AdminNavLink from "@/components/admin/AdminNavLink";
-import { DemoPreviewBanner } from "@/components/admin/ui";
 import { getCurrentUser, isStaff } from "@/lib/auth";
 
 /*
   Back-office shell. Server Component — the sidebar, the mobile nav strip and
-  the demo banner are static markup; only the per-link active state is a
+  the shell are static markup; only the per-link active state is a
   client island (AdminNavLink), exactly as the storefront header does it.
 
   The navy surface comes from the --sidebar-* tokens in globals.css
@@ -59,7 +58,7 @@ const NAV_SECTIONS: { heading: string; items: { label: string; to: string; end?:
 ];
 
 export const metadata: Metadata = {
-  description: "Kalima back office — demo preview.",
+  description: "Kalima back office.",
   robots: { index: false, follow: false },
 };
 
@@ -138,8 +137,6 @@ export default async function AdminLayout({ children }: { children: React.ReactN
             ))}
           </nav>
         </div>
-
-        <DemoPreviewBanner />
 
         <main className="flex-1 px-4 py-6 lg:px-6 lg:py-8 print:p-0">{children}</main>
       </div>

@@ -97,7 +97,7 @@ export default function Footer() {
           <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-6 text-[11px] tracking-wide text-white/40 lg:flex-row">
             <p>© {new Date().getFullYear()} Kalima. All rights reserved.</p>
             <Link href="/admin" className="hover:text-white/70 transition-colors">
-              Back Office (demo preview)
+              Back Office
             </Link>
             <p>FPX · Visa · Mastercard · GrabPay — secure checkout</p>
           </div>
