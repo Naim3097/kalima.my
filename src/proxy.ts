@@ -1,5 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import {
+  isOpenDuringMaintenance,
+  maintenanceEnabled,
+  maintenanceResponse,
+} from "@/lib/maintenance";
 
 /*
   Refreshes the Supabase auth session on every request so Server Components
@@ -14,13 +19,26 @@ import { createServerClient } from "@supabase/ssr";
   Enforced here (redirects) AND re-checked in the admin layout (defence in
   depth). If Supabase is unconfigured, nothing is gated — matches the
   seed-data demo where /admin is open.
+
+  Also the maintenance gate (see src/lib/maintenance.ts). It lives here rather
+  than in a layout because it has to cover route handlers and redirects too —
+  a layout only wraps pages, so /api would stay wide open behind a closed sign.
 */
 const STAFF_ROLES = new Set(["staff", "admin"]);
 
 export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  // Resolved once: whether the shop is closed, and whether this particular
+  // path is one of the few that stays reachable regardless.
+  const closed = maintenanceEnabled() && !isOpenDuringMaintenance(pathname);
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return NextResponse.next();
+  if (!url || !anonKey) {
+    // Without Supabase there is no way to tell staff from the public, so a
+    // closed shop stays closed for everyone rather than falling open.
+    return closed ? maintenanceResponse() : NextResponse.next();
+  }
 
   let response = NextResponse.next({ request });
 
@@ -45,7 +63,16 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
+  const role = (user?.app_metadata as { role?: string } | null)?.role;
+  const isStaff = !!role && STAFF_ROLES.has(role);
+
+  /*
+    Maintenance gate. Staff walk straight through — signing in IS the bypass,
+    so there is no secret URL or shared password to leak, and access revokes
+    itself the moment a role is removed.
+  */
+  if (closed && !isStaff) return maintenanceResponse();
+
   const needsAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
   // /reset-password runs inside the recovery session the callback establishes,
   // so it needs a signed-in user just like /account.
@@ -60,12 +87,9 @@ export async function proxy(request: NextRequest) {
   if (needsAdmin || needsAuth) {
     if (!user) return redirectToLogin(request);
 
-    if (needsAdmin) {
-      const role = (user.app_metadata as { role?: string } | null)?.role;
-      if (!role || !STAFF_ROLES.has(role)) {
-        // Signed in but not staff — send to the storefront, not the login loop.
-        return NextResponse.redirect(new URL("/", request.url));
-      }
+    // Signed in but not staff — send to the storefront, not the login loop.
+    if (needsAdmin && !isStaff) {
+      return NextResponse.redirect(new URL("/", request.url));
     }
   }
 
