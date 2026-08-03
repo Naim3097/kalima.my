@@ -191,6 +191,51 @@ After changing the catalog:
 npm run seed:generate
 ```
 
+## Password reset email template (REQUIRED)
+
+The reset flow uses **`token_hash` + `verifyOtp`**, not the PKCE code exchange, and that
+needs one change to the Supabase email template. Without it, resets fail for most
+people and the reason is not obvious.
+
+**Why.** `exchangeCodeForSession` requires a `code_verifier` cookie written on the origin
+and browser where the request *started*. So the ordinary case — request the reset on a
+laptop, open the email on a phone — always fails. So does requesting on `localhost` and
+landing on the deployed domain. `verifyOtp` carries its proof in the link, so it works
+from any device.
+
+**Dashboard → Authentication → Email Templates → Reset Password.** Make the link:
+
+```html
+<a href="{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=recovery">Reset password</a>
+```
+
+Use `{{ .RedirectTo }}` rather than a hardcoded `{{ .SiteURL }}`: the app already sends
+`<origin>/auth/confirm?next=/reset-password`, so the same template works on localhost,
+on Vercel previews and on kalima.my without editing. Appending `&token_hash=…&type=recovery`
+is what `/auth/confirm` reads.
+
+Do **not** revert this to `{{ .ConfirmationURL }}` — that routes back through
+`/auth/v1/verify`, which hands back a PKCE `?code=` and reintroduces the cross-device
+failure.
+
+### URL configuration
+
+**Authentication → URL Configuration.** Site URL is the fallback when a redirect is not
+allowlisted; Redirect URLs is the allowlist itself. A redirect that is not on the list is
+silently replaced by the Site URL **with its path stripped**, which looks exactly like a
+broken link.
+
+```
+Site URL:       https://kalima.my
+Redirect URLs:  http://localhost:3000/**
+                https://kalima.my/**
+                https://*.vercel.app/**
+```
+
+The `/**` wildcard covers `/auth/confirm`, `/auth/callback` and the five channel OAuth
+callbacks in one entry. The `*.vercel.app` line matters because preview deployments get a
+new hostname on every push; without it auth breaks on previews intermittently.
+
 ## Design notes
 
 - **Money is `integer` sen**, never float (§4.2 money integrity). `price_sen` 29500 = RM295.

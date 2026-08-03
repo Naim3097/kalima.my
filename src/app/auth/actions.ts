@@ -91,8 +91,19 @@ export async function requestPasswordReset(formData: FormData): Promise<AuthResu
   const supabase = await createClient();
   if (!supabase) return { error: "Authentication is not configured." };
 
+  /*
+    Points at /auth/confirm (token_hash), NOT /auth/callback (PKCE code).
+
+    The code exchange needs a `code_verifier` cookie from the origin and browser
+    where the request started, which breaks the most common reset there is:
+    request on a laptop, open the email on a phone. token_hash carries its proof
+    in the link, so it works from any device.
+
+    Requires the Supabase "Reset Password" email template to send
+    {{ .TokenHash }} rather than {{ .ConfirmationURL }} — see supabase/README.md.
+  */
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${await siteUrl()}/auth/callback?next=/reset-password`,
+    redirectTo: `${await siteUrl()}/auth/confirm?next=/reset-password`,
   });
   if (error) return { error: error.message };
 
