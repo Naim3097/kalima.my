@@ -201,7 +201,50 @@ export interface ChannelAdapter {
     is not an error.
   */
   parseWebhook(body: unknown): ChannelOrderInput[];
+
+  /*
+    Echo a subscription handshake. Meta verifies a webhook URL by GETting it with
+    hub.mode / hub.verify_token / hub.challenge and expecting the challenge
+    echoed back; the marketplaces have equivalents. Returns the string to echo,
+    or null to refuse — refusing is the default, so an unwired adapter can never
+    have a webhook subscribed to it.
+  */
+  verifySubscription(params: URLSearchParams): string | null;
+
+  /*
+    Normalize a verified webhook payload into inbound messages. Separate from
+    parseWebhook because the same signature scheme carries both order events and
+    message events, and only the payload shape differs.
+  */
+  parseMessageWebhook(body: unknown): InboundMessage[];
+
+  /*
+    Send a free-text reply. Callers must check the reply window FIRST — see
+    lib/channels/inbox.ts. An adapter may assume the window is open; it is not
+    the adapter's job to re-derive policy from a timestamp.
+  */
+  sendMessage(input: OutboundMessage): Promise<{ externalMessageId: string | null }>;
 }
+
+/** An inbound message, normalized out of whatever shape the platform sent. */
+export type InboundMessage = {
+  externalThreadId: string;
+  externalMessageId: string | null;
+  externalUserId: string | null;
+  externalHandle: string | null;
+  body: string | null;
+  attachments: { url: string; mime: string | null; name: string | null }[];
+  sentAt: string | null;
+  /* Used once, on first contact, to link a customer record. */
+  contactPhone: string | null;
+  contactEmail: string | null;
+};
+
+export type OutboundMessage = {
+  externalThreadId: string;
+  externalUserId: string | null;
+  body: string;
+};
 
 /*
   Shared by every adapter that has not been wired yet. Keeping one
@@ -222,10 +265,15 @@ export function unwiredAdapter(channel: Channel): ChannelAdapter {
     pushStock: notConfigured,
     /*
       FAILS CLOSED. An unwired adapter cannot authenticate anything, so it
-      authenticates nothing — returning true here would leave the inbound route
-      accepting unsigned payloads that move real stock.
+      authenticates nothing — returning true here would leave the inbound routes
+      accepting unsigned payloads that move real stock and post real messages.
     */
     verifyWebhook: () => false,
     parseWebhook: notConfigured,
+    /* Also fails closed: refusing the handshake means an unwired adapter can
+       never have a live webhook subscription pointed at it. */
+    verifySubscription: () => null,
+    parseMessageWebhook: notConfigured,
+    sendMessage: notConfigured,
   };
 }
