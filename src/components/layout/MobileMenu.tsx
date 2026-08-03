@@ -11,12 +11,14 @@ import {
   SheetContent,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { useAuth } from "@/hooks/useAuth";
 
 /*
   Mobile navigation drawer on the shadcn Sheet (left side). The primitive owns
   the backdrop, Escape, focus trap, body scroll lock and slide animation.
 */
 export default function MobileMenu() {
+  const { isStaff } = useAuth();
   const { mobileMenuOpen, setMobileMenuOpen } = useUi();
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -85,7 +87,7 @@ export default function MobileMenu() {
               { label: "My Account", href: "/account" },
               { label: "Wishlist", href: "/wishlist" },
               { label: "Stores", href: "/pages/stores" },
-              { label: "Back Office", href: "/admin" },
+              // Back Office is appended below, only for staff.
             ].map((l) => (
               <li key={l.href}>
                 <Link
@@ -97,6 +99,19 @@ export default function MobileMenu() {
                 </Link>
               </li>
             ))}
+            {/* Staff only. MobileMenu is already a client component, so it can
+                read the hook directly — no island needed here. */}
+            {isStaff && (
+              <li>
+                <Link
+                  href="/admin"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="block py-2 text-[13px] tracking-wide text-navy-400"
+                >
+                  Back Office
+                </Link>
+              </li>
+            )}
           </ul>
         </nav>
       </SheetContent>

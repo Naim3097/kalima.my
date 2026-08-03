@@ -23,7 +23,7 @@ export default function HeaderActions({ side }: { side: "left" | "right" }) {
   const items = useCart((s) => s.items);
   const wishlistIds = useWishlist((s) => s.ids);
   const { setCartOpen, setSearchOpen, setMobileMenuOpen } = useUi();
-  const { signedIn, ready: authReady } = useAuth();
+  const { signedIn, isStaff, ready: authReady } = useAuth();
 
   // Persisted stores are empty during SSR; hold the empty state until mount.
   const mounted = useMounted();
@@ -65,11 +65,20 @@ export default function HeaderActions({ side }: { side: "left" | "right" }) {
       >
         <SearchIcon size={19} />
       </button>
+      {/*
+        Staff get the back office where a customer gets their account: it is
+        where they actually work. /account still exists for them — the owner
+        places test orders and needs to see them as a customer does — this only
+        changes the default door. UX only; the guard is server-side.
+      */}
       <Link
-        href={authReady && !signedIn ? "/login" : "/account"}
+        href={
+          !authReady || signedIn === false ? "/login" : isStaff ? "/admin" : "/account"
+        }
         className="hidden lg:inline-flex items-center gap-2 label-caps text-navy-400 hover:text-navy transition-colors"
       >
-        <UserIcon size={16} /> {authReady && !signedIn ? "Sign in" : "Account"}
+        <UserIcon size={16} />{" "}
+        {authReady && !signedIn ? "Sign in" : isStaff ? "Back office" : "Account"}
       </Link>
       <Link
         href="/wishlist"

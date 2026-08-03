@@ -1,4 +1,5 @@
 import Link from "next/link";
+import StaffLink from "@/components/layout/StaffLink";
 import Image from "next/image";
 import {
   TruckIcon,
@@ -96,9 +97,10 @@ export default function Footer() {
         <div className="border-t border-white/10">
           <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-3 px-4 py-6 text-[11px] tracking-wide text-white/40 lg:flex-row">
             <p>© {new Date().getFullYear()} Kalima. All rights reserved.</p>
-            <Link href="/admin" className="hover:text-white/70 transition-colors">
+            {/* Staff only — customers never see it. Convenience, not a guard. */}
+            <StaffLink href="/admin" className="hover:text-white/70 transition-colors">
               Back Office
-            </Link>
+            </StaffLink>
             <p>FPX · Visa · Mastercard · GrabPay — secure checkout</p>
           </div>
         </div>
