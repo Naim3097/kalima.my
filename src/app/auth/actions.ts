@@ -12,10 +12,29 @@ import { createClient, createPublicClient } from "@/lib/supabase/server";
 
 export type AuthResult = { error: string } | void;
 
-function safeNext(next: FormDataEntryValue | null): string {
+/*
+  Returns an explicitly-requested destination, or null when none was given.
+
+  Null matters: it is how signIn tells "the user deep-linked somewhere" apart
+  from "the user just signed in", so a staff member can be sent to the back
+  office by default WITHOUT overriding a deliberate ?next=/orders/ABC.
+*/
+function safeNext(next: FormDataEntryValue | null): string | null {
   // Only allow same-site relative paths — never an open redirect.
   const value = typeof next === "string" ? next : "";
-  return value.startsWith("/") && !value.startsWith("//") ? value : "/account";
+  return value.startsWith("/") && !value.startsWith("//") ? value : null;
+}
+
+/*
+  Where someone belongs when they have not asked for anywhere in particular.
+
+  Staff and admins run the shop, so the back office is their home; customers
+  get their account. Staff are NOT blocked from /account — the owner places
+  test orders and needs to see them as a customer does — this only decides the
+  default landing.
+*/
+function homeForRole(role: string | undefined): string {
+  return role === "staff" || role === "admin" ? "/admin" : "/account";
 }
 
 export async function signIn(formData: FormData): Promise<AuthResult> {
@@ -28,11 +47,18 @@ export async function signIn(formData: FormData): Promise<AuthResult> {
   const supabase = await createClient();
   if (!supabase) return { error: "Authentication is not configured." };
 
-  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) return { error: error.message };
 
+  /*
+    Role comes from the JWT app_metadata claim that the sign-in just returned,
+    so this costs no extra round trip. It is a UX default only — the actual
+    guard on /admin lives in proxy.ts and is re-checked in the admin layout.
+  */
+  const role = (data.user?.app_metadata as { role?: string } | undefined)?.role;
+
   revalidatePath("/", "layout");
-  redirect(next);
+  redirect(next ?? homeForRole(role));
 }
 
 export async function signUp(formData: FormData): Promise<AuthResult> {
@@ -91,8 +117,19 @@ export async function requestPasswordReset(formData: FormData): Promise<AuthResu
   const supabase = await createClient();
   if (!supabase) return { error: "Authentication is not configured." };
 
+  /*
+    Points at /auth/confirm (token_hash), NOT /auth/callback (PKCE code).
+
+    The code exchange needs a `code_verifier` cookie from the origin and browser
+    where the request started, which breaks the most common reset there is:
+    request on a laptop, open the email on a phone. token_hash carries its proof
+    in the link, so it works from any device.
+
+    Requires the Supabase "Reset Password" email template to send
+    {{ .TokenHash }} rather than {{ .ConfirmationURL }} — see supabase/README.md.
+  */
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${await siteUrl()}/auth/callback?next=/reset-password`,
+    redirectTo: `${await siteUrl()}/auth/confirm?next=/reset-password`,
   });
   if (error) return { error: error.message };
 
