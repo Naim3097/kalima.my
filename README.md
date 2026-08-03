@@ -147,6 +147,10 @@ colour × size **variant matrix**, which `mapProduct()` collapses back into the 
 **There is no demo data left.** `src/data/demo.ts`, the `/api/admin/[resource]` fixture endpoint and
 the "Demo preview" banner have all been deleted — every screen reads the live database.
 
+**Connecting a channel?** [INSTRUCTION.md](./INSTRUCTION.md) is the per-platform runbook —
+approvals to apply for, credentials to obtain, and the five adapter methods to implement, for
+WhatsApp, Instagram, Facebook, Shopee and TikTok.
+
 **Env-gated behaviour.** Integrations are null-until-configured and never fake success:
 
 | Missing variable | Behaviour |
