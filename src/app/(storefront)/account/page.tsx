@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { getCurrentUser } from "@/lib/auth";
 import { fetchMyOrders } from "@/lib/commerce";
+import { getMyClub } from "@/lib/loyalty";
 import { courierName, trackingLink } from "@/lib/couriers";
 import { signOut } from "@/app/auth/actions";
 import ChangePasswordForm from "@/components/account/ChangePasswordForm";
@@ -26,18 +27,20 @@ export const metadata: Metadata = {
     "Your Kalima Club dashboard — points balance, tier progress, order history and saved details.",
 };
 
-const POINTS_HISTORY = [
-  { date: "28 Jun", event: "Order KLM-10201 — points credited", delta: "+289" },
-  { date: "15 Jun", event: "Redeemed at checkout (KLM-10142)", delta: "−1,000" },
-  { date: "9 Jun", event: "Order KLM-10142 — points credited", delta: "+319" },
-  { date: "2 Jun", event: "Birthday voucher bonus 🎂", delta: "+200" },
-];
-
 /*
-  Server Component. The identity block (greeting + Profile card + sign-out) is
-  now real, read from the signed-in session. Orders and the Kalima Club
-  dashboard are still demo data — those are Phase 2 / Phase 7 — and keep the
-  demo badge. The tier meter uses shadcn Progress (a client primitive).
+  Server Component, entirely on real data: session identity, the Kalima Club
+  standing from the loyalty ledger, and order history with tracking.
+
+  The Club card previously showed a hardcoded "Gold Member · 1,250 points" and a
+  fabricated points history, while the badge above it claimed orders were demo
+  too — which they had not been since Phase 2. Inventing a balance on a page a
+  customer reads as their own account is worse than showing nothing: points are
+  a liability the shop owes them, and a wrong number is a promise it did not
+  make.
+
+  Tier, balance and progress all come from getMyClub, the same read model
+  /kalima-club uses, so the two pages cannot disagree about what someone is
+  owed.
 */
 export default async function AccountPage({
   searchParams,
@@ -50,7 +53,7 @@ export default async function AccountPage({
 
   const { password } = await searchParams;
   const { user, profile } = current;
-  const orders = await fetchMyOrders();
+  const [orders, club] = await Promise.all([fetchMyOrders(), getMyClub()]);
   const displayName = profile?.full_name?.trim() || user.email?.split("@")[0] || "there";
   const profileLine = [
     profile?.full_name,
@@ -75,9 +78,6 @@ export default async function AccountPage({
           <h1 className="mt-1 font-display text-4xl text-navy">Salam, {displayName}</h1>
         </div>
         <div className="flex items-center gap-3">
-          <span className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[11px] uppercase tracking-wider text-amber-900">
-            Club &amp; orders: demo — Phases 2 &amp; 7
-          </span>
           <form action={signOut}>
             <button
               type="submit"
@@ -89,67 +89,105 @@ export default async function AccountPage({
         </div>
       </div>
 
-      {/* Kalima Club card */}
-      <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-        <div className="bg-navy p-8 text-white">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="label-caps text-white/60">Kalima Club</p>
-              <p className="mt-2 font-display text-3xl">Gold Member</p>
+      {/* Kalima Club — from the loyalty ledger */}
+      {club && (
+        <section className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+          <div className="bg-navy p-8 text-white">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="label-caps text-white/60">Kalima Club</p>
+                <p className="mt-2 font-display text-3xl">{club.tier.name}</p>
+              </div>
+              <Image
+                src="/brand/kalima-mark-white.png"
+                alt=""
+                width={48}
+                height={48}
+                className="h-12 w-auto opacity-80"
+              />
             </div>
-            <Image
-              src="/brand/kalima-mark-white.png"
-              alt=""
-              width={48}
-              height={48}
-              className="h-12 w-auto opacity-80"
-            />
-          </div>
-          <div className="mt-8 flex items-end justify-between">
-            <div>
-              <p className="label-caps text-white/60">Points balance</p>
-              <p className="mt-1 font-display text-4xl">1,250</p>
-              <p className="mt-1 text-[12px] tracking-wide text-white/50">= RM62.50 off your next order</p>
+            <div className="mt-8 flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="label-caps text-white/60">Points balance</p>
+                <p className="mt-1 font-display text-4xl">{club.balance.toLocaleString("en-MY")}</p>
+                <p className="mt-1 text-[12px] tracking-wide text-white/50">
+                  = {formatRM(club.valueSen / 100)} off your next order
+                </p>
+              </div>
+              <div className="text-right text-[12px] tracking-wide text-white/60">
+                <p>
+                  {(club.tier.multiplierBps / 10000).toFixed(
+                    club.tier.multiplierBps % 10000 ? 1 : 0,
+                  )}
+                  × points on every order
+                </p>
+                {club.tier.freeShipping && <p>Free shipping, always</p>}
+              </div>
             </div>
-            <div className="text-right text-[12px] tracking-wide text-white/60">
-              <p>1.5× points on every order</p>
-              <p>Free shipping, always</p>
-            </div>
-          </div>
-          <div className="mt-8">
-            <div className="mb-1.5 flex justify-between text-[12px] tracking-wide text-white/60">
-              <span>Progress to Platinum</span>
-              <span>RM2,680 / RM3,000</span>
-            </div>
-            <Progress
-              value={89}
-              aria-label="Progress to Platinum tier"
-              className="h-1.5 rounded-none bg-white/15 *:data-[slot=progress-indicator]:bg-white"
-            />
-            <p className="mt-2 text-[12px] tracking-wide text-white/50">
-              RM320 more this year unlocks private sales, RM50 birthday voucher &amp; priority support
-            </p>
-          </div>
-        </div>
 
-        {/* Points history */}
-        <div className="border border-navy/10 bg-white">
-          <div className="border-b border-navy/10 px-5 py-4">
-            <h2 className="label-caps !text-[12px]">Points activity</h2>
-          </div>
-          <ul className="divide-y divide-navy/5 px-5">
-            {POINTS_HISTORY.map((p) => (
-              <li key={p.event} className="flex items-center justify-between gap-4 py-3.5 text-[13px]">
-                <div>
-                  <p className="text-navy">{p.event}</p>
-                  <p className="text-[11px] text-navy-300">{p.date}</p>
+            {/* Only shown when there is a next tier to reach. */}
+            {club.nextTier && (
+              <div className="mt-8">
+                <div className="mb-1.5 flex justify-between text-[12px] tracking-wide text-white/60">
+                  <span>Progress to {club.nextTier.name}</span>
+                  <span>
+                    {formatRM(club.spend12mSen / 100)} / {formatRM(club.nextTier.minSpendSen / 100)}
+                  </span>
                 </div>
-                <span className={p.delta.startsWith("+") ? "text-emerald-700" : "text-navy-400"}>{p.delta}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </section>
+                <Progress
+                  value={Math.min(
+                    100,
+                    club.nextTier.minSpendSen > 0
+                      ? Math.round((club.spend12mSen / club.nextTier.minSpendSen) * 100)
+                      : 100,
+                  )}
+                  aria-label={`Progress to ${club.nextTier.name} tier`}
+                  className="h-1.5 rounded-none bg-white/15 *:data-[slot=progress-indicator]:bg-white"
+                />
+                <p className="mt-2 text-[12px] tracking-wide text-white/50">
+                  {formatRM(club.toNextTierSen / 100)} more in the next 12 months unlocks{" "}
+                  {club.nextTier.name}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Points activity — the real ledger */}
+          <div className="border border-navy/10 bg-white">
+            <div className="border-b border-navy/10 px-5 py-4">
+              <h2 className="label-caps !text-[12px]">Points activity</h2>
+            </div>
+            {club.entries.length === 0 ? (
+              <p className="px-5 py-8 text-center text-[13px] text-navy-300">
+                No points yet — they are credited once an order is delivered.
+              </p>
+            ) : (
+              <ul className="divide-y divide-navy/5 px-5">
+                {club.entries.map((e) => (
+                  <li
+                    key={e.id}
+                    className="flex items-center justify-between gap-4 py-3.5 text-[13px]"
+                  >
+                    <div>
+                      <p className="text-navy">{e.reason ?? e.type}</p>
+                      <p className="text-[11px] text-navy-300">
+                        {new Date(e.createdAt).toLocaleDateString("en-MY", {
+                          day: "numeric",
+                          month: "short",
+                        })}
+                      </p>
+                    </div>
+                    <span className={e.points > 0 ? "text-emerald-700" : "text-navy-400"}>
+                      {e.points > 0 ? "+" : "−"}
+                      {Math.abs(e.points)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Orders — real */}
       <section className="mt-10">
@@ -221,21 +259,28 @@ export default async function AccountPage({
         )}
       </section>
 
-      {/* Profile blocks */}
-      <section className="mt-10 grid gap-4 md:grid-cols-3">
-        {[
-          { title: "Profile", body: profileLine, real: true },
-          { title: "Address book", body: "12, Jalan Setia 3/2, 40170 Shah Alam, Selangor (default)", real: false },
-          { title: "Preferences", body: "Kalima Club member since Mar 2025 · PDPA consent given · Birthday: 2 June", real: false },
-        ].map((b) => (
-          <div key={b.title} className="border border-navy/10 bg-white px-5 py-4">
-            <h3 className="label-caps !text-[12px]">{b.title}</h3>
-            <p className="mt-2 text-[13px] leading-relaxed tracking-wide text-navy-400">{b.body}</p>
-            {!b.real && (
-              <button className="mt-3 cursor-pointer text-[12px] text-navy underline underline-offset-4">Edit</button>
-            )}
-          </div>
-        ))}
+      {/* Saved details */}
+      <section className="mt-10 grid gap-4 md:grid-cols-2">
+        <div className="border border-navy/10 bg-white px-5 py-4">
+          <h3 className="label-caps !text-[12px]">Profile</h3>
+          <p className="mt-2 text-[13px] leading-relaxed tracking-wide text-navy-400">
+            {profileLine}
+          </p>
+        </div>
+        {/*
+          Address book and marketing preferences are not built. They were
+          previously rendered as a fabricated Shah Alam address and an invented
+          membership date, each with an Edit button that did nothing — three
+          untruths on the page a customer trusts most about their own data.
+          Saying so plainly is the honest placeholder.
+        */}
+        <div className="border border-navy/10 bg-white px-5 py-4">
+          <h3 className="label-caps !text-[12px]">Saved addresses</h3>
+          <p className="mt-2 text-[13px] leading-relaxed tracking-wide text-navy-400">
+            Your delivery address is taken at checkout each time. A saved address book is on the
+            way.
+          </p>
+        </div>
       </section>
 
       {/* Security — real */}

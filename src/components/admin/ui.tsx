@@ -143,24 +143,3 @@ export function Tr({ children, className = "" }: { children: ReactNode; classNam
 export function Td({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <TableCell className={cn("whitespace-nowrap px-5 py-3.5", className)}>{children}</TableCell>;
 }
-
-export function DemoNote({ children }: { children: ReactNode }) {
-  return (
-    <p className="mt-6 border border-dashed border-navy/20 bg-navy-100/40 px-4 py-3 text-[12px] leading-relaxed tracking-wide text-navy-400">
-      {children}
-    </p>
-  );
-}
-
-/** The persistent "Demo preview" banner shown above every back-office page. */
-export function DemoPreviewBanner() {
-  return (
-    <div className="border-b border-amber-300/60 bg-amber-50 px-4 py-2.5 lg:px-6 print:hidden">
-      <p className="text-[12px] tracking-wide text-amber-900">
-        <span className="font-semibold uppercase tracking-wider">Demo preview</span> — sample data for client
-        walkthrough. Numbered modules ①–⑥ are the client&apos;s requested features; live integrations arrive in
-        Phases 4–9.
-      </p>
-    </div>
-  );
-}

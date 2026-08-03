@@ -1,8 +1,14 @@
 # Supabase
 
 **Provisioned.** Project `Kalima` · ref `gylsymfonxyegdlfodvk` · Southeast Asia (Singapore) ·
-Postgres 17. Schema and seed are applied, RLS is on, and the linter reports zero
-security warnings.
+Postgres 17. Schema and seed are applied and RLS is on.
+
+The security linter currently reports one INFO and three WARNs, all understood:
+`channel_connections` has RLS with no policies (deliberate — it is sealed to the service
+role, see Phase 8 below); `newsletter_subscribers` allows unrestricted INSERT (deliberate
+— anyone may subscribe, and there is no read policy); the `product-images` bucket allows
+listing; and leaked-password protection is off in Auth settings. The first two are by
+design; the last two are open items for Phase 10.
 
 > ⚠️ **Single environment.** There is no staging project — every migration from here
 > lands directly on the database the store will run on. Dry-run each one first
@@ -10,16 +16,49 @@ security warnings.
 
 ## What is deployed
 
-| Migration | Contents |
-|---|---|
-| `20260720000001_catalog.sql` | collections, products, variants, images, FTS, RLS |
-| `20260720000002_harden_security_definer_helpers.sql` | moves `is_staff()` out of the exposed schema, pins `search_path` |
-| `20260721000001_add_variant_color_position.sql` | persists swatch/colour order |
-| `20260722000001_auth_profiles_and_roles.sql` | `profiles`, `user_role`, signup pipeline, self-elevation guard |
-| `20260722100001_commerce_schema.sql` | orders, order_items, payments, stock_movements, discounts, addresses + RLS |
-| `20260722100002_commerce_functions.sql` | create_order, validate_discount, mark_order_paid, get_order_by_reference |
-| `20260722100003_admin_adjust_stock.sql` | ledger-backed manual stock adjustment |
-| `20260722100004_cms_content.sql` | announcements, hero_slides, content_pages (CMS) + RLS |
+**34 migrations**, listed below in applied order. Each file is named
+`<applied_version>_<applied_name>.sql` and its contents are the record of what actually
+ran — see commit `3c8b0a5`, which resynced the repo after it had drifted from the
+database. Treat that property as load-bearing: a fresh Supabase built from this
+directory must reproduce production, and it is verified by replaying the whole
+directory into a throwaway Postgres (see [Testing a migration](#testing-a-migration-before-it-lands)).
+
+| Migration |
+|---|
+| `20260720094446_catalog.sql` |
+| `20260720095138_harden_security_definer_helpers.sql` |
+| `20260721022540_add_variant_color_position.sql` |
+| `20260722045740_auth_profiles_and_roles.sql` |
+| `20260722052547_move_auth_helpers_to_private_schema.sql` |
+| `20260722060705_commerce_orders_payments_ledger.sql` |
+| `20260722060756_commerce_order_functions.sql` |
+| `20260722060902_commerce_use_gen_random_uuid.sql` |
+| `20260722061113_lock_down_mark_order_paid.sql` |
+| `20260722061244_lock_order_functions_to_service_role.sql` |
+| `20260722085954_admin_adjust_stock.sql` |
+| `20260722090014_admin_adjust_stock_fix_enum_cast.sql` |
+| `20260722091136_cms_content.sql` |
+| `20260722093452_store_settings_and_staff.sql` |
+| `20260723040125_product_image_storage.sql` |
+| `20260723040310_product_images_storage_path.sql` |
+| `20260723044027_admin_audit_log.sql` |
+| `20260723050759_refund_order.sql` |
+| `20260723051428_shipments.sql` |
+| `20260723103945_easyparcel_config_and_quotes.sql` |
+| `20260723105012_drop_shipping_quotes.sql` |
+| `20260723110330_messaging_campaigns.sql` |
+| `20260723142919_affiliate_program.sql` |
+| `20260723142953_affiliate_attribution.sql` |
+| `20260723151458_loyalty_engine.sql` |
+| `20260723151526_loyalty_functions.sql` |
+| `20260723152503_loyalty_redemption.sql` |
+| `20260723152654_refund_returns_loyalty_points.sql` |
+| `20260723153946_no_points_on_points_funded_spend.sql` |
+| `20260803022333_channel_connections.sql` |
+| `20260803064500_lock_down_loyalty_reads.sql` |
+| `20260803065200_restore_default_function_privileges.sql` |
+| `20260803070000_marketplace_sync.sql` |
+| `20260803074500_claim_sync_jobs.sql` |
 
 ## Commerce (Phase 2)
 
@@ -75,6 +114,51 @@ no double-decrement, amount mismatch → 409.
 
 Seeded from `seed.sql`: 10 collections · 13 products · 188 variants · 8 images ·
 23 curated memberships.
+
+## Marketplace sync (Phase 8)
+
+Shopee and TikTok are not connected yet — their app approvals are outstanding, and the
+adapters in `src/lib/channels/` are stubs until credentials and a sandbox exist. The
+database side is complete and live.
+
+- **`channel_connections` is sealed**: RLS on, *no policies at all*, plus an explicit
+  revoke. Only the service role can read it. It holds OAuth tokens for the client's own
+  marketplace accounts — the ability to move their inventory and read their buyers'
+  messages. The admin read path never SELECTs the token columns either, because a Server
+  Component serializes its props into the RSC payload.
+- **Outbound sync hangs off the ledger, not its callers.** An `AFTER INSERT` trigger on
+  `stock_movements` enqueues a push for every mapped listing of that variant, so all five
+  stock paths (sale, refund, manual adjust, CSV import, marketplace sale) are covered
+  including any added later. `origin_channel` on the movement is the loop guard.
+- **Jobs carry no quantity.** A job means "resync this listing"; the worker reads current
+  stock when it runs. That is what lets a partial unique index collapse ten rapid
+  movements into one push without arithmetic, and why a stale delta can never be sent.
+- **Marketplace orders live in `channel_orders`, never `orders`.** Shopee and TikTok
+  mandate their own fulfilment and refunds, so an imported row could never be shipped or
+  refunded from here; keeping them separate means `refund_order`, `award_loyalty_points`,
+  `attribute_referral` and the packing slips cannot reach them by construction.
+- **Oversell is clamped, not refused.** `stock_on_hand` carries `check (>= 0)` and a
+  marketplace sale has already happened, so `record_channel_sale` decrements what we hold,
+  records the shortfall in `applied_qty`, and logs an `oversell` at level `error`.
+
+### A lesson worth not relearning
+
+`20260803064500` closed a leak where `loyalty_balance()` and `customer_tier()` were
+callable by `anon` — any customer's points balance and tier, given a user id. The Phase 7
+migration had *granted* to `authenticated` without *revoking* first, and a grant permits
+nothing that was not already permitted.
+
+There is no default that prevents this, and one was tried and reverted (`20260803065200`)
+after measurement showed Postgres applies its built-in `PUBLIC` EXECUTE grant *in addition
+to* the `pg_default_acl` entry. So the rule is per function, and it is all three roles:
+
+```sql
+revoke all on function public.<name>(<args>) from public, anon, authenticated;
+grant execute on function public.<name>(<args>) to service_role;
+```
+
+`public` covers the built-in grant; `anon` and `authenticated` cover Supabase's default
+privileges. Verify with `has_function_privilege` rather than assuming.
 
 ## Auth & roles
 

@@ -1,150 +1,154 @@
 import type { Metadata } from "next";
-import dynamic from "next/dynamic";
-import Image from "next/image";
-import { Card, CardHeader, Pill, DemoNote } from "@/components/admin/ui";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardHeader, StatCard } from "@/components/admin/ui";
+import ChannelConnections from "@/components/admin/ChannelConnections";
+import ListingMapper from "@/components/admin/ListingMapper";
+import SyncLog from "@/components/admin/SyncLog";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { SYNC_ROWS } from "@/data/demo";
+  getChannelCards,
+  getChannelOrders,
+  getSyncActivity,
+  getSyncHealth,
+  getSyncRows,
+  STOCK_CHANNELS,
+} from "@/lib/channels/admin";
+import { CHANNEL_LABEL } from "@/lib/channels/types";
+import { formatRM } from "@/lib/format";
 
-/* The activity log sits below the fold — split it out of the initial payload. */
-const SyncLog = dynamic(() => import("@/components/admin/SyncLog"), {
-  loading: () => <Skeleton className="h-64 w-full" />,
-});
+/*
+  Marketplace Sync — driven by the live database.
+
+  Replaces the Phase 8 demo mock-up, whose numbers were hardcoded ("312 SKUs
+  checked, 0 drift").
+
+  What is honest about this screen while the platform approvals are outstanding:
+  the connection cards say plainly that an adapter is not wired, and the CSV
+  export/import pair is offered as the workflow that actually works today. It
+  does not imply an automatic sync that cannot run yet.
+*/
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Sync · Admin",
   description:
-    "One stock pool across kalima.my, Shopee and TikTok Shop — a sale anywhere updates everywhere, no more oversell.",
+    "One stock pool across kalima.my, Shopee and TikTok Shop — a sale anywhere updates everywhere.",
 };
 
-const HEAD = ["SKU", "Product", "kalima.my", "Shopee", "TikTok Shop", "Status"];
+export default async function AdminSyncPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ connected?: string; error?: string }>;
+}) {
+  const { connected, error } = await searchParams;
 
-export default function AdminSyncPage() {
+  const [cards, rows, health, activity, orders] = await Promise.all([
+    getChannelCards(),
+    getSyncRows(),
+    getSyncHealth(),
+    getSyncActivity(40),
+    getChannelOrders(15),
+  ]);
+
+  const channels = STOCK_CHANNELS.map((c) => ({ key: c, label: CHANNEL_LABEL[c] }));
+  const mapped = rows.reduce(
+    (n, r) => n + channels.filter((c) => r.listings[c.key as keyof typeof r.listings]).length,
+    0,
+  );
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-3xl text-navy">Marketplace Sync ⑤</h1>
         <p className="mt-1 text-[13px] tracking-wide text-navy-400">
-          One stock pool across kalima.my, Shopee and TikTok Shop — a sale anywhere updates everywhere, no more
-          oversell.
+          One stock pool across kalima.my, Shopee and TikTok Shop — a sale anywhere updates
+          everywhere, no more oversell.
         </p>
       </div>
 
-      {/* Connections */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="px-5 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-navy">Shopee</p>
-              <p className="text-[12px] text-navy-400">kalima.os — MY</p>
-            </div>
-            <Pill value="active" />
-          </div>
-          <p className="mt-3 text-[12px] text-navy-300">Last webhook 2 min ago · token healthy</p>
-        </Card>
-        <Card className="px-5 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-navy">TikTok Shop</p>
-              <p className="text-[12px] text-navy-400">KALIMA Official</p>
-            </div>
-            <Pill value="active" />
-          </div>
-          <p className="mt-3 text-[12px] text-navy-300">Last webhook 14 min ago · token healthy</p>
-        </Card>
-        <Card className="px-5 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-navy">Safety buffer</p>
-              <p className="text-[12px] text-navy-400">Held back per marketplace listing</p>
-            </div>
-            <span className="font-display text-2xl text-navy">2 units</span>
-          </div>
-          <p className="mt-3 text-[12px] text-navy-300">Reconciliation poll every 15 min</p>
-        </Card>
+      {connected && (
+        <p className="border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-800">
+          {connected}
+        </p>
+      )}
+      {error && (
+        <p className="border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-800">{error}</p>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Listings mapped" value={String(mapped)} sub={`${rows.length} variants`} />
+        <StatCard
+          label="Not fully mapped"
+          value={String(health.unmappedVariants)}
+          sub="variants missing a channel"
+          accent={health.unmappedVariants > 0 ? "down" : undefined}
+        />
+        <StatCard label="Queued pushes" value={String(health.queued)} sub={`${health.running} running`} />
+        <StatCard
+          label="Failed jobs"
+          value={String(health.failed)}
+          sub="after 6 attempts"
+          accent={health.failed > 0 ? "down" : undefined}
+        />
       </div>
 
-      <Card>
-        <CardHeader
-          title="SKU mapping & live stock"
-          action={
-            <Button
-              variant="kalimaOutline"
-              size="editorial"
-              className="cursor-pointer border-navy/30 px-3 py-1.5 transition-colors"
-            >
-              Re-sync all
-            </Button>
-          }
-        />
-        <Table className="text-left text-[13px]">
-          <TableHeader>
-            <TableRow className="border-navy/10 hover:bg-transparent">
-              {HEAD.map((h) => (
-                <TableHead
-                  key={h}
-                  className="label-caps h-auto px-5 py-3 !text-[10px] font-medium text-navy-400"
-                >
-                  {h}
-                </TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody className="divide-y divide-navy/5 text-navy">
-            {SYNC_ROWS.map((r) => (
-              <TableRow key={r.sku} className="border-b-0 hover:bg-cream-50">
-                <TableCell className="px-5 py-3.5">
-                  <code className="rounded bg-navy-100 px-2 py-1 text-[11px] text-navy">{r.sku}</code>
-                </TableCell>
-                <TableCell className="px-5 py-3.5">
-                  <div className="flex items-center gap-3">
-                    {r.image && (
-                      <Image
-                        src={r.image}
-                        alt=""
-                        width={32}
-                        height={40}
-                        className="h-10 w-8 object-cover object-top"
-                      />
-                    )}
-                    <span className="max-w-64 truncate">{r.product}</span>
-                  </div>
-                </TableCell>
-                <TableCell className="px-5 py-3.5 font-medium">{r.web}</TableCell>
-                <TableCell className="px-5 py-3.5">
-                  {r.shopee ?? <span className="text-navy-300">—</span>}
-                </TableCell>
-                <TableCell className="px-5 py-3.5">
-                  {r.tiktok ?? (
-                    <button className="cursor-pointer text-[12px] text-amber-700 underline underline-offset-4">
-                      Map listing
-                    </button>
-                  )}
-                </TableCell>
-                <TableCell className="px-5 py-3.5">
-                  <Pill value={r.synced ? "synced" : "attention"} />
-                </TableCell>
-              </TableRow>
+      <ChannelConnections cards={cards} />
+
+      <ListingMapper rows={rows} channels={channels} />
+
+      {health.unmappedFromOrders.length > 0 && (
+        <Card>
+          <CardHeader title="Unmapped listings seen in marketplace orders" />
+          <p className="px-5 pb-3 text-[12px] text-navy-400">
+            These sold on a marketplace but are not mapped to a variant here, so their stock was not
+            deducted. Map them above and the next sale will reconcile.
+          </p>
+          <ul className="divide-y divide-navy/5 px-5 pb-4">
+            {health.unmappedFromOrders.map((u) => (
+              <li
+                key={`${u.channel}-${u.externalItemId}-${u.externalModelId ?? ""}`}
+                className="flex items-center justify-between py-2.5 text-[13px]"
+              >
+                <code className="rounded bg-navy-100 px-2 py-1 text-[11px]">
+                  {u.externalItemId}
+                  {u.externalModelId ? `/${u.externalModelId}` : ""}
+                </code>
+                <span className="text-navy-300">
+                  {CHANNEL_LABEL[u.channel]} · seen in {u.seen} order{u.seen === 1 ? "" : "s"}
+                </span>
+              </li>
             ))}
-          </TableBody>
-        </Table>
-      </Card>
+          </ul>
+        </Card>
+      )}
 
-      <SyncLog />
+      {orders.length > 0 && (
+        <Card>
+          <CardHeader title="Recent marketplace orders" />
+          <p className="px-5 pb-3 text-[12px] text-navy-400">
+            Imported for stock and visibility only — fulfilment and refunds stay in the seller
+            centre, which both platforms require.
+          </p>
+          <ul className="divide-y divide-navy/5 px-5 pb-4">
+            {orders.map((o) => (
+              <li key={o.id} className="flex items-center justify-between py-2.5 text-[13px]">
+                <div>
+                  <code className="rounded bg-navy-100 px-2 py-1 text-[11px]">
+                    {o.externalOrderId}
+                  </code>
+                  <span className="ml-2 text-navy-300">
+                    {CHANNEL_LABEL[o.channel]} · {o.lines} line{o.lines === 1 ? "" : "s"}
+                    {o.buyerName ? ` · ${o.buyerName}` : ""}
+                  </span>
+                </div>
+                <span className="text-navy">
+                  {o.totalSen == null ? "—" : formatRM(o.totalSen / 100)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
-      <DemoNote>
-        Demo preview of Phase 8. Requires Shopee Open Platform + TikTok Shop Partner Center app approvals
-        (1–4 weeks — applications start during Phase 3). Website Postgres is the source of truth; every movement
-        goes through the stock ledger, webhook-first with a 15-minute reconciliation poll as the safety net.
-      </DemoNote>
+      <SyncLog entries={activity} />
     </div>
   );
 }

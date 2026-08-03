@@ -2,10 +2,32 @@
 
 **Project:** Kalima — Timeless Modest Luxury (kalima.my)
 **Type:** Custom e-commerce storefront + admin back-office (EasyStore-class features, self-hosted)
-**Stack:** React.js (Vite + TypeScript) · Supabase (Postgres, Auth, Storage, Edge Functions, Realtime)
+**Stack:** Next.js 16 (App Router) + React 19 + TypeScript · Supabase (Postgres, Auth, Storage)
 **Market:** Malaysia (MYR, BM/EN, FPX-first payments, EasyParcel logistics)
 **Prepared by:** Nexova Digital
-**Date:** 17 July 2026
+**Date:** 17 July 2026 · **Last reconciled against the codebase:** 3 August 2026
+
+> ### 📍 Build status
+>
+> | Phase | State |
+> |---|---|
+> | 0 — Foundations & auth | ✅ **Done** (domain/DNS cutover outstanding) |
+> | 1 — Storefront UI | ✅ **Done** (PLP filters + pagination outstanding) |
+> | 2 — Commerce core | ✅ **Done** — LeanX live (FPX + e-wallets) |
+> | 3 — Admin back office | ✅ **Done** |
+> | 4 — EasyParcel shipping | ✅ **Built** — awaiting API credentials to exercise live |
+> | 5 — Messaging & broadcast | 🟡 **Email done** · WhatsApp not built (Meta verification) |
+> | 6 — Affiliate program | ✅ **Done** |
+> | 7 — Loyalty / Kalima Club | ✅ **Done** |
+> | 8 — Marketplace stock sync | 🟡 **Engine built** — Shopee/TikTok adapters await app approval |
+> | 9 — Unified inbox | 🟡 **Engine built** — channel adapters await Meta/Shopee/TikTok approval |
+> | 10 — QA, SEO & launch | ⛔ **Not started** |
+>
+> The original plan assumed a Vite SPA and an undecided payment gateway. Both changed during the
+> build: the app was migrated to **Next.js 16 App Router** (server-rendered, which also retires the
+> SPA-SEO risk in §9) and **LeanX** was selected as the gateway. §4 and §5 below have been rewritten
+> to describe what was actually built; the phase checklists carry per-item notes where the delivered
+> scope differs from what was planned.
 
 ---
 
@@ -45,7 +67,7 @@ Kalima is a Malaysian modest-fashion brand (women's & men's wear, hijabs, access
 - Inventory sync with Shopee and TikTok Shop
 - A unified inbox for marketplace/social messages (feasibility-gated)
 
-**Why custom (React + Supabase) instead of a hosted platform:** full ownership of customer data (critical for messaging/loyalty/affiliate features), no monthly platform fees or transaction fee lock-in, and freedom to integrate any Malaysian service (EasyParcel, toyyibPay, Shopee, TikTok) without app-store limitations.
+**Why custom (Next.js + Supabase) instead of a hosted platform:** full ownership of customer data (critical for messaging/loyalty/affiliate features), no monthly platform fees or transaction fee lock-in, and freedom to integrate any Malaysian service (LeanX, EasyParcel, Shopee, TikTok) without app-store limitations.
 
 ---
 
@@ -103,7 +125,7 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 8. **USP strip** — full-width beige band, 5 icon columns: *Made in Malaysia · Premium Fabrics · In-house Design · Inclusive Sizing · Sustainable Fashion*, each with a thin-line icon and 2-line caption.
 9. **Lookbook / Instagram grid** — `LOOKBOOK` header + `View Instagram →`, 5-up image grid of styled shots (some with wishlist hearts → shoppable lookbook posts tagged to products).
 10. **Newsletter band ("Join Kalima Club")** — satin-texture cream band, serif heading, supporting copy (*"Be the first to know about new collections, exclusive offers and private sales."*), inline email input + solid black `SUBSCRIBE` button. **Note: "Kalima Club" doubles as the loyalty/membership brand (Phase 7).**
-11. **Trust footer bar** — 4 icon columns: Free Shipping (orders above RM500 — ⚠️ mockup inconsistency vs RM300 announcement bar, confirm threshold) · Easy Returns (14-day policy) · Secure Payment · Customer Support.
+11. **Trust footer bar** — 4 icon columns: Free Shipping (~~orders above RM500 — ⚠️ mockup inconsistency vs RM300 announcement bar~~ — ✅ **resolved:** the threshold is now a `store_settings` field editable at `/admin/settings`, read server-side by `create_order`) · Easy Returns (14-day policy) · Secure Payment · Customer Support.
 12. *(Implied, not shown)* Full footer: link columns, social icons, payment method logos, copyright — standard build.
 
 ### 2.3 Pages Implied by the Mockup
@@ -127,14 +149,17 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 
 ## 3. Client Feature Requests — Feasibility Matrix
 
-| # | Client request | Feasibility | Approach | Phase |
-|---|---|---|---|---|
-| 1 | Message / bulk message to customers | ✅ Fully feasible | WhatsApp Business Cloud API (template broadcasts) + transactional email (Resend). Segmented audiences from our own customer DB. | 5 |
-| 2 | Affiliate code | ✅ Fully feasible | Native build: unique codes + referral links, click & order attribution, commission ledger, payout tracking, affiliate portal. | 6 |
-| 3 | Loyalty / membership | ✅ Fully feasible | Native build: points ledger, tier system ("Kalima Club": e.g. Member/Gold/Platinum), earn on purchase, redeem at checkout, birthday rewards. | 7 |
-| 4 | Link postage to EasyParcel | ✅ Fully feasible | EasyParcel Individual/Marketplace API: live rate quotes at checkout, one-click consignment booking from admin, AWB label PDF, tracking webhooks → auto customer notification. | 4 |
-| 5 | Stock sync with Shopee & TikTok Shop | ✅ Feasible (approval-gated) | Shopee Open Platform API + TikTok Shop Open Platform API. SKU mapping table, near-real-time stock push on our sales, webhook-driven stock pull on marketplace sales. Requires developer app approval on both platforms (lead time). | 8 |
-| 6 | Read TikTok / IG / Shopee messages in one place | ✅ Feasible (approval-gated) | **Shopee:** ✅ chat API via Open Platform. **TikTok Shop:** ✅ customer-service conversation API for approved apps. **TikTok organic DMs:** ✅ **Business Messaging API** — Kalima's TikTok account is a Business account, which unlocks send/receive of organic TikTok DMs (48h reply window). **Instagram + FB Page:** ✅ via Meta's Messenger API for Instagram — requires Meta App Review + IG professional account linked to a FB Page. **WhatsApp:** ✅ Cloud API (already integrated in Phase 5). Only gap: TikTok *personal/creator* DMs (no API on any platform) — not relevant here, since Kalima runs a Business account. | 9 |
+*Feasibility was the question at proposal time. The **Built** column records where each request
+actually landed.*
+
+| # | Client request | Feasibility | Built | Approach | Phase |
+|---|---|---|---|---|---|
+| 1 | Message / bulk message to customers | ✅ Fully feasible | 🟡 Email live; WhatsApp blocked on Meta verification | WhatsApp Business Cloud API (template broadcasts) + transactional email (Resend). Segmented audiences from our own customer DB. | 5 |
+| 2 | Affiliate code | ✅ Fully feasible | ✅ Live | Native build: unique codes + referral links, click & order attribution, commission ledger, payout tracking, affiliate portal. | 6 |
+| 3 | Loyalty / membership | ✅ Fully feasible | ✅ Live | Native build: points ledger, tier system ("Kalima Club": e.g. Member/Gold/Platinum), earn on purchase, redeem at checkout, birthday rewards. | 7 |
+| 4 | Link postage to EasyParcel | ✅ Fully feasible | 🟡 Built; needs API credentials | EasyParcel Individual/Marketplace API: live rate quotes at checkout, one-click consignment booking from admin, AWB label PDF, tracking webhooks → auto customer notification. | 4 |
+| 5 | Stock sync with Shopee & TikTok Shop | ✅ Feasible (approval-gated) | 🟡 Engine built; adapters await approval | Shopee Open Platform API + TikTok Shop Open Platform API. SKU mapping table, near-real-time stock push on our sales, webhook-driven stock pull on marketplace sales. Requires developer app approval on both platforms (lead time). | 8 |
+| 6 | Read TikTok / IG / Shopee messages in one place | ✅ Feasible (approval-gated) | 🟡 Engine built; adapters await approval | **Shopee:** ✅ chat API via Open Platform. **TikTok Shop:** ✅ customer-service conversation API for approved apps. **TikTok organic DMs:** ✅ **Business Messaging API** — Kalima's TikTok account is a Business account, which unlocks send/receive of organic TikTok DMs (48h reply window). **Instagram + FB Page:** ✅ via Meta's Messenger API for Instagram — requires Meta App Review + IG professional account linked to a FB Page. **WhatsApp:** ✅ Cloud API (already integrated in Phase 5). Only gap: TikTok *personal/creator* DMs (no API on any platform) — not relevant here, since Kalima runs a Business account. | 9 |
 
 **Honest summary for the client:** items 1–6 boleh buat semua. Item 6 (unified inbox) covers Shopee chat, TikTok **Shop** buyer chat, **TikTok organic DMs** (Kalima's TikTok is a Business account, so the TikTok Business Messaging API applies), Instagram DM + Facebook Page (lepas Meta approval), and WhatsApp — semua dalam satu inbox, reply terus dari sana. The only thing with no API anywhere is TikTok *personal/creator* DMs, which does not apply to a Business account. This is beyond what EasyStore offers at any tier, and no third-party vendor sells this exact channel mix (see [INTEGRATION_STRATEGY.md §2⑥](./INTEGRATION_STRATEGY.md)).
 
@@ -146,85 +171,145 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 
 ### 4.1 Stack
 
+*Rewritten to match what was built. Changes from the original plan are flagged **[changed]**.*
+
 | Layer | Choice | Notes |
 |---|---|---|
-| Frontend | **React 18 + Vite + TypeScript** | SPA with route-based code splitting. |
-| Styling | **Tailwind CSS** + design tokens | Tokens derived from §2.1 (colors, type scale, spacing). |
-| Routing | React Router v7 | Storefront + `/admin` + `/affiliate` portals in one app (role-gated). |
-| Server state | TanStack Query | Caching, optimistic updates. |
-| Client state | Zustand | Cart drawer, UI state (persisted to localStorage + synced to DB when logged in). |
-| Backend | **Supabase** | Postgres 15 + Row Level Security, Auth, Storage (product images), Edge Functions (Deno), Realtime (unified inbox live updates), `pg_cron` (scheduled sync jobs). |
-| Payments | **Stripe Malaysia** (FPX + cards + GrabPay) — or **toyyibPay/Billplz** if client prefers lower FPX fees | Decision needed; see §9. Webhook-driven order confirmation. |
-| Email | Resend (transactional + campaigns) | Order confirmations, shipping updates, newsletters. |
-| WhatsApp | Meta WhatsApp Business Cloud API | Broadcasts (template messages) + transactional notifications. |
-| Shipping | EasyParcel API v1 | Rates, booking, AWB, tracking. |
-| Marketplaces | Shopee Open Platform v2, TikTok Shop Open Platform | OAuth per shop, webhooks + polling fallback. |
-| Hosting | Vercel (frontend) + Supabase Cloud | `kalima.my` apex + `admin` served from same app. |
-| Analytics | GA4 + Meta Pixel + TikTok Pixel | Pixel events needed for ads ROI anyway. |
+| Frontend | **Next.js 16 (App Router) + React 19 + TypeScript** **[changed — was Vite SPA]** | Server Components by default; only interactive leaves ship JS. Catalog routes prerender with hourly ISR. Migrating off the SPA also retired the SEO risk in §9. |
+| Styling | **Tailwind CSS v4** + design tokens | Tokens in `src/app/globals.css` (`@theme`), derived from §2.1. shadcn/ui over Radix for interactive primitives. |
+| Routing | Next App Router **[changed — was React Router v7]** | `(storefront)` route group + `/admin` + `/affiliate`, role-gated in `src/proxy.ts` (Next 16's renamed middleware) and re-checked server-side. |
+| Server state | TanStack Query | Client-side catalog hooks only; server components fetch directly. |
+| Client state | Zustand | Cart, wishlist, UI drawers — persisted to localStorage. **DB-synced carts were not built.** |
+| Backend | **Supabase** | Postgres + Row Level Security, Auth, Storage (product images). **[changed]** No Edge Functions: all server work runs in Next route handlers and server actions on Vercel, which keeps one language and one deploy. `pg_cron` unused so far. |
+| Payments | **LeanX** — FPX + e-wallets **[changed — resolved from the Stripe/toyyibPay/Billplz open question]** | Silent Bill flow, HMAC-SHA256 webhook verification, webhook-driven confirmation. See `LEANX_SAAS_INTEGRATION_GUIDE.md`. |
+| Email | Resend (transactional + campaigns) | Order confirmations, payment receipts, marketing broadcasts. |
+| WhatsApp | Meta WhatsApp Business Cloud API | **Not built** — blocked on Meta Business verification. Campaign tables are channel-agnostic and ready for it. |
+| Shipping | EasyParcel (OAuth) | Rates, booking, AWB, tracking webhook. **[changed]** Admin booking tool, **not** a checkout courier picker — see Phase 4. |
+| Marketplaces | Shopee Open Platform v2, TikTok Shop Open Platform | Not built (Phase 8). |
+| Hosting | Vercel + Supabase Cloud (`gylsymfonxyegdlfodvk`, Singapore) | `kalima.my` apex + `/admin` from the same app. Single Supabase project — no staging/prod split yet. |
+| Analytics | GA4 + Meta Pixel + TikTok Pixel | Not wired yet (Phase 10). |
 
 ### 4.2 Architecture Principles
 
-- **All secrets & third-party calls live in Supabase Edge Functions** — Shopee/TikTok/EasyParcel/WhatsApp keys never touch the browser.
-- **RLS everywhere:** customers see only their own rows; `admin`/`staff` roles via JWT claims; affiliates see only their own referral data.
-- **Webhook-first, poll-fallback** for marketplace sync (webhooks can be delayed/dropped; `pg_cron` reconciliation every 15 min).
-- **Single inventory source of truth:** `product_variants.stock_on_hand` in Postgres; every change goes through a `stock_movements` ledger (auditable, prevents oversell disputes with marketplaces).
-- **Money integrity:** orders/payments state machines (`pending → paid → fulfilled → completed / cancelled / refunded`); payment confirmed **only** by gateway webhook, never by client redirect.
+These held through the build and are worth reading before changing anything downstream of an order.
+
+- **All secrets & third-party calls stay server-side** — LeanX/EasyParcel/Resend keys live in Next
+  route handlers and server actions, never in the browser. **[changed]** The plan said Supabase Edge
+  Functions; Next server code does the same job in one language and one deploy.
+- **RLS everywhere:** customers see only their own rows; `admin`/`staff` via the JWT
+  `app_metadata.role` claim; affiliates see only their own referrals. `SECURITY DEFINER` helpers
+  live in the `private` schema so PostgREST cannot call them.
+- **Money is integer sen, computed server-side, always.** The browser never sends an amount.
+  `create_order` recomputes price, discount, shipping, tax and loyalty redemption from the database.
+- **Anything that can drift is a ledger, never a stored total.** Stock (`stock_movements`),
+  commission (`affiliate_referrals`), points (`loyalty_ledger`). Balances are summed from rows —
+  there is deliberately no stored balance column anywhere. A running total that can disagree with
+  the rows it summarises is how someone gets paid twice.
+- **Money-moving functions are `service_role`-only:** `create_order`, `mark_order_paid`,
+  `refund_order`, `adjust_stock`, `award_loyalty_points`, `revoke_loyalty_points`,
+  `record_affiliate_referral`. `anon` and `authenticated` hold no grant on any of them.
+- **Money integrity:** orders/payments state machines
+  (`pending → paid → fulfilled → completed / cancelled / refunded`); payment confirmed **only** by
+  gateway webhook, never by client redirect. `mark_order_paid` is idempotent and rolls the whole
+  payment back if any line is unfulfillable.
+- **One refund path.** `refund_order` returns stock, claws back commission and reverses points in a
+  single transaction, reached identically from the admin action and the gateway refund webhook —
+  rather than parallel paths a caller could forget.
+- **Inbound webhooks fail closed.** No secret configured means every request is rejected, never
+  accepted. Signatures/secrets are compared in constant time.
+- **Audit is append-only by construction** — staff hold SELECT and no write policy at all, so only
+  service-role server actions can append.
+- **Webhook-first, poll-fallback** for marketplace sync (Phase 8, not yet built): webhooks can be
+  delayed or dropped, so `pg_cron` reconciliation every 15 min is planned as the safety net.
 
 ---
 
 ## 5. Database Schema (high level)
 
-~35 tables, grouped by domain. Detailed DDL delivered per-phase as Supabase migrations.
+**30 migrations applied.** `supabase/migrations/` is a faithful, replayable record of the live
+schema — every file is named `<applied_version>_<applied_name>.sql` and was verified byte-exact
+against `supabase_migrations.schema_migrations` (commit `3c8b0a5`, after the repo had drifted).
 
-**Catalog:** `categories` (tree), `collections`, `products`, `product_variants` (SKU, color, size, price, stock_on_hand), `product_images`, `lookbook_posts` (+ product tags)
+### ✅ Built
 
-**Customers:** `profiles` (extends auth.users; phone in E.164 for WhatsApp), `addresses`, `wishlists`, `newsletter_subscribers`, `customer_tags` (segmentation for broadcasts)
+**Catalog:** `collections`, `products`, `product_variants` (SKU, colour, size, price_sen, weight,
+stock_on_hand), `product_images` (+ `storage_path`), `collection_products`
 
-**Commerce:** `carts`, `cart_items`, `orders`, `order_items`, `payments`, `discount_codes`, `discount_redemptions`, `stock_movements` (ledger: sale/restock/adjustment/marketplace_sync)
+**Customers & auth:** `profiles` (extends `auth.users`; phone in E.164, PDPA consent),
+`role_grants` (sign-up role allowlist), `addresses`, `newsletter_subscribers` (consent timestamp +
+source, unsubscribe token)
 
-**Shipping:** `shipping_zones`, `shipments` (EasyParcel consignment no., AWB URL, courier, status), `shipment_tracking_events`
+**Commerce:** `orders`, `order_items`, `payments`, `discount_codes`, `discount_redemptions`,
+`stock_movements` (ledger: sale / restock / adjustment / release / marketplace_sync)
 
-**Messaging (Phase 5):** `message_templates`, `campaigns`, `campaign_recipients`, `message_logs` (per-message delivery status)
+**Shipping:** `shipments` (courier-agnostic — `manual` or a provider booking with AWB, label URL,
+cost, weight), EasyParcel OAuth tokens + pickup address on `store_settings`
 
-**Affiliate (Phase 6):** `affiliates`, `affiliate_clicks`, `affiliate_referrals` (order-level attribution + commission), `affiliate_payouts`
+**Messaging:** `campaigns`, `campaign_recipients` — channel-agnostic (`campaign_channel` enum
+already carries `whatsapp`)
 
-**Loyalty (Phase 7):** `membership_tiers`, `loyalty_ledger` (earn/redeem/expire entries), `loyalty_rules`
+**Affiliate:** `affiliates`, `affiliate_clicks`, `affiliate_referrals` (order-level attribution +
+commission, `unique(order_id)`), `affiliate_payouts`
 
-**Marketplace sync (Phase 8):** `channel_connections` (Shopee/TikTok OAuth tokens per shop), `channel_listings` (SKU ↔ marketplace item/model ID map), `channel_orders` (imported marketplace orders), `sync_jobs` / `sync_logs`
+**Loyalty:** `loyalty_rules` (single row), `membership_tiers`, `loyalty_ledger`
+(earn / redeem / expire / adjust, unique earn per order)
 
-**Unified inbox (Phase 9):** `conversations` (channel, external thread ID, customer link), `messages` (direction, body, attachments, read state), `inbox_assignments`
+**CMS / settings / audit:** `announcements`, `hero_slides`, `content_pages`, `store_settings`
+(single row — shipping threshold, flat rate, tax, store info), `admin_audit_log` (append-only)
 
-**CMS/Settings:** `announcements` (top bar), `hero_slides`, `content_blocks`, `pages`, `store_locations`, `settings`
+### ⛔ Planned but not built
+
+- `categories` (tree), `lookbook_posts`, `wishlists` — wishlist is a client-side store
+- `carts` / `cart_items` — the cart is localStorage only; no guest-cart merge on login
+- `customer_tags` — segmentation is behavioural instead (spend, recency, buyer status) in
+  `src/lib/messaging/audience.ts`
+- `shipping_zones`, `shipment_tracking_events` — flat rate from settings; tracking status is a
+  column, not an event log
+- `message_templates`, `message_logs` — arrive with WhatsApp; `campaign_recipients` is the
+  delivery log today
+- Phase 8: `channel_connections`, `channel_listings`, `channel_orders`, `sync_jobs` / `sync_logs`
+- Phase 9: `conversations`, `messages`, `inbox_assignments`
+- `content_blocks`, `store_locations` — deferred CMS passes
+
+> `shipping_quotes` was built and then **dropped** (`20260723105012`) when Phase 4 was rescoped:
+> quote-freezing exists to stop an untrusted browser choosing its own shipping price, and there is
+> no untrusted party in an admin-only booking flow.
 
 ---
 
 ## 6. Build Phases
 
-> ### 🎬 Demo preview build — client walkthrough
-> The repo contains a **full clickable demo** of the storefront plus mockups of every client-requested feature, using the supplied model photoshoot for 5 SKUs (Maya Chiffon, Bella Dress, Amanda Sparkle, Ruwa Kaftan, Sofea Dress). Demo screens show sample data with a "Demo preview" badge; each becomes live in its listed phase.
+> ### 🗺️ Route status — what is live vs still a mock-up
+> Only **two** screens remain demo previews. Those read from `src/data/demo.ts` and carry a
+> "Demo preview" badge; everything else is driven by the live database.
 >
-> | Route | What the client sees | Phase it goes live |
+> | Route | What it does | Status |
 > |---|---|---|
-> | `/` | Full storefront with real photoshoot imagery | 1 |
-> | `/checkout` → `/checkout/success` | Checkout w/ EasyParcel live rates, FPX/card/e-wallet, discount & **affiliate code** (try `AISYAH10`), **points redemption**, WhatsApp confirmation story | 2, 4 |
-> | `/account` | Kalima Club member dashboard — points, Gold→Platinum tier progress, order history w/ tracking | 2, 7 |
-> | `/affiliate` | Affiliate portal — stats, referral link/code, commissions, payouts | 6 |
-> | `/admin` | Back-office dashboard — KPIs, 14-day sales chart, channel split | 3 |
-> | `/admin/orders` · `/admin/products` · `/admin/customers` | Ops tables w/ marketplace channel badges, stock, tags/consent | 3 |
-> | `/admin/campaigns` | **① Bulk messaging** — WhatsApp/email campaigns, segments, template composer w/ preview | 5 |
-> | `/admin/affiliates` | **② Affiliate program** management — codes, attribution, payouts | 6 |
-> | `/admin/loyalty` | **③ Loyalty/membership** — tiers, earn/redeem rules, liability | 7 |
-> | `/admin/shipping` | **④ EasyParcel** — credit, courier quotes, booking, AWB, tracking timeline | 4 |
-> | `/admin/sync` | **⑤ Shopee & TikTok stock sync** — connections, SKU mapping, live stock, activity log | 8 |
-> | `/admin/inbox` | **⑥ Unified inbox** — Shopee, TikTok Shop + organic DMs, Instagram, WhatsApp threads in one place, quick replies, linked orders | 9 |
+> | `/` | Full storefront, DB-backed catalog + CMS content | ✅ live |
+> | `/products/*` · `/collections/*` · `/pages/*` | PDP, PLP, content pages — prerendered, hourly ISR | ✅ live |
+> | `/checkout` → `/checkout/pay` → `/checkout/success` | Real orders, server-computed totals, discount codes, **points redemption**, LeanX FPX/e-wallet, webhook-confirmed | ✅ live |
+> | `/kalima-club` | Member standing — balance, value, tier progress, points history; scheme explainer when signed out | ✅ live |
+> | `/account` | Identity + real order history w/ tracking links | 🟡 **part demo** — the Club card, points activity, address book and preferences are still hardcoded; the real member view is `/kalima-club` |
+> | `/affiliate` | Affiliate portal — application, status, referral link/code, Held vs Payable earnings | ✅ live |
+> | `/admin` | KPIs, real 14-day sales chart, top products, recent orders | ✅ live |
+> | `/admin/orders` · `/admin/products` · `/admin/customers` · `/admin/discounts` | Ops tables, product editor, ledger-backed stock, CSV import/export, LTV, discount management | ✅ live |
+> | `/admin/orders/[ref]/packing-slip` · `/admin/orders/packing-slips` | Single + bulk printable packing slips | ✅ live |
+> | `/admin/cms` · `/admin/settings` · `/admin/staff` · `/admin/audit` | Announcements/hero/pages, store + shipping + tax settings, roles, append-only audit trail | ✅ live |
+> | `/admin/campaigns` | **① Bulk messaging** — segments, composer, send, delivery report | 🟡 **email live**, WhatsApp not built |
+> | `/admin/affiliates` | **② Affiliate program** — approve/suspend, rates, discount code, payouts | ✅ live |
+> | `/admin/loyalty` | **③ Loyalty** — outstanding liability, earn/redeem rules, tiers | ✅ live |
+> | `/admin/shipping` | **④ EasyParcel** — connection status, pickup address, rates, booking, AWB | ✅ built, needs credentials |
+> | `/admin/sync` | **⑤ Shopee & TikTok stock sync** — connections, SKU mapping, CSV import/export, activity | ✅ live; adapters pending |
+> | `/admin/inbox` | **⑥ Unified inbox** — threads, customer context, notes, canned replies, reply-window enforcement | ✅ live; adapters pending |
 
 ### Phase 0 — Foundations & Project Setup
+**Status: ✅ done — domain/DNS outstanding**
 **Duration: ~1 week**
 
-- [x] Repo init (Git) — *done; branch strategy + CI pipeline pending*
-- [x] Vite + React + TS + Tailwind v4 + Router v7 + TanStack Query + Zustand scaffolding
-- [x] Supabase project + migrations workflow + seed scripts — *live (`gylsymfonxyegdlfodvk`, Singapore); catalog + auth schema applied, `seed.sql` generated from `catalog.ts`. Single production env for now, not staging+prod.*
-- [x] Design tokens from §2.1/§2.1.1 in `src/index.css` — Kalima Navy `#383C61` scale, cream/beige surfaces, Playfair Display + Jost pairing, tracked-caps label utility
+- [x] Repo init (Git) — *done; branch strategy + CI pipeline still pending*
+- [x] ~~Vite + React + Router v7~~ → **migrated to Next.js 16 App Router** + React 19 + TS + Tailwind v4 + TanStack Query + Zustand (commit `47fb56b`)
+- [x] Supabase project + migrations workflow + seed scripts — *live (`gylsymfonxyegdlfodvk`, Singapore); 30 migrations applied, `seed.sql` generated from `catalog.ts`. Single production env for now, not staging+prod.*
+- [x] Design tokens from §2.1/§2.1.1 in `src/app/globals.css` (`@theme`) — Kalima Navy `#383C61` scale, cream/beige surfaces, Playfair Display + Jost pairing, tracked-caps label utility
 - [x] Base component library: Button (solid/outline/white), section header, product card w/ swatches, placeholder imagery, 20-icon thin-line set
 - [x] Auth skeleton: email/password sign-in, phone capture, roles (`customer`/`staff`/`admin`/`affiliate`) — *done: Supabase Auth + `profiles`, role in JWT `app_metadata`, signup pipeline with an admin allowlist, self-elevation blocked. `/admin` gated on staff/admin, `/account` on any signed-in user. **Google sign-in deferred** (needs a Google OAuth app); magic link not built.*
 - [ ] Domain + DNS for `kalima.my`, staging URL
@@ -234,14 +319,15 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 ---
 
 ### Phase 1 — Storefront UI
+**Status: ✅ done — PLP filters + pagination outstanding**
 **Duration: ~2–3 weeks** — pixel-faithful build of the mockup + all implied pages (§2.3).
 
-- [x] **Announcement bar** — rotating messages w/ arrows (admin-editable arrives with Phase 3 CMS)
-- [x] **Header + nav** — dropdown menus (WOMEN/MEN/SIGNATURE), sticky on scroll, mobile drawer nav, search overlay (client-side name search; Postgres full-text lands with Supabase)
+- [x] **Announcement bar** — rotating messages w/ arrows; *now admin-editable via the Phase 3 CMS*
+- [x] **Header + nav** — dropdown menus (WOMEN/MEN/SIGNATURE), sticky on scroll, mobile drawer nav, search overlay (client-side name search; *Postgres full-text still not built*)
 - [x] **Home page** — hero carousel, category tiles, Maya collection spotlight (arch mask), best-sellers rail, USP strip, lookbook grid, newsletter signup, trust bar, navy footer w/ white logo
 - [x] **Product card** — placeholder imagery, wishlist toggle, name, RM price, color swatches w/ image-tone swap on click
-- [x] **PLP (category/collection)** — breadcrumb, sort (featured/price); *filter sidebar (size, color, price, fabric) + pagination still to do*
-- [x] **PDP** — color/size selection, add-to-bag → cart drawer, accordions (description/fabric/shipping), loyalty points teaser, related products; *stock states + notify-me arrive with real inventory (Phase 2)*
+- [ ] **PLP (category/collection)** — breadcrumb + sort (featured/price) **done**; ⛔ *filter sidebar (size, colour, price, fabric) and pagination were never built — the one open Phase 1 item*
+- [x] **PDP** — color/size selection, add-to-bag → cart drawer, accordions (description/fabric/shipping), loyalty points teaser, related products; *stock states + notify-me still not built*
 - [x] **Wishlist page** (persisted), **content page stubs** (About, Fabrics, Shipping, Returns, Stores, Kalima Club); *Raya campaign landing template + shoppable lookbook tags still to do*
 - [x] Responsive mobile-first layout (hamburger drawer, 2-col grids); *skeleton loaders + image optimization pending real photography*
 - [x] **Photography drop-in (partial)** — 7 model shots wired in across 5 SKUs (hero, category tiles, Maya spotlight arch, best sellers, lookbook, PDP, cart), incl. **per-colour variant photos** on Ruwa Kaftan (Peach/Lilac/Powder Blue — swatch click swaps the photo); remaining catalog items render branded placeholders until shots are supplied (§8)
@@ -252,136 +338,256 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 ---
 
 ### Phase 2 — Commerce Core
-**Duration: ~2–3 weeks**
+**Status: ✅ done**
+**Duration: ~2–3 weeks** — *commits `71245b8`, `64e8a2e`, `5b7b24e`*
 
-- [ ] **Cart** — mini-cart drawer + cart page, guest cart (localStorage) merged into DB cart on login, free-shipping progress bar ("RM xx away from free shipping" — ties to announcement bar)
-- [ ] **Checkout** — single-page: contact, address (Malaysian states/postcodes), shipping method (flat rates first; live EasyParcel rates land in Phase 4), discount code field, order summary
-- [ ] **Payments** — chosen gateway integration (FPX, card, e-wallet), hosted/redirect flow, **webhook-confirmed** payment status, idempotent order creation, failed/abandoned payment recovery
-- [ ] **Orders** — state machine, order confirmation page + email, **stock decrement via `stock_movements`** ledger with oversell guard (`stock_on_hand >= qty` constraint)
-- [ ] **Customer account area** — order history w/ status timeline, addresses book, profile, password/phone management
-- [ ] **Discount codes** — % / fixed / free-shipping, min spend, usage limits, expiry (foundation reused by affiliate + loyalty phases)
-- [ ] Email notifications: order confirmed, payment received (Resend templates in brand style)
+- [x] **Cart** — mini-cart drawer + free-shipping progress bar. ⛔ *No cart page and no DB-backed cart: the cart is a persisted Zustand store, so guest-cart-merge-on-login was not built.*
+- [x] **Checkout** — contact, Malaysian address, discount code, order summary; flat shipping computed server-side from `store_settings`
+- [x] **Payments — LeanX** (FPX + e-wallets): Silent Bill flow, bank/e-wallet picker at `/checkout/pay`, HMAC-SHA256 webhook verification over the raw body, timing-safe and fail-closed. `bill_no` is the idempotency anchor. ⛔ *Cards not offered by LeanX; abandoned-payment recovery not built.*
+- [x] **Orders** — full state machine, confirmation page + email, stock decrement through the `stock_movements` ledger with oversell guard. `mark_order_paid` is the only path to `paid`, is idempotent, and rolls the entire payment back if any line is unfulfillable
+- [x] **Customer account area** — real profile, real order history with tracking links, password reset + in-account change (reauthenticated). ⛔ *Address book and status timeline not built; the account page's Club card is still hardcoded*
+- [x] **Discount codes** — % / fixed / free-shipping, min spend, usage limits, expiry; validated server-side against a server-computed subtotal
+- [x] Email notifications — Resend order-received + payment-confirmed, brand-styled, null until `RESEND_API_KEY`
 
-**Exit criteria:** end-to-end real test order on staging with RM1 live-mode payment, stock decremented, email received.
+**Exit criteria:** ✅ met — end-to-end order → `create-bill-silent` → bank redirect → signature-verified webhook → order paid, stock decremented via the ledger, payment row written, replay idempotent, tampered amount rejected 409.
 
 ---
 
 ### Phase 3 — Admin Dashboard
-**Duration: ~2–3 weeks** — the EasyStore-replacement back office at `/admin`.
+**Status: ✅ done**
+**Duration: ~2–3 weeks** — the EasyStore-replacement back office at `/admin`. *Commits `149af74`, `784c844`, `9e080fb`, `5130519`, `49e97f6`, `3e35a43`, `c98cc4b`, `2ff4476`, `8e7b931`*
 
-- [ ] **Dashboard** — today/7d/30d sales, orders, AOV, top products, channel breakdown (prepared for Shopee/TT later)
-- [ ] **Products** — CRUD, variant matrix editor, image upload w/ drag-sort, inventory adjustments (reasoned, ledger-backed), CSV import/export
-- [ ] **Orders** — list w/ filters & search, detail view, manual status updates, refund/cancel (gateway refund API), packing slip print
-- [ ] **Customers** — list, profile w/ lifetime value & order history, tags for segmentation (feeds Phase 5 broadcasts)
-- [ ] **Discounts** — code management UI
-- [ ] **CMS** — announcement bar messages, hero slides, collection spotlight, USP items, nav menu manager (seasonal items like RAYA COLLECTION), pages editor, store locations
-- [ ] **Settings** — shipping rates, tax, store info, staff accounts & roles
-- [ ] Audit log for admin actions
+- [x] **Dashboard** — today/7d/30d sales, orders, AOV, real 14-day chart, top products (30d), recent orders. *Channel breakdown waits on Phase 8*
+- [x] **Products** — CRUD, variant matrix editor with inline weight, image upload w/ drag-sort, ledger-backed stock, CSV import/export
+  - Images: the browser PUTs straight to Storage using a short-lived signed URL minted by a staff-gated action, scoped to a single random object key — bytes never pass through a server action and a client filename can never dictate the storage path
+  - Stock has **no absolute input**, only signed deltas through `adjust_stock`, so the ledger stays complete. The CSV importer moves stock by computed delta for the same reason
+  - CSV: dependency-free parser handling quoted commas, escaped quotes, embedded newlines, CRLF and Excel's BOM. The whole file validates before anything is written, so a typo on line 40 cannot half-import a catalog
+- [x] **Orders** — filters & search, detail view, status updates, packing slip print (single + bulk)
+  - **Refunds:** ⛔ LeanX publishes no refund API, so money moves in the LeanX dashboard and the UI says so plainly. `refund_order` handles everything on our side — returns stock as a `release`, reverses commission and points, idempotent, reached identically from the admin action and the gateway refund webhook. *This phase fixed two real bugs: "Mark refunded" was a bare status flip that permanently understated inventory, and an inbound `refunded` webhook was acknowledged and ignored.*
+- [x] **Customers** — list, per-customer order count + lifetime value, role, marketing consent. ⛔ *Tag-based segmentation was replaced by behavioural filters in Phase 5 (spend, recency, buyer status); no `customer_tags` table*
+- [x] **Discounts** — code table, create/edit dialog, instant active toggle
+- [x] **CMS** — announcements, hero slides, content pages, each with public-read/staff-write RLS and revalidation on save. ⛔ *Nav menu manager, USP strip, collection spotlight and store locations deferred*
+- [x] **Settings** — `store_settings` single row driving free-shipping threshold, flat rate, tax and store info (read by `create_order`); staff accounts, roles and the sign-up allowlist
+- [x] **Audit log** — 21+ mutations write actor, machine action, entity and summary. Append-only by construction: staff hold SELECT and no write policy at all. `actor_email` denormalised so records survive user deletion
 
-**Exit criteria:** client can run the store day-to-day without developer help.
+**Exit criteria:** ✅ met — the client can run the store day-to-day without a developer.
 
 ---
 
 ### Phase 4 — Shipping: EasyParcel Integration
-**Duration: ~1 week** — *client feature #4*
+**Status: ✅ built — awaiting EasyParcel credentials to exercise live**
+**Duration: ~1 week** — *client feature #4* · *commits `f6cfe85`, `dbf7172`, `c018843`, `931ca7e`*
 
-- [ ] EasyParcel account + API key (client action, see §8); sandbox first
-- [ ] **Checkout:** live rate quotes by postcode + parcel weight (variant weights added to catalog), courier selection or cheapest-auto, free-shipping threshold override
-- [ ] **Admin:** one-click "Book shipment" on paid orders → EasyParcel order creation, credit balance check, AWB/label PDF download, bulk booking for multiple orders
-- [ ] **Tracking:** consignment status polling/webhook → order timeline updates → customer email (and later WhatsApp) notification "Your order has shipped, track here"
-- [ ] Storefront order page shows courier + tracking link
-- [ ] Edge cases: East Malaysia rates, oversized items, EasyParcel top-up-needed alerts
+> **⚠️ Scope corrected mid-phase after client clarification: customers do not choose a courier.**
+> Checkout charges the store flat rate (or free above the threshold), computed server-side exactly
+> as before. EasyParcel exists so Kalima can book a parcel, get the AWB and print a label from the
+> order page instead of re-typing an address on easyparcel.com. The `shipping_quotes`
+> freeze/redeem layer built for the checkout picker was **removed** — it exists to stop an
+> untrusted browser choosing its own shipping price, and there is no untrusted party in an
+> admin-only flow.
 
-**Exit criteria:** real parcel booked, labelled, and tracked through to delivery on a staging order.
+- [ ] EasyParcel account + API key — ⛔ **client action, still outstanding** (§8). The code is complete and unexercised against the live API.
+- [x] ~~**Checkout:** live rate quotes~~ → **out of scope by design** (see box above). Variant weights *were* added to the catalog as an inline, audit-logged field in the variant editor, since couriers price on weight
+- [x] **Admin:** "Book with EasyParcel" on a pending parcel — rates load cheapest-first, staff pick a courier, booking writes back AWB, courier, cost and weight and advances a paid order to fulfilled. The picker states plainly that the figures are Kalima's own wallet cost, not a customer price
+  - **Idempotency:** the shipment row is claimed with a conditional update (`pending → booked`) *before* the API call, so a second concurrent click loses the race instead of booking a second parcel and debiting the wallet twice. A failed call releases the claim
+  - **Wallet pre-check:** an empty wallet produces "top up", not a raw upstream error, and costs nothing
+  - **OAuth connect/callback:** `state` carries no identity and proves only that the round trip began in this browser; identity is re-derived from the staff session in the callback. *The reference integration encoded the user id in `state`, which let an attacker attach their own merchant account to someone else's store and receive their shipments.*
+  - ⛔ *Bulk booking across multiple orders not built — one parcel at a time*
+- [x] **Tracking:** `/api/shipping/webhook` consumes EasyParcel status pushes. EasyParcel publishes no HMAC scheme, so auth is a shared secret compared in constant time and **fails closed** — no secret in the environment means every request is rejected (503). An unmapped upstream status is ignored rather than written through; a `delivered` push only completes an order that is paid or fulfilled, so a refunded order is never silently promoted. Responses are 200 even on failure so EasyParcel stops retrying. ⛔ *Shipped-notification email not wired*
+- [x] Storefront order history shows courier + a working tracking link, resolved from a per-courier URL template (an explicit URL from a booking always wins)
+- [x] Edge cases: Malaysian state names mapped to ISO 3166-2 (`Selangor → MY-10`) because EasyParcel prices on the code and a wrong one silently misprices West vs East Malaysia — 12 unit tests cover aliases, ISO passthrough, unknown → null and East Malaysia classification. Top-up-needed surfaced by the wallet pre-check. ⛔ *Oversized-item handling not built*
+
+**Exit criteria:** ⛔ **not yet met** — needs a real parcel booked, labelled and tracked to delivery, which requires the client's EasyParcel account. Everything up to that boundary is verified: settings save with audit entries, the webhook rejects no-secret / wrong-secret / same-length-wrong-value with 401 (constant-time compare confirmed), accepts the correct secret via header, alternate header and query fallback, and a full push sequence rewrote the AWB, ignored an unknown status and moved paid → completed on delivery.
 
 ---
 
 ### Phase 5 — Customer Messaging & Bulk Broadcast
-**Duration: ~1–2 weeks** — *client feature #1*
+**Status: 🟡 email done · WhatsApp blocked on Meta Business verification**
+**Duration: ~1–2 weeks** — *client feature #1* · *commit `9dd4198`*
 
-- [ ] **WhatsApp Business Cloud API** setup: Meta Business verification, WABA, phone number, display name (client action, §8)
-- [ ] **Template management** — create/submit WhatsApp templates (Meta approval required per template) from admin
-- [ ] **Audience segments** — filter customers by tags, purchase history (e.g. "bought Raya 2025 collection", "spent > RM500", "inactive 90 days"), consent status
-- [ ] **Campaign composer** — pick template → pick segment → variable mapping (name, voucher code) → schedule/send
-- [ ] **Send pipeline** — Edge Function queue with rate limiting, per-message delivery/read status → `message_logs`, campaign report (sent/delivered/read/failed)
-- [ ] **Transactional WhatsApp** — order confirmed, shipped w/ tracking (upgrade from email-only)
-- [ ] **Email campaigns** — same segment engine → Resend broadcast (newsletter "Kalima Club" list from footer signup)
-- [ ] **PDPA compliance** — explicit marketing consent checkbox at signup/checkout, unsubscribe/opt-out handling for both channels
+> **Email works today. WhatsApp is the other half and is blocked** on the client's Meta Business
+> verification plus per-template approval — a multi-week external dependency. The `campaigns` and
+> `campaign_recipients` tables are therefore **channel-agnostic** (`campaign_channel` already
+> carries `whatsapp`), so WhatsApp slots in without reshaping anything.
+
+- [ ] **WhatsApp Business Cloud API** setup — ⛔ **client action, outstanding** (§8)
+- [ ] **Template management** — ⛔ not built (depends on the above)
+- [x] **Audience segments** — ⛔ *tags dropped in favour of behavioural filters*: buyers-only, minimum lifetime spend, active-within-N-days, inactive-for-N-days. Consent status is not a filter — see PDPA below
+- [x] **Campaign composer** — subject + body, pick segment, live audience count, send
+- [x] **Send pipeline** — sends are **sequential with a pause**, not parallel: a broadcast that trips Resend's rate limit half way through is worse than a slower one. The campaign is claimed `draft → sending` before the first message so a double click cannot mail the list twice. Every message writes a `campaign_recipients` row, so the delivery report is the log rather than a guess. ⛔ *Read receipts not available on the email path*
+- [ ] **Transactional WhatsApp** — ⛔ not built
+- [x] **Email campaigns** — Resend broadcast off the same segment engine, fed by the footer "Join Kalima Club" list. *This also fixed a live untruth: that form showed a success message and persisted nothing — it told people they had joined a list that did not exist.*
+- [x] **PDPA compliance** — treated as **the floor, not a filter option**. `resolveAudience` always excludes anyone without explicit consent and anyone who has unsubscribed, and there is deliberately **no switch to override it** — compliance should not be one careless checkbox away. Consent is timestamped with its source; unsubscribing is *recorded*, not deleted, so a later import cannot resurrect someone who said no. Every marketing email carries a per-subscriber random unsubscribe token (so a link cannot be forged from someone else's address) plus `List-Unsubscribe` headers. Marketing mail uses a separate shell from the transactional templates: this one must carry an unsubscribe link and a receipt must not. The subscriber table has **no read policy** for `anon` or `authenticated` — an open select would hand every customer email to a scraper
 
 **Costs to flag to client:** Meta charges per marketing conversation (~RM0.30–0.60 range, category-dependent) — billed to client's Meta account.
 
-**Exit criteria:** client sends a real segmented broadcast to test customers and views a delivery report.
+**Exit criteria:** 🟡 **partially met.** The pipeline is verified end to end — signup persists with timestamped consent and a 48-char token; unsubscribe works, is idempotent and rejects a forged token; the audience preview returned 5 (4 consenting accounts + 1 active subscriber) with the opted-out address excluded, narrowing to 4 under the buyers filter. **No campaign has actually been sent**, deliberately: the seed audience is real-looking gmail.com addresses and sending would put mail in a stranger's inbox. The client's first real broadcast closes this out.
 
 ---
 
 ### Phase 6 — Affiliate Program
-**Duration: ~1–2 weeks** — *client feature #2*
+**Status: ✅ done**
+**Duration: ~1–2 weeks** — *client feature #2* · *commits `36da292`, `dace8e8`*
 
-- [ ] **Affiliate onboarding** — application form → admin approval → affiliate role
-- [ ] **Codes & links** — unique discount code per affiliate (e.g. `AISYAH10`) + trackable link (`kalima.my/?ref=aisyah`, 30-day cookie); either path attributes the order
-- [ ] **Attribution engine** — order webhook records `affiliate_referrals` row w/ commission (% or fixed, per-affiliate override), only on **paid** orders; clawback on refund/cancel
-- [ ] **Affiliate portal** (`/affiliate`) — dashboard: clicks, orders, conversion, pending/approved/paid commission, marketing asset downloads
-- [ ] **Admin** — affiliate list, commission rules, payout batching (mark-as-paid w/ reference no. — DuitNow transfer done manually by client; payout automation optional later)
-- [ ] Fraud guards: self-purchase block, code+link double-attribution rules, commission hold period (e.g. 14 days = return window)
+- [x] **Affiliate onboarding** — application form creates a **pending** row, never an approved one; self-approval would make every downstream fraud guard pointless. Pending/suspended affiliates see a status message rather than a dashboard implying earnings
+- [x] **Codes & links** — per-affiliate discount code (e.g. `AISYAH10`) + trackable link (`kalima.my/?ref=aisyah`). The `?ref` is captured by the proxy into a 30-day httpOnly cookie and stamped onto the order **after** creation — deliberately a follow-up update rather than a `create_order` parameter, because attribution is bookkeeping layered on the sale and must never be able to fail the sale
+- [x] **Attribution engine** — runs when an order becomes **paid**, from the payment webhook, so an abandoned or failed order never earns anyone a commission. Commission is integer sen computed server-side from the order, on **goods after discount, excluding shipping and tax** — postage the store merely passes through is not margin to pay out on. Per-affiliate rate in basis points (default 10%)
+- [x] **Clawback** — wired into `refund_order` itself rather than added as a second path a caller could forget: refunding a referred sale kills its commission in the same transaction that returns the stock
+- [x] **Affiliate portal** (`/affiliate`) — referral link, discount code, and earnings split into **Held vs Payable**, because "when do I actually get paid" is the question the page exists to answer. ⛔ *Click/conversion stats and marketing asset downloads not built*
+- [x] **Admin** — approve/suspend, per-affiliate commission rate, attach a discount code, record a payout with a DuitNow reference. **The payout control has no amount field**: the server settles exactly the referrals past their hold period and derives the total from them, because a typed amount could disagree with the ledger and the ledger has to win. Balances are **derived** from `affiliate_referrals`, never stored on the affiliate row
+- [x] **Fraud guards — all in the database, not the UI:**
+  - **Self-purchase:** an affiliate buying through their own code or link earns nothing. Matched on `user_id` **and** on email, because signing out is not a loophole
+  - **One per order:** `unique(order_id)` means the code path and the link path can never both pay for the same sale. An explicit code beats an ambient cookie
+  - **Hold period:** 14 days, so a refund lands before money goes out rather than after
+  - **Approved only:** a pending or suspended affiliate accrues nothing
 
-**Exit criteria:** test affiliate earns, sees, and gets marked paid for a commission end-to-end.
+**Exit criteria:** ✅ met — verified against the database: link attribution 20000 → 2000 sen; code attribution (30000−3000) → 2700 sen with shipping excluded; self-purchase blocked; pending affiliate earns nothing; re-running attribution idempotent; an order carrying both a code and a ref produced exactly one referral; refunding flipped it to `clawed_back`. An approved affiliate on 12% showed Held RM48 / Payable RM30, and recording a payout settled only the cleared RM30.
 
 ---
 
 ### Phase 7 — Loyalty & Membership ("Kalima Club")
-**Duration: ~1–2 weeks** — *client feature #3*
+**Status: ✅ done**
+**Duration: ~1–2 weeks** — *client feature #3* · *commits `5d6c002`, `4df3240`, `c5851ea`*
 
-- [ ] **Points engine** — earn rule (e.g. RM1 = 1 point) applied on order **completion** (after return window), ledger-based balance, expiry policy (e.g. 12 months)
-- [ ] **Redemption** — points → discount at checkout (e.g. 100 pts = RM5), min/max redemption rules
-- [ ] **Tiers** — e.g. Member / Gold / Platinum by 12-month spend; perks: point multipliers, early access to collections (gated pages), birthday voucher (auto-issued via Phase 5 WhatsApp/email), free shipping tier
-- [ ] **Storefront** — account "Kalima Club" page: balance, tier progress bar, history, available rewards; points preview on PDP/checkout ("Earn 295 points")
-- [ ] **Admin** — rules config, manual point adjustments, tier overrides, liability report (outstanding points value)
-- [ ] Tie-in: newsletter signup band (§2.2 #10) upgraded to full Club signup
+- [x] **Points engine** — RM1 = 1 point, awarded on order **completion**, not payment: goods still inside the return window are a liability that may have to be unwound, and handing points out then clawing them back is a worse experience than a short wait. A unique index on `(order_id) where type='earn'` makes a replayed completion a no-op, so the shipping webhook's delivery push cannot re-award. Balance is the sum of unexpired ledger entries — earning positive, redemption and expiry negative. 12-month expiry
+- [x] **Redemption at checkout** — happens **inside `create_order`'s transaction**, not as a follow-up call: if the order fails to insert the points are not spent, and if it succeeds they cannot be spent twice. A separate "burn points" call would leak points on failure or double-spend on retry. The caller says *how many* points to use, never *what they are worth* — the amount is clamped by three independent limits (the customer's real ledger balance, the scheme's per-order ceiling, and what is left to pay), so no combination of inputs can produce a negative total or spend points that do not exist. Hitting the cap leaves the remainder in the balance rather than burning it. Defaults: 100 points = RM5, 100-point minimum, 50% of order maximum
+- [x] **Tiers** — Member / Gold (RM1,000) / Platinum (RM3,000) by 12-month spend, with 1× / 1.5× / 2× earn multipliers and free shipping at Platinum. Tier is **recomputed on read**, never stored, so it can never be stale after a refund; refunded orders are excluded, because a sale that came back should not keep buying status. ⛔ *Early-access gated pages and birthday vouchers not built (the latter depends on Phase 5 WhatsApp)*
+- [x] **Storefront** — `/kalima-club` shows balance, what it is worth, tier progress and history when signed in, and works as a scheme explainer when signed out. Points teaser on the PDP. Checkout shows a Club panel: points held, what redeeming saves, the discount summary line, and what the order will earn — the panel mirrors the server's clamp so the figure shown is the figure charged, but it is a **preview, not a decision**: a tampered client can misdraw it and never change the price. 🟡 *The `/account` Club card is still the old hardcoded mock-up — `/kalima-club` is the real view*
+- [x] **Admin** — liability report leading with **outstanding liability**, because unredeemed points are money already promised; computed from the ledger and floored at zero per member so a negative balance cannot quietly reduce what is owed. Rules and tiers displayed. ⛔ *Manual point adjustments and tier overrides are DB-only — no UI*
+- [x] **Refund reversal** — deducts what was *actually awarded* rather than recomputing, because rules or tier may have changed since, and balance is allowed to go negative — the alternative is letting someone refund their way to free points
+- [x] Tie-in: newsletter signup band upgraded to a real, consent-recording Club list (Phase 5)
 
-**Exit criteria:** customer earns points on a paid order, redeems on the next, tier upgrades automatically.
+> **Two real bugs this phase found and fixed.**
+> 1. Points reversal had been wired into the admin refund *action*, but `refund_order` is the actual money path and is also reached from the LeanX refund webhook — so a gateway-initiated refund returned the stock and clawed back the commission while silently **destroying** the points the customer had spent. Stock, commission and points now all reverse inside the one function.
+> 2. **A points-farming loop.** `award_loyalty_points` based earning on `subtotal − discount` and ignored `loyalty_discount_sen`, so a customer earned points on the portion they had paid for *with points* — redeem, earn on the redemption, feed it back. Slow, but real. Earning now applies only to money actually paid for goods.
+
+**Exit criteria:** ✅ met — RM200 of goods earned 200 points with shipping excluded; replaying the award returned "already awarded"; crossing RM1,000 promoted to Gold and the next order earned 150 for RM100 at 1.5×; a revoke took 350 → 200 and a second revoke did not double-deduct. Redemption verified by attacking each limit: 999,999 points against a 500 balance used 500; 5,000 points on an RM89 order capped at exactly 50% and charged only 890; 50 points against a 100-point minimum redeemed nothing; a guest requesting 5,000 redeemed nothing. Refunding an order that spent 890 points returned them (4110 → 4610).
 
 ---
 
 ### Phase 8 — Marketplace Stock Sync (Shopee + TikTok Shop)
-**Duration: ~2–3 weeks** — *client feature #5* · ⚠️ start platform app applications during Phase 3 (approval lead time 1–4 weeks)
+**Status: 🟡 engine built and verified — Shopee/TikTok HTTP adapters await app approval**
+**Duration: ~2–3 weeks** — *client feature #5*
 
-- [ ] **Platform apps** — register on Shopee Open Platform & TikTok Shop Partner Center (client authorizes their shops via OAuth; tokens stored encrypted in `channel_connections`)
-- [ ] **SKU mapping** — admin UI to link Kalima variants ↔ Shopee item/model IDs ↔ TikTok SKU IDs (auto-match by SKU string + manual override); unmapped-listing report
-- [ ] **Outbound sync (site sale → marketplaces)** — on our stock change, push new qty to both platforms via Edge Function queue (debounced, retried, logged)
-- [ ] **Inbound sync (marketplace sale → site)** — Shopee/TikTok order webhooks decrement `stock_on_hand` via ledger; `pg_cron` reconciliation poll every 15 min as safety net
-- [ ] **Marketplace orders visibility** — imported into `channel_orders`, shown in admin orders list with channel badge (fulfilment stays in Shopee/TikTok seller centers — they mandate their own logistics)
-- [ ] **Conflict policy** — website DB is source of truth; oversell alarm if marketplace sells below safety stock; optional per-channel stock buffer (e.g. hold back 2 units)
-- [ ] **Sync health dashboard** — last sync per channel, error queue, manual re-sync button
+> **Everything that does not depend on a vendor's API contract is built, verified and live.**
+> Shopee and TikTok have issued no credentials and publish no sandbox reachable without one, so
+> their HTTP clients are deliberate stubs behind the `ChannelAdapter` seam in
+> `src/lib/channels/`. When a credential lands, the remaining work is one adapter file rather
+> than a feature — the same approach Phase 4 groundwork took with EasyParcel.
+>
+> ⚠️ **The platform applications were meant to start during Phase 3 and STILL have not been
+> submitted.** 1–4 weeks of approval each, and they are now the only thing between this engine
+> and a working sync (§8).
+>
+> Note that "Edge Function queue" below means a Next route handler on a Vercel cron; the project
+> uses no Supabase Edge Functions (§4.1).
 
-**Exit criteria:** a sale on any of the 3 channels updates stock on the other 2 within ~1 minute (webhook path) / 15 min worst case (poll path).
+- [ ] **Platform apps** — ⛔ **client action, outstanding.** `channel_connections` is built and
+      sealed (RLS on, no policies, explicit revoke — service-role only), and the staff-gated OAuth
+      connect/callback routes are live at `/api/channels/[channel]/{connect,callback}`. `state`
+      carries no identity; identity is re-derived from the staff session.
+- [x] **SKU mapping** — `/admin/sync` maps variants to marketplace listings, with a per-listing
+      safety buffer, a pause switch, and an unmapped report driven by lines that actually arrived
+      in marketplace orders. Bulk mapping is by **seller-centre CSV import matched on SKU only** —
+      fuzzy-matching a product name would silently point a listing at the wrong variant, and every
+      future push would then be wrong in both directions.
+- [x] **Outbound sync** — an `AFTER INSERT` trigger on `stock_movements` enqueues a push for every
+      mapped listing, so all five stock paths are covered rather than five call sites anyone could
+      forget. Jobs carry **no quantity** — they are an intent to resync, which is what lets a
+      partial unique index collapse rapid movements into one push. Drained by `/api/channels/sync`
+      on a once-a-minute Vercel cron, claiming with `for update skip locked`, exponential backoff
+      to six attempts. *Pushes themselves no-op until an adapter exists.*
+- [x] **Inbound sync** — `/api/channels/[channel]/webhook` verifies the signature through the
+      adapter (fail-closed: an unwired adapter returns false, never true) and calls
+      `record_channel_sale`, which is idempotent on `(channel, external_order_id)` and decrements
+      through the ledger with `origin_channel` set as a loop guard. ⛔ *The 15-minute
+      reconciliation poll is not built — it needs an adapter to poll against.*
+- [x] **Marketplace orders visibility** — imported into `channel_orders`, shown on `/admin/sync`.
+      Deliberately **not** in `orders`: both platforms mandate their own fulfilment and refunds, so
+      an imported row could never be shipped or refunded here, and keeping it separate means
+      `refund_order`, `award_loyalty_points` and `attribute_referral` cannot reach it.
+- [x] **Conflict policy** — website DB is the source of truth. Per-listing safety buffer honoured
+      by one shared, unit-tested quantity rule. Oversell is **clamped, not refused**:
+      `stock_on_hand` carries `check (>= 0)` and a marketplace sale has already happened, so the
+      decrement is capped at what we hold, `applied_qty` records the shortfall, and an `oversell`
+      is logged at level `error`.
+- [x] **Sync health dashboard** — queued/running/failed counts, per-channel connection state with
+      the real reason a channel is unavailable, unmapped report, recent marketplace orders, and a
+      live activity log. Manual re-sync goes through the same debounced queue so pressing it cannot
+      stampede a rate limit.
+- [x] **Usable before any approval** — CSV export of per-listing quantities using the same rule the
+      automated push will use, so the manual and automatic paths can never disagree. With the
+      listing import, that completes a working loop today: seller centre → import mappings → export
+      stock → bulk upload.
+
+**Exit criteria:** ⛔ **not yet met** — needs a real sale on one channel to move stock on the other
+two, which requires the platform apps. Everything up to that boundary is verified: the trigger fires
+on all five stock paths, 11 rapid movements collapse to one job per channel, the loop guard holds in
+both directions, two concurrent workers claim 20 jobs with zero overlap, backoff escalates to
+'failed' at six attempts, `record_channel_sale` is idempotent and clamps an oversell, both endpoints
+fail closed, and the CSV export honours the safety buffer exactly.
 
 ---
 
 ### Phase 9 — Unified Inbox (Shopee / TikTok / Instagram / WhatsApp)
+**Status: 🟡 engine built and verified — channel adapters await Meta/Shopee/TikTok approval**
 **Duration: ~2–3 weeks** — *client feature #6, the client's headline priority* · scope per feasibility matrix (§3)
 
-> **This is the "reply to everyone from one place" feature.** The client's focus is
-> unification and response, not outbound blasting — every incoming message from every
-> channel lands in one screen, each linked to the customer's orders and Kalima Club
-> profile, and staff reply without leaving the admin.
+> **Everything that does not depend on a vendor's API contract is built and live.** The schema,
+> ingestion route, reply-window enforcement, customer linking, notes, canned replies and the
+> three-pane admin all work against the real database. No channel is connected, so the honest
+> state of the screen today is an empty inbox that says which approval unlocks which channel.
+>
+> ⚠️ **None of the approvals have been applied for.** WhatsApp is the shortest path: it shares
+> the Meta Business verification Phase 5 broadcasts already need, so one application opens both.
+>
+> "Edge Functions" below means Next route handlers (§4.1).
 
-- [ ] **Channels in scope:** Shopee chat ✅ · TikTok **Shop** buyer chat ✅ · **TikTok organic DMs** ✅ (Business Messaging API — Kalima runs a TikTok **Business** account, 48h reply window) · Instagram DM ✅ (post Meta App Review) · Facebook Page messages ✅ (same Meta track) · WhatsApp ✅ (infra already exists from Phase 5) · TikTok *personal/creator* DMs ❌ (no API anywhere — not applicable to a Business account)
-- [ ] **Ingestion** — per-channel webhook receivers (Edge Functions) normalize messages into `conversations`/`messages`; media attachments mirrored to Storage
-- [ ] **Inbox UI (admin)** — 3-pane layout: conversation list w/ channel badges & unread counts, thread view, reply composer; Supabase Realtime for live updates; filters by channel/assignee/unread; link conversation → customer profile & orders
-- [ ] **Replies** — send back through each channel's API (Shopee `send_message`, TikTok Shop CS reply, TikTok Business Messaging send, IG/Messenger send, WhatsApp send). Respect per-channel reply windows: IG/FB 24h, TikTok Business 48h, WhatsApp 24h + template fallback. Outside the window the composer disables free-text and surfaces the reason
-- [ ] **Team features** — assign conversation to staff, internal notes, canned replies/quick answers ("What's my order status?" → auto-context from linked order)
-- [ ] **Meta App Review** submission for `instagram_business_manage_messages` + `pages_messaging` (allow 2–4 weeks; feature ships Shopee + TikTok-first, Meta channels toggled on when approved)
+- [ ] **Channels in scope** — ⛔ **client action, outstanding for every one.** Shopee chat ·
+      TikTok Shop buyer chat · TikTok organic DMs (Business Messaging, 48h window) · Instagram DM
+      and Facebook Page (post Meta App Review) · WhatsApp (shares Phase 5's Meta verification) ·
+      TikTok *personal/creator* DMs have no API anywhere and do not apply to a Business account.
+- [x] **Ingestion** — `/api/channels/[channel]/messages/webhook` normalizes into
+      `conversations`/`messages`, idempotent on `external_message_id` so a redelivery cannot
+      double-post or inflate the unread count. Signature checking is delegated to the adapter and
+      **fails closed**; the subscription handshake refuses too, so no live webhook can be pointed
+      at the app before it can handle the traffic. ⛔ *Media is stored as sent for now — mirroring
+      bytes into Storage needs a wired adapter to know what auth their CDN requires.*
+- [x] **Inbox UI** — three panes: thread list with channel badges and unread counts, the
+      conversation, and the customer's orders and Kalima Club standing beside it. Filters by
+      channel; assignment and open/snoozed/closed status. ⛔ *Supabase Realtime is not wired —
+      threads refresh on navigation. It is new ground in this codebase and deserves its own change
+      once there is live traffic to test against.*
+- [x] **Replies** — the reply window is enforced **server-side**, computed from `last_inbound_at`
+      by a unit-tested module and re-derived again inside the send path, because a page rendered an
+      hour ago can show an open composer for a window that has since closed. Outside it the
+      free-text box is disabled and states the reason. Per-channel hours are data, not a hardcoded
+      number: 24h Meta, 48h TikTok Business, none on Shopee.
+- [x] **Team features** — assignment, open/snoozed/closed, internal notes and canned replies.
+      A note is a message DIRECTION, not a flag, so it cannot reach a customer through any code
+      path; five starting replies are seeded and editable.
+- [ ] **Meta App Review** — ⛔ **outstanding**, for `instagram_business_manage_messages` and
+      `pages_messaging` (2–4 weeks). WhatsApp does not need it and comes first.
 
-**Exit criteria:** messages from a test buyer on Shopee, TikTok Shop, TikTok organic DM, and Instagram all appear in one inbox and receive replies from it — each thread linked to the sender's customer record.
+**Exit criteria:** ⛔ **not yet met** — needs a real message from a test buyer, which requires the
+approvals. Everything up to that boundary is verified: inbound recording links a customer by phone
+and by email, a redelivered message id changes nothing, an outbound reply does not extend the reply
+window, a note does not advance the thread, both webhook entry points fail closed, and the admin
+renders an open window, a closed window and a no-window channel correctly from seeded threads.
 
 ---
 
 ### Phase 10 — QA, SEO, Performance & Launch
+**Status: ⛔ not started**
 **Duration: ~1–2 weeks**
 
-- [ ] Full regression: purchase flows (FPX/card/e-wallet), refunds, all integrations end-to-end
+> Also outstanding and worth folding in here: **no CI pipeline, no automated test suite, and a
+> single Supabase project with no staging/prod split.** Verification to date is live-database
+> manual testing recorded per commit — `git log` is currently the most accurate test report.
+
+- [ ] Full regression: purchase flows (FPX/e-wallet), refunds, all integrations end-to-end
 - [ ] Load/perf: Lighthouse ≥ 90 mobile, image lazy-loading audit, bundle-size budget
-- [ ] SEO: meta/OG per page, product structured data (JSON-LD → Google rich results), sitemap, canonical URLs; pre-rendering/SSR for PDP/PLP if crawlability requires (Vite SSR or prerender service — decide during phase)
+- [ ] SEO: meta/OG per page, product structured data (JSON-LD → Google rich results), sitemap, canonical URLs. *The SSR/prerender decision is already resolved — the Next.js migration made PDP/PLP server-rendered and statically prerendered with hourly ISR*
 - [ ] Analytics events wired: view_item, add_to_cart, begin_checkout, purchase (GA4 + Meta + TikTok pixels)
 - [ ] Security pass: RLS audit, webhook signature verification (payment/Shopee/TikTok/Meta/EasyParcel), rate limiting, secrets rotation
 - [ ] PDPA: privacy policy, consent records, data export/delete procedure
@@ -393,21 +599,36 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 
 ## 7. Timeline Summary
 
-| Phase | Scope | Duration | Cumulative |
-|---|---|---|---|
-| 0 | Foundations | 1 wk | Wk 1 |
-| 1 | Storefront UI | 2–3 wk | Wk 4 |
-| 2 | Commerce core | 2–3 wk | Wk 7 |
-| 3 | Admin dashboard | 2–3 wk | Wk 10 |
-| 4 | EasyParcel | 1 wk | Wk 11 |
-| 5 | Messaging/broadcast | 1–2 wk | Wk 13 |
-| 6 | Affiliate | 1–2 wk | Wk 15 |
-| 7 | Loyalty/membership | 1–2 wk | Wk 17 |
-| 8 | Shopee + TikTok sync | 2–3 wk | Wk 20 |
-| 9 | Unified inbox | 2–3 wk | Wk 23 |
-| 10 | QA & launch | 1–2 wk | **Wk 24–25 (~6 months full scope)** |
+| Phase | Scope | Duration | Cumulative | Status |
+|---|---|---|---|---|
+| 0 | Foundations | 1 wk | Wk 1 | ✅ done |
+| 1 | Storefront UI | 2–3 wk | Wk 4 | ✅ done |
+| 2 | Commerce core | 2–3 wk | Wk 7 | ✅ done |
+| 3 | Admin dashboard | 2–3 wk | Wk 10 | ✅ done |
+| 4 | EasyParcel | 1 wk | Wk 11 | ✅ built — blocked on client credentials |
+| 5 | Messaging/broadcast | 1–2 wk | Wk 13 | 🟡 email done · WhatsApp blocked on Meta |
+| 6 | Affiliate | 1–2 wk | Wk 15 | ✅ done |
+| 7 | Loyalty/membership | 1–2 wk | Wk 17 | ✅ done |
+| 8 | Shopee + TikTok sync | 2–3 wk | Wk 20 | 🟡 engine built — apps still not applied for |
+| 9 | Unified inbox | 2–3 wk | Wk 23 | 🟡 engine built — approvals still not applied for |
+| 10 | QA & launch | 1–2 wk | **Wk 24–25 (~6 months full scope)** | ⛔ not started |
 
-**Recommended go-live strategy:** soft-launch after **Phase 4 (~week 11)** — store can sell and ship. Phases 5–9 roll out as post-launch upgrades on the live store. This gets revenue flowing ~3 months earlier and lets marketplace app approvals (Phase 8/9 blockers) run in parallel.
+**Where the project actually is:** phases 0–7 are delivered — roughly week 17 of the plan, i.e. the
+build is on schedule against its own sequence. **Everything still outstanding is either an
+external approval or a launch task**, not further feature work on 0–7.
+
+**Recommended go-live strategy (unchanged, and now actionable):** the store can already sell and
+ship — soft-launch is gated on three things, none of which are development:
+1. EasyParcel account + API key (Phase 4 cannot be exercised live without it)
+2. Domain + DNS cutover for `kalima.my`
+3. Phase 10 launch tasks — SEO, analytics, monitoring, backups, admin training
+
+Phases 5 (WhatsApp), 8 and 9 then roll out as post-launch upgrades on the live store, which is
+exactly what the platform approval lead times want anyway.
+
+> ⚠️ **The Phase 8/9 platform applications were supposed to start during Phase 3 and have not been
+> submitted.** At 1–4 weeks of approval each, every week they are delayed pushes those phases back
+> one-for-one. Submitting them now costs nothing and de-risks the post-launch roadmap.
 
 > Durations assume one dedicated full-stack developer + designer support. Parallelizing with 2 devs compresses to roughly 4 months.
 
@@ -415,40 +636,49 @@ Pixel-sampled from all four supplied logo assets — the blue is byte-identical 
 
 ## 8. Third-Party Accounts & Prerequisites (Client Action Items)
 
-| Item | Needed by | Notes |
-|---|---|---|
-| `kalima.my` domain access | Phase 0 | DNS management |
-| SSM business registration docs | Phase 2 | Required for payment gateway KYC |
-| Payment gateway account (Stripe MY / toyyibPay / Billplz) | Phase 2 | KYC approval ~3–10 working days |
-| EasyParcel account + API key + credit top-up | Phase 4 | Instant-ish; marketplace API needs request form |
-| Meta Business Manager (verified) + WhatsApp number | Phase 5 | Business verification can take 1–3 weeks — **start early**. Number must not be attached to a personal WhatsApp. |
-| Shopee seller account + Open Platform app approval | Phase 8 | Apply during Phase 3; approval 1–4 wks |
-| TikTok Shop seller account + Partner Center app approval | Phase 8 | Apply during Phase 3; approval 1–4 wks |
-| Instagram professional account linked to Facebook Page | Phase 9 | Needed for IG DM + Messenger API + Meta App Review |
-| TikTok **Business** account + Business Messaging API access | Phase 9 | Confirmed: Kalima's TikTok is a Business account. Register for Business Messaging API credentials + authorize the account to our app |
-| Product photography & copy (per mockup art direction) | Phase 1 | Warm-tone studio style; 4:5 product shots + lookbook |
-| Policies content: returns (14-day), shipping, privacy (PDPA) | Phase 2/10 | We provide templates for review |
+**These are now the critical path.** Development on phases 0–7 is complete; what remains is
+almost entirely waiting on the items below.
+
+| Item | Needed by | Status | Notes |
+|---|---|---|---|
+| `kalima.my` domain access | Phase 0 | ⛔ **outstanding** | DNS management. Blocks go-live. |
+| SSM business registration docs | Phase 2 | ✅ done | Used for gateway KYC |
+| Payment gateway account | Phase 2 | ✅ **done — LeanX live** | Resolved from the Stripe/toyyibPay/Billplz question. FPX + e-wallets working end to end. |
+| EasyParcel account + API key + credit top-up | Phase 4 | ⛔ **outstanding — highest priority** | The integration is code-complete and cannot be exercised without it. Instant-ish to obtain. |
+| Meta Business Manager (verified) + WhatsApp number | Phase 5 | ⛔ **outstanding** | Blocks the WhatsApp half of Phase 5. Verification 1–3 weeks, then per-template approval — **start now**. Number must not be attached to a personal WhatsApp. |
+| Shopee seller account + Open Platform app approval | Phase 8 | ⛔ **outstanding — overdue** | Was scheduled for Phase 3; approval 1–4 wks |
+| TikTok Shop seller account + Partner Center app approval | Phase 8 | ⛔ **outstanding — overdue** | Was scheduled for Phase 3; approval 1–4 wks |
+| Instagram professional account linked to Facebook Page | Phase 9 | ⛔ outstanding | Needed for IG DM + Messenger API + Meta App Review |
+| TikTok **Business** account + Business Messaging API access | Phase 9 | ⛔ outstanding | Confirmed: Kalima's TikTok is a Business account. Register for Business Messaging API credentials + authorize the account to our app |
+| Product photography & copy (per mockup art direction) | Phase 1 | 🟡 partial | 7 model shots across 5 SKUs wired in; remaining catalog items render branded placeholders until shots are supplied |
+| Policies content: returns (14-day), shipping, privacy (PDPA) | Phase 2/10 | 🟡 partial | Content pages are live and CMS-editable; final policy copy still to be reviewed |
 
 ---
 
 ## 9. Risks & Open Questions
 
 ### Risks
-1. **Platform approvals are the critical path** for Phases 8–9 (Shopee/TikTok/Meta reviews are outside our control). Mitigation: apply during Phase 3; soft-launch strategy makes these non-blocking.
-2. **TikTok DM coverage depends on account type** — Kalima's TikTok is a **Business** account, so both TikTok *Shop* buyer chat and **organic TikTok DMs** (via the Business Messaging API) are inboxable. Only TikTok *personal/creator* DMs have no API anywhere, and that does not apply here. No client-facing gap on TikTok.
-3. **WhatsApp broadcast costs & quality rating** — aggressive blasts can degrade the WABA quality score and throttle sending. Mitigation: consent-gated segments, frequency caps.
-4. **Marketplace stock race conditions** — flash-sale moments can oversell across channels. Mitigation: ledger constraints + per-channel safety buffer + oversell alerts.
-5. **SPA SEO** — client-rendered React can underperform for organic search. Mitigation: Phase 10 prerender/SSR decision for PDP/PLP.
+1. **⬆️ ESCALATED — Platform approvals are the critical path** for Phases 8–9, and **the applications have still not been submitted** (they were planned for Phase 3, now long past). Each carries 1–4 weeks of review outside our control. Mitigation still holds — the soft-launch strategy keeps them non-blocking for revenue — but the delay is now pure schedule loss on the post-launch roadmap.
+2. **⬆️ NEW — Client action items are the only thing between here and launch.** Development on phases 0–7 is done. EasyParcel credentials, DNS access and Meta verification are all outstanding, and no amount of engineering moves them.
+3. **⬆️ NEW — No CI, no automated tests, one Supabase project.** Every change to date was verified by manual testing against the live database and recorded in the commit message. That has worked well and caught real bugs, but it does not scale to hypercare, and there is no staging environment to rehearse a release in. Mitigation: fold a test suite + staging project into Phase 10.
+4. **TikTok DM coverage depends on account type** — Kalima's TikTok is a **Business** account, so both TikTok *Shop* buyer chat and **organic TikTok DMs** (via the Business Messaging API) are inboxable. Only TikTok *personal/creator* DMs have no API anywhere, and that does not apply here. No client-facing gap on TikTok.
+5. **WhatsApp broadcast costs & quality rating** — aggressive blasts can degrade the WABA quality score and throttle sending. Mitigation: consent-gated segments (already enforced at the database level, with no override switch), frequency caps.
+6. **Marketplace stock race conditions** — flash-sale moments can oversell across channels. Mitigation: ledger constraints (already in place) + per-channel safety buffer + oversell alerts.
+7. ~~**SPA SEO**~~ — **✅ RESOLVED.** The Next.js App Router migration made the storefront server-rendered, with PDP/PLP/content routes prerendered at build time and revalidated hourly. No prerender service needed.
 
 ### Open questions for client
-1. ~~Brand palette conflict~~ **Resolved:** brand colors extracted from logo files — Kalima Navy `#383C61` + white (§2.1.1). Remaining sign-off: client to approve navy-as-ink (headings/buttons/nav) on the mockup's cream surfaces, replacing the mockup's near-black.
-2. **Free-shipping threshold** — RM300 (announcement bar) or RM500 (footer)? Or tiered by region (West/East MY)?
-3. **Payment gateway preference** — Stripe (best DX, ~3% cards / RM1 FPX) vs toyyibPay/Billplz (cheaper FPX, weaker card/e-wallet support)?
-4. Commission structure for affiliates (flat % vs tiered?) and payout cadence?
-5. Loyalty economics — earn rate, redemption value, tier thresholds? (We'll propose defaults in Phase 7 kickoff.)
-6. Languages — English-only at launch, or BM + EN (i18n adds ~1 week to Phase 1)?
-7. Physical store list for the Stores locator page?
+
+1. ~~**Brand palette conflict**~~ — **Resolved.** Kalima Navy `#383C61` + white, extracted from the logo files (§2.1.1), applied as ink throughout.
+2. ~~**Free-shipping threshold** — RM300 or RM500?~~ — **Resolved by making it configurable.** The threshold, flat rate and tax live in `store_settings` and are editable at `/admin/settings` without a deploy; `create_order` reads them. *Small follow-up: the checkout free-shipping **display** still uses the client-side default — the charged total is already server-authoritative.* Regional (West/East MY) tiering is still not built if the client wants it.
+3. ~~**Payment gateway preference**~~ — **Resolved: LeanX** (FPX + e-wallets), live and webhook-confirmed.
+4. ~~**Affiliate commission structure**~~ — **Resolved as built:** flat percentage per affiliate, stored in basis points with a 10% default and a per-affiliate override, plus a 14-day hold period. Payouts are manual DuitNow with a reference recorded against the settled referrals. *Open: payout cadence — weekly, monthly, or on request?*
+5. ~~**Loyalty economics**~~ — **Resolved as built defaults**, all editable in `loyalty_rules` without a deploy: RM1 = 1 point, 100 points = RM5, 100-point minimum redemption, 50% of order maximum, 12-month expiry; tiers Member / Gold (RM1,000) / Platinum (RM3,000) at 1× / 1.5× / 2× with free shipping at Platinum. *Client to confirm these are the numbers they want to launch with — outstanding points are a real liability.*
+6. **Languages** — still open. English-only at launch, or BM + EN? i18n was not built and would now be a Phase 10 addition.
+7. **Physical store list** for the Stores locator page — still open; `store_locations` was never built.
+8. **NEW — Birthday vouchers and tier early-access** were specified in Phase 7 but not built (the voucher path depends on WhatsApp). Confirm whether these are launch scope or a later upgrade.
 
 ---
 
 *This document is the master build reference. Each phase begins with a kickoff confirming scope and ends with a staging demo + client sign-off before the next phase starts.*
+
+*Reconciled against the codebase on 3 August 2026 (branch `refactor/nextjs-shadcn-supabase`, 30 migrations applied, `tsc --noEmit` clean). Where this document and the code disagree, the code wins — and the commit messages are the most detailed record of what was built and how it was verified. See also [README.md](./README.md) for the developer-facing view and its Known gaps section.*

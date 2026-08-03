@@ -8,6 +8,11 @@ import { getOrder } from "@/lib/admin";
 import { awardLoyaltyPoints } from "@/lib/commerce";
 import { easyparcelClient, getShippingConfig } from "@/lib/shipping/config";
 import { getRatesForOrder, receiverFrom, senderFrom } from "@/lib/shipping/rates";
+import { disconnectChannel, markConnectedViaEnvironment } from "@/lib/channels/tokens";
+import { verifyWhatsAppCredentials } from "@/lib/channels/meta";
+import { enqueueFullResync } from "@/lib/channels/sync";
+import { addNote, markRead, sendReply } from "@/lib/channels/inbox";
+import { channelDoes, isChannel } from "@/lib/channels/types";
 import {
   CATEGORIES,
   parseBool,
@@ -1611,4 +1616,379 @@ export async function removeRoleGrant(email: string): Promise<ActionResult> {
   });
   revalidatePath("/admin/staff");
   return { ok: true };
+}
+
+/* ------------------------------------------------------------------------
+   Phase 8 — marketplace sync
+   ------------------------------------------------------------------------ */
+
+/*
+  Mapping a variant to a marketplace listing.
+
+  The external ids are typed or imported, never guessed. Both uniqueness
+  directions are enforced in the database (one listing per variant per channel,
+  one variant per listing), so a duplicate surfaces as a friendly message here
+  rather than a constraint error in the UI.
+*/
+export async function mapListing(input: {
+  variantId: string;
+  channel: string;
+  externalItemId: string;
+  externalModelId?: string;
+  safetyBuffer?: number;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!isChannel(input.channel) || !channelDoes(input.channel, "stock_sync")) {
+    return { error: "That channel does not carry stock." };
+  }
+  const itemId = input.externalItemId.trim();
+  if (!itemId) return { error: "The marketplace item id is required." };
+
+  const modelId = input.externalModelId?.trim() || null;
+  const buffer = Math.max(0, Math.trunc(input.safetyBuffer ?? 0));
+
+  const { data: variant } = await db
+    .from("product_variants").select("sku").eq("id", input.variantId).maybeSingle();
+  if (!variant) return { error: "That variant no longer exists." };
+
+  const { error } = await db.from("channel_listings").upsert(
+    {
+      channel: input.channel,
+      variant_id: input.variantId,
+      external_item_id: itemId,
+      external_model_id: modelId,
+      external_sku: variant.sku,
+      safety_buffer: buffer,
+    },
+    { onConflict: "channel,variant_id" },
+  );
+  if (error) {
+    return {
+      error: error.code === "23505"
+        ? "That marketplace listing is already mapped to a different variant."
+        : error.message,
+    };
+  }
+
+  await logAudit(db, {
+    action: "channel_listing.mapped", entityType: "product_variant", entityId: input.variantId,
+    summary: `${variant.sku} mapped to ${input.channel} listing ${itemId}${modelId ? `/${modelId}` : ""}`,
+    meta: { channel: input.channel, external_item_id: itemId, external_model_id: modelId },
+  });
+  revalidatePath("/admin/sync");
+  return { ok: true };
+}
+
+export async function unmapListing(listingId: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: listing } = await db
+    .from("channel_listings").select("channel, external_item_id, external_sku").eq("id", listingId).maybeSingle();
+
+  const { error } = await db.from("channel_listings").delete().eq("id", listingId);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "channel_listing.unmapped", entityType: "channel_listing", entityId: listingId,
+    summary: `${listing?.external_sku ?? "listing"} unmapped from ${listing?.channel ?? "channel"}`,
+  });
+  revalidatePath("/admin/sync");
+  return { ok: true };
+}
+
+/*
+  Safety buffer and the per-listing sync switch.
+
+  Changing the buffer changes what the marketplace is allowed to sell, so it
+  queues a resync rather than waiting for the next stock movement — otherwise a
+  buffer raised in response to an oversell would not take effect until something
+  else happened to move.
+*/
+export async function updateListing(input: {
+  listingId: string;
+  safetyBuffer?: number;
+  syncEnabled?: boolean;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const patch: Record<string, unknown> = {};
+  if (input.safetyBuffer !== undefined) {
+    patch.safety_buffer = Math.max(0, Math.trunc(input.safetyBuffer));
+  }
+  if (input.syncEnabled !== undefined) patch.sync_enabled = input.syncEnabled;
+  if (Object.keys(patch).length === 0) return { ok: true };
+
+  const { data: listing, error } = await db
+    .from("channel_listings").update(patch).eq("id", input.listingId)
+    .select("channel, external_sku, safety_buffer, sync_enabled").maybeSingle();
+  if (error) return { error: error.message };
+  if (!listing) return { error: "That mapping no longer exists." };
+
+  if (listing.sync_enabled) {
+    await db.from("channel_sync_jobs").upsert(
+      { channel: listing.channel, kind: "push_stock", listing_id: input.listingId },
+      { onConflict: "listing_id", ignoreDuplicates: true },
+    );
+  }
+
+  await logAudit(db, {
+    action: "channel_listing.updated", entityType: "channel_listing", entityId: input.listingId,
+    summary: `${listing.external_sku ?? "listing"} on ${listing.channel}: buffer ${listing.safety_buffer}, sync ${listing.sync_enabled ? "on" : "off"}`,
+    meta: patch,
+  });
+  revalidatePath("/admin/sync");
+  return { ok: true };
+}
+
+/*
+  Bulk mapping from a listing export.
+
+  This is the path that works TODAY, with no API access: the client exports
+  their listings from the Shopee or TikTok seller centre, and we match each row
+  to a variant by SKU. It is also how mapping will be seeded once the APIs do
+  arrive, because a seller centre export is still the fastest way to map a few
+  hundred listings.
+
+  Matches on SKU only. Fuzzy matching on product name would guess, and a wrong
+  guess here silently points a marketplace listing at the wrong variant — every
+  future stock push would then be wrong in both directions.
+*/
+export async function importListingCsv(
+  channel: string,
+  csv: string,
+): Promise<ActionResult & { mapped?: number; skipped?: number; problems?: string[] }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!isChannel(channel) || !channelDoes(channel, "stock_sync")) {
+    return { error: "That channel does not carry stock." };
+  }
+
+  let records: Record<string, string>[];
+  try {
+    records = parseCsvRecords(csv);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not read that CSV." };
+  }
+  if (records.length === 0) return { error: "That file has no rows." };
+
+  const first = records[0];
+  const hasColumns = "sku" in first && "external_item_id" in first;
+  if (!hasColumns) {
+    return { error: "The file needs at least the columns: sku, external_item_id (external_model_id optional)." };
+  }
+
+  const { data: variants } = await db.from("product_variants").select("id, sku");
+  const bySku = new Map(((variants ?? []) as { id: string; sku: string }[]).map((v) => [v.sku.trim().toLowerCase(), v.id]));
+
+  const rows: Record<string, unknown>[] = [];
+  const problems: string[] = [];
+  let skipped = 0;
+
+  records.forEach((r, i) => {
+    const line = i + 2; // header is line 1
+    const sku = (r.sku ?? "").trim();
+    const itemId = (r.external_item_id ?? "").trim();
+    if (!sku || !itemId) { skipped++; problems.push(`Line ${line}: missing sku or external_item_id`); return; }
+
+    const variantId = bySku.get(sku.toLowerCase());
+    if (!variantId) { skipped++; problems.push(`Line ${line}: no variant with SKU "${sku}"`); return; }
+
+    rows.push({
+      channel,
+      variant_id: variantId,
+      external_item_id: itemId,
+      external_model_id: (r.external_model_id ?? "").trim() || null,
+      external_sku: sku,
+    });
+  });
+
+  if (rows.length === 0) {
+    return { error: `Nothing could be mapped. ${problems.slice(0, 5).join("; ")}` };
+  }
+
+  const { error } = await db.from("channel_listings").upsert(rows, { onConflict: "channel,variant_id" });
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "channel_listing.imported", entityType: "channel", entityId: channel,
+    summary: `Imported ${rows.length} ${channel} listing mapping(s)${skipped ? `, ${skipped} skipped` : ""}`,
+    meta: { mapped: rows.length, skipped },
+  });
+  revalidatePath("/admin/sync");
+  return { ok: true, mapped: rows.length, skipped, problems: problems.slice(0, 10) };
+}
+
+/*
+  Queues a resync of every mapped listing.
+
+  Goes through the debounced queue rather than pushing directly, so pressing it
+  during a busy period cannot stampede a marketplace's rate limit.
+*/
+export async function resyncChannel(channel?: string): Promise<ActionResult & { queued?: number }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const target = channel && isChannel(channel) ? channel : undefined;
+  try {
+    const queued = await enqueueFullResync(target);
+    await logAudit(db, {
+      action: "channel_sync.resync_requested", entityType: "channel", entityId: target ?? "all",
+      summary: `Queued a resync of ${queued} listing(s)${target ? ` on ${target}` : ""}`,
+    });
+    revalidatePath("/admin/sync");
+    return { ok: true, queued };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not queue the resync." };
+  }
+}
+
+export async function disconnectChannelAction(channel: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  if (!isChannel(channel)) return { error: "Unknown channel." };
+
+  try {
+    await disconnectChannel(channel);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not disconnect." };
+  }
+  await logAudit(db, {
+    action: "channel.disconnected", entityType: "channel", entityId: channel,
+    summary: `${channel} disconnected`,
+  });
+  revalidatePath("/admin/sync");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------------
+   Phase 9 — unified inbox
+   ------------------------------------------------------------------------ */
+
+/*
+  Send a reply.
+
+  Deliberately thin: every policy decision — is the window open, is the channel
+  connected, what happens when the platform rejects it — lives in
+  lib/channels/inbox.ts, so it cannot differ between this action and any other
+  caller added later. This layer does authorisation and revalidation only.
+*/
+export async function sendInboxReply(
+  conversationId: string,
+  body: string,
+): Promise<ActionResult> {
+  let current;
+  try {
+    await assertStaff();
+    current = await getCurrentUser();
+  } catch {
+    return { error: "Not authorized." };
+  }
+  if (!current) return { error: "Not authorized." };
+
+  const res = await sendReply({ conversationId, body, staffId: current.user.id });
+  if ("error" in res) return { error: res.error };
+
+  revalidatePath("/admin/inbox");
+  return { ok: true };
+}
+
+export async function addInboxNote(
+  conversationId: string,
+  body: string,
+): Promise<ActionResult> {
+  let current;
+  try {
+    await assertStaff();
+    current = await getCurrentUser();
+  } catch {
+    return { error: "Not authorized." };
+  }
+  if (!current) return { error: "Not authorized." };
+
+  const res = await addNote({ conversationId, body, staffId: current.user.id });
+  if ("error" in res) return { error: res.error };
+
+  revalidatePath("/admin/inbox");
+  return { ok: true };
+}
+
+export async function markInboxRead(conversationId: string): Promise<ActionResult> {
+  try { await assertStaff(); } catch { return { error: "Not authorized." }; }
+  await markRead(conversationId);
+  revalidatePath("/admin/inbox");
+  return { ok: true };
+}
+
+/*
+  Assignment and status.
+
+  Assigning to nobody is expressed as null rather than a sentinel, so "unassigned"
+  and "assigned to a deleted user" are the same state — which they are, since the
+  column is ON DELETE SET NULL.
+*/
+export async function updateConversation(input: {
+  conversationId: string;
+  assignedTo?: string | null;
+  status?: "open" | "snoozed" | "closed";
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const patch: Record<string, unknown> = {};
+  if (input.assignedTo !== undefined) patch.assigned_to = input.assignedTo || null;
+  if (input.status !== undefined) patch.status = input.status;
+  if (Object.keys(patch).length === 0) return { ok: true };
+
+  const { error } = await db.from("conversations").update(patch).eq("id", input.conversationId);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "conversation.updated", entityType: "conversation", entityId: input.conversationId,
+    summary: `Conversation ${input.status ? `set to ${input.status}` : "reassigned"}`,
+    meta: patch,
+  });
+  revalidatePath("/admin/inbox");
+  return { ok: true };
+}
+
+/*
+  Connects WhatsApp.
+
+  Unlike the marketplaces there is no OAuth round trip: Cloud API for a single
+  business uses a permanent System User token from the environment. So this
+  verifies that token can actually see the configured phone number, then records
+  the connection. "Connected" on the admin card therefore means a real round
+  trip succeeded, not that someone pasted a value into an env file.
+*/
+export async function connectWhatsApp(): Promise<ActionResult & { number?: string | null }> {
+  let db;
+  let current;
+  try {
+    db = await assertStaff();
+    current = await getCurrentUser();
+  } catch {
+    return { error: "Not authorized." };
+  }
+
+  try {
+    const info = await verifyWhatsAppCredentials();
+    await markConnectedViaEnvironment("whatsapp", {
+      shopName: info.verifiedName ?? info.displayPhoneNumber,
+      externalShopId: info.phoneNumberId,
+      connectedBy: current?.user.id ?? null,
+    });
+    await logAudit(db, {
+      action: "channel.connected", entityType: "channel", entityId: "whatsapp",
+      summary: `WhatsApp connected (${info.displayPhoneNumber ?? info.phoneNumberId})`,
+    });
+    revalidatePath("/admin/inbox");
+    return { ok: true, number: info.displayPhoneNumber };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not verify the WhatsApp credentials." };
+  }
 }
