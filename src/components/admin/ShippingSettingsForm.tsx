@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { disconnectEasyparcel, saveSenderSettings } from "@/app/admin/actions";
-import { Card, CardHeader, Chip } from "@/components/admin/ui";
+import { Card, CardBody, CardHeader, Chip } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -92,6 +92,7 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
             )
           }
         />
+        <CardBody>
         <div className="flex items-center gap-3">
           <Chip>{settings.connected ? "connected" : "not connected"}</Chip>
           <p className="text-[13px] tracking-wide text-navy-400">
@@ -105,10 +106,12 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
           (or free above the threshold) set in Settings — booking a courier is Kalima&apos;s
           own cost, paid from the EasyParcel wallet.
         </p>
+        </CardBody>
       </Card>
 
       <Card>
         <CardHeader title="Pickup address" />
+        <CardBody>
         <p className="mb-4 text-[13px] tracking-wide text-navy-400">
           Where the courier collects. The postcode and state decide the rate, so an
           incorrect one misprices every quote.
@@ -173,6 +176,7 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
             {pending ? "Saving…" : "Save shipping settings"}
           </Button>
         </div>
+        </CardBody>
       </Card>
     </div>
   );

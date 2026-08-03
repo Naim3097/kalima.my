@@ -10,7 +10,7 @@ import {
   saveShipment,
   type CourierRate,
 } from "@/app/admin/actions";
-import { Card, CardHeader, Chip } from "@/components/admin/ui";
+import { Card, CardBody, CardHeader, Chip } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -167,10 +167,12 @@ export function ShipmentPanel({
       />
 
       {shipments.length === 0 && !open && (
-        <p className="text-[13px] tracking-wide text-navy-400">
-          No parcel recorded yet. Add one with its consignment number and the customer
-          gets a tracking link on their order.
-        </p>
+        <CardBody>
+          <p className="text-[13px] tracking-wide text-navy-400">
+            No parcel recorded yet. Add one with its consignment number and the customer
+            gets a tracking link on their order.
+          </p>
+        </CardBody>
       )}
 
       {shipments.length > 0 && (

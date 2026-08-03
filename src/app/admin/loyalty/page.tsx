@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Card, CardHeader, Table, Td, Tr } from "@/components/admin/ui";
+import { Card, CardBody, CardHeader, Table, Td, Tr } from "@/components/admin/ui";
 import { getLoyaltyLiability, getLoyaltyRules, getTiers } from "@/lib/loyalty";
 import { formatRM } from "@/lib/format";
 
@@ -54,6 +54,7 @@ export default async function AdminLoyaltyPage() {
 
       <Card>
         <CardHeader title="Earn and redemption rules" />
+        <CardBody>
         <dl className="grid gap-4 text-[13px] sm:grid-cols-2 lg:grid-cols-3">
           {[
             ["Earn rate", `${rules.pointsPerRm} point per RM1 spent`],
@@ -73,6 +74,7 @@ export default async function AdminLoyaltyPage() {
           Points earn on goods after discount — shipping and tax are excluded, since
           those are passed through rather than earned on.
         </p>
+        </CardBody>
       </Card>
 
       <Card>

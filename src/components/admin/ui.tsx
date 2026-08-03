@@ -43,6 +43,27 @@ export function CardHeader({ title, action }: { title: string; action?: ReactNod
   );
 }
 
+/*
+  Padded content region inside a Card.
+
+  Card itself is deliberately padding-free: tables, lists and image grids are
+  meant to bleed to the border, and giving Card padding would inset all of them.
+  That leaves every text block responsible for its own inset, which is a rule
+  people forget — several bodies had ended up flush against the border.
+
+  So the inset gets a name. Reach for CardBody rather than remembering `px-5`.
+  Matches CardHeader's px-5 py-4, so a header and a body line up exactly.
+*/
+export function CardBody({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return <div className={cn("px-5 py-4", className)}>{children}</div>;
+}
+
 export function StatCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: "up" | "down" }) {
   return (
     <Card className="px-5 py-4">

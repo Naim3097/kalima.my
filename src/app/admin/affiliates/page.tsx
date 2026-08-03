@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { AffiliateControls } from "@/components/admin/AffiliateControls";
-import { Card, CardHeader, Chip } from "@/components/admin/ui";
+import { Card, CardBody, CardHeader, Chip } from "@/components/admin/ui";
 import { listAffiliates } from "@/lib/affiliate";
 import { formatRM } from "@/lib/format";
 
@@ -42,17 +42,19 @@ export default async function AdminAffiliatesPage() {
       {affiliates.length === 0 ? (
         <Card>
           <CardHeader title="No affiliates yet" />
-          <p className="text-[13px] tracking-wide text-navy-400">
-            People apply at <code>/affiliate</code>. Approve them here and they get a
-            referral link and, optionally, a discount code.
-          </p>
+          <CardBody>
+            <p className="text-[13px] tracking-wide text-navy-400">
+              People apply at <code>/affiliate</code>. Approve them here and they get a
+              referral link and, optionally, a discount code.
+            </p>
+          </CardBody>
         </Card>
       ) : (
         <div className="space-y-4">
           {affiliates.map((a) => (
             <Card key={a.id}>
               <CardHeader title={a.name} action={<Chip>{a.status}</Chip>} />
-              <div className="mb-4 flex flex-wrap gap-x-6 gap-y-1 text-[12px] tracking-wide text-navy-400">
+              <div className="px-5 pt-4 flex flex-wrap gap-x-6 gap-y-1 text-[12px] tracking-wide text-navy-400">
                 <span>{a.email}</span>
                 <span>?ref={a.slug}</span>
                 <span>{a.stats.clicks} clicks</span>
