@@ -22,7 +22,7 @@ const jost = Jost({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://kalima.my"),
+  metadataBase: new URL("https://www.kalima.my"),
   title: {
     default: "Kalima — Timeless Modest Luxury",
     template: "%s · Kalima",

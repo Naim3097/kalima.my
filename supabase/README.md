@@ -226,9 +226,9 @@ silently replaced by the Site URL **with its path stripped**, which looks exactl
 broken link.
 
 ```
-Site URL:       https://kalima.my
+Site URL:       https://www.kalima.my
 Redirect URLs:  http://localhost:3000/**
-                https://kalima.my/**
+                https://www.kalima.my/**
                 https://*.vercel.app/**
 ```
 
