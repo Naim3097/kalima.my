@@ -34,6 +34,25 @@ export const metadata: Metadata = {
     locale: "en_MY",
     siteName: "Kalima",
   },
+  /*
+    Proves to Meta that we own kalima.my, which is what lets the Business
+    Portfolio own the domain and later attribute conversions to it.
+
+    Rendered server-side into <head>, which is what Meta requires — it explicitly
+    refuses a tag injected by client-side JavaScript, so this has to come from
+    the Metadata API rather than a useEffect.
+
+    NOTE: while MAINTENANCE_MODE is on, `/` answers 503 from the proxy and this
+    tag is never served, because the maintenance page is a standalone HTML string
+    that never reaches this layout. Verification during the closed period has to
+    go through the DNS TXT method instead. This tag is here for afterwards, and
+    for the re-checks Meta runs later.
+  */
+  verification: {
+    other: {
+      "facebook-domain-verification": "f2ambcxfiiuzh2kzsqokcw0n0bkoav",
+    },
+  },
 };
 
 export default function RootLayout({
