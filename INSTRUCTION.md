@@ -161,6 +161,98 @@ to a working inbox — and it is the highest-volume channel for a Malaysian bran
 4. From the app dashboard: **App ID**, **App Secret**, **Phone Number ID**, **WABA ID**, and a
    permanent **System User access token**.
 
+### 2.1a Getting there from zero
+
+Meta renames these screens often. The *names* below may drift; the sequence and the artefacts do not.
+
+**The shape of it.** There are three separate approvals people routinely confuse, and only the first
+two apply to WhatsApp:
+
+| | What it gates | How long |
+|---|---|---|
+| **Business verification** | Sending to real customers; raising messaging limits | 1–3 weeks |
+| **Display-name review** | The name customers see next to your messages | hours–days |
+| **App Review** | Instagram DM and Facebook Page messaging **only** | 2–4 weeks |
+
+**You do not have to wait for any of them to start.** Meta issues a free **test number** the moment
+the WhatsApp product is added. It sends to up to five recipient numbers you nominate, and it exposes
+a real Phone Number ID and a real token — which means the whole pipeline in this repo can be wired,
+webhooked and tested end to end while verification is still in the queue. Do that in parallel. The
+only step that then remains is swapping two environment values for the production number.
+
+---
+
+**Step 1 — A personal Facebook account.**
+A Business Portfolio cannot exist without one; Meta uses it as the human administrator. It is not
+shown to customers and it does not have to be an active social profile, but it does need to be a
+real account in a real name — Meta disables portfolios administered by obvious throwaways, and it
+takes the portfolio down with them. Use one you will still control in two years, and turn on
+two-factor authentication before going further: Business Manager will demand it at the point where
+losing access is most expensive.
+
+**Step 2 — Create the Business Portfolio** at [business.facebook.com](https://business.facebook.com)
+(formerly "Business Manager", now often surfaced as "Meta Business Suite").
+
+The business name you type here is the single highest-risk field in the entire process. **It must
+match the legal name on your SSM document character for character** — the same suffix, the same
+spacing, the same `SDN. BHD.` punctuation. Not the brand name. "Kalima" is the storefront; the
+portfolio wants whatever the SSM certificate says. A mismatch here is the most common rejection, and
+a rejected verification cannot simply be resubmitted — you wait out a cooldown.
+
+You will also give a business email (use a `@kalima.my` address, not Gmail — Meta weights a
+domain-matched address) and a business address.
+
+**Step 3 — Business verification.** Business Settings → **Security Centre** → *Start verification*.
+
+For a Malaysian entity, prepare:
+
+- **Proof of legal existence** — SSM: the Section 17 certificate or Superform for a Sdn. Bhd.;
+  Borang A/D for a sole proprietorship or enterprise. A clear scan or PDF of the original, not a
+  photo of a screen.
+- **Proof of address or phone** — a utility bill, bank statement, or business licence issued within
+  the last 90 days, showing the **same** business name and the **same** address you entered.
+- A business phone number Meta can reach for a code, and a business email on your own domain.
+
+The address on the document and the address in the portfolio must agree. Kalima's `store_settings`
+currently records only a Selangor postcode (40170) with no street lines — fill those in from the SSM
+document so the shop, the courier pickup address and the Meta portfolio all tell the same story.
+
+**Step 4 — Create the app.** [developers.facebook.com](https://developers.facebook.com) → *My Apps*
+→ **Create App** → use case **Other** → type **Business** → link it to the portfolio from step 2.
+Linking at creation time matters; an app created loose has to be transferred later, which is fiddlier
+than it sounds.
+
+Then **Add product → WhatsApp**. This creates the WABA and hands you the test number.
+
+**Step 5 — Note the credentials.** App dashboard → *App Settings → Basic* gives **App ID** and
+**App Secret** (the secret is behind a *Show* button and re-prompts for your password — it is also
+the webhook signing key, per §2.4). *WhatsApp → API Setup* gives the **Phone Number ID** and the
+**WABA ID**.
+
+**Step 6 — A permanent token.** The token shown on the API Setup page expires in 24 hours; it is
+fine for a first smoke test and useless for a deployment. For the real one:
+
+Business Settings → **Users → System Users** → *Add* → give it a name and the **Admin** role →
+*Add Assets* → assign **the app** and **the WABA** → *Generate New Token* → select the app, set
+expiry **Never**, and tick:
+
+- `whatsapp_business_messaging` — sending and receiving
+- `whatsapp_business_management` — reading the number and its configuration, which is what the
+  **Connect WhatsApp** button in `/admin/inbox` calls to prove the token really can see the number
+
+The token is displayed **once**. Copy it straight into Vercel; there is no way to read it back, only
+to generate a replacement.
+
+**Step 7 — The production number**, when verification clears. *WhatsApp → API Setup → Add phone
+number*. It must be able to receive an SMS or a voice call, and it must not currently be registered
+to WhatsApp or WhatsApp Business — including the app on someone's phone. If it is, uninstall and
+**delete the account from inside the app** (Settings → Account → Delete my account); merely
+uninstalling leaves the registration alive on Meta's side and the number will be rejected. Give the
+number a few days to clear before retrying.
+
+Adding the production number changes only `META_WHATSAPP_PHONE_ID`. Everything else, including the
+webhook subscription, carries over untouched.
+
 ### 2.2 Environment variables
 
 All five are in `.env.example`. The adapter reports itself configured only when **all** of them are
