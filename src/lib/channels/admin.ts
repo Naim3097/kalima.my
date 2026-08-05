@@ -32,7 +32,19 @@ export type ChannelCard = ChannelConnectionView & {
   mappedListings: number;
 };
 
-export async function getChannelCards(): Promise<ChannelCard[]> {
+/*
+  Which channels to describe. Defaults to the stock channels because /admin/sync
+  asked first, but the inbox needs the messaging ones and the default silently
+  excluded them: WhatsApp does `messaging`, not `stock_sync`, so no card was
+  ever produced for it and the inbox read a missing card as "Not connected" —
+  with a live, verified connection sitting in channel_connections.
+
+  A parameter rather than a widened default, because /admin/sync listing
+  WhatsApp beside Shopee would be its own kind of wrong.
+*/
+export async function getChannelCards(
+  channels: readonly Channel[] = STOCK_CHANNELS,
+): Promise<ChannelCard[]> {
   const [connections, counts] = await Promise.all([
     listConnections(),
     admin().from("channel_listings").select("channel"),
@@ -44,7 +56,7 @@ export async function getChannelCards(): Promise<ChannelCard[]> {
     listingCounts.set(row.channel, (listingCounts.get(row.channel) ?? 0) + 1);
   }
 
-  return STOCK_CHANNELS.map((channel) => {
+  return channels.map((channel) => {
     const existing = byChannel.get(channel);
     return {
       channel,
