@@ -3,12 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { formatRM } from "@/lib/format";
-import {
-  addInboxNote,
-  markInboxRead,
-  sendInboxReply,
-  updateConversation,
-} from "@/app/admin/actions";
+import { addInboxNote, sendInboxReply, updateConversation } from "@/app/admin/actions";
 
 /*
   Unified inbox — channel filter, thread list, conversation and composer.
@@ -174,8 +169,10 @@ export default function InboxPanes({
           {list.map((t) => (
             <li key={t.id}>
               <a
+                /* Not marked read here: navigating away can kill the action
+                   mid-flight, and it never fired for the auto-selected thread.
+                   The server does it on render — see admin/inbox/page.tsx. */
                 href={`/admin/inbox?c=${t.id}`}
-                onClick={() => start(async () => { await markInboxRead(t.id); })}
                 className={`block cursor-pointer px-4 py-3 text-left transition-colors hover:bg-cream-50 ${
                   t.id === activeId ? "bg-cream-50" : ""
                 }`}

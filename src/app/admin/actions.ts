@@ -11,7 +11,7 @@ import { getRatesForOrder, receiverFrom, senderFrom } from "@/lib/shipping/rates
 import { disconnectChannel, markConnectedViaEnvironment } from "@/lib/channels/tokens";
 import { verifyWhatsAppCredentials } from "@/lib/channels/meta";
 import { enqueueFullResync } from "@/lib/channels/sync";
-import { addNote, markRead, sendReply } from "@/lib/channels/inbox";
+import { addNote, sendReply } from "@/lib/channels/inbox";
 import { channelDoes, isChannel } from "@/lib/channels/types";
 import {
   CATEGORIES,
@@ -1917,12 +1917,12 @@ export async function addInboxNote(
   return { ok: true };
 }
 
-export async function markInboxRead(conversationId: string): Promise<ActionResult> {
-  try { await assertStaff(); } catch { return { error: "Not authorized." }; }
-  await markRead(conversationId);
-  revalidatePath("/admin/inbox");
-  return { ok: true };
-}
+/*
+  No markInboxRead action. Reading is decided by what the server renders
+  (admin/inbox/page.tsx), so there is nothing for the client to ask for — and
+  every exported action here is a reachable endpoint, so an unused one is
+  surface with no purpose.
+*/
 
 /*
   Assignment and status.
