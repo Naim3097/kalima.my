@@ -33,6 +33,9 @@ const LINKS: { heading: string; items: { label: string; href: string }[] }[] = [
       { label: "Returns & Exchanges", href: "/pages/returns" },
       { label: "Size Guide", href: "/pages/size-guide" },
       { label: "Contact Us", href: "/pages/contact" },
+      // Meta checks that the Privacy Policy URL it was given is actually
+      // reachable from the site, not just a bare URL typed into a form.
+      { label: "Privacy Policy", href: "/pages/privacy" },
     ],
   },
   {
