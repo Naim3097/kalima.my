@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 
 export const dynamic = "force-dynamic";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://kalima.my";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://www.kalima.my";
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (

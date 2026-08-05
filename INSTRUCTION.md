@@ -47,20 +47,32 @@ Nothing else in the codebase changes when a channel comes online.
 
 | # | Item | Why it blocks |
 |---|---|---|
-| 1 | **DNS cutover for `kalima.my`** | Every platform requires a **public HTTPS** webhook URL. `localhost` is rejected by all of them, and none accept an IP. Until the domain resolves to the deployed app, no webhook can be registered anywhere. |
-| 2 | **Deploy to production** | The URL you register must actually respond. A preview URL works for testing but changes on every deploy, and re-registering a webhook on each push is not a workflow. |
-| 3 | **`NEXT_PUBLIC_APP_URL=https://kalima.my`** in Vercel | OAuth callbacks build absolute redirect URLs from it. Unset, it falls back to `http://localhost:3000` and will bounce a merchant to localhost mid-connection. |
+| 1 | ~~**DNS cutover for `kalima.my`**~~ **Done.** | Every platform requires a **public HTTPS** webhook URL. `localhost` is rejected by all of them, and none accept an IP. |
+| 2 | ~~**Deploy to production**~~ **Done.** | The URL you register must actually respond. A preview URL works for testing but changes on every deploy, and re-registering a webhook on each push is not a workflow. |
+| 3 | **`NEXT_PUBLIC_APP_URL=https://www.kalima.my`** in Vercel | OAuth callbacks build absolute redirect URLs from it. Unset, it falls back to `http://localhost:3000` and will bounce a merchant to localhost mid-connection. |
 | 4 | **Meta Business verification** | Gates WhatsApp, Instagram *and* Facebook. Takes 1–3 weeks. It is also required for the Phase 5 broadcast feature, so this one application unblocks two features. **Start it today** — it is the longest pole. |
 
 Your webhook URLs will be:
 
 ```
-https://kalima.my/api/channels/<channel>/messages/webhook    ← messages (this guide)
-https://kalima.my/api/channels/<channel>/webhook             ← marketplace orders (Phase 8)
-https://kalima.my/api/channels/<channel>/callback            ← OAuth return
+https://www.kalima.my/api/channels/<channel>/messages/webhook    ← messages (this guide)
+https://www.kalima.my/api/channels/<channel>/webhook             ← marketplace orders (Phase 8)
+https://www.kalima.my/api/channels/<channel>/callback            ← OAuth return
 ```
 
 where `<channel>` is one of `whatsapp`, `instagram`, `facebook`, `shopee`, `tiktok`.
+
+⚠️ **`www.`, not the bare apex.** `kalima.my` is not the primary domain — it answers **308 Redirect** to
+`www.kalima.my`. Meta's webhook client does not follow redirects: the verification GET expects a
+direct 200 whose entire body is the challenge, so a 308 fails the handshake, and delivery POSTs to a
+redirecting URL are simply dropped. Register the `www.` form everywhere. The same applies to every
+marketplace's callback and to `NEXT_PUBLIC_APP_URL`.
+
+⚠️ **Maintenance mode does not block these.** `MAINTENANCE_MODE=on` is live on production, but
+`/api/channels` is on the exemption list in `src/lib/maintenance.ts` — a webhook that 503'd through a
+platform's whole retry schedule would be a message or an order lost for good. Verified live: the
+WhatsApp messages webhook answers **403** to an unverified handshake and **401** to an unsigned POST
+on both `www.kalima.my` and `staging.kalima.my` — reaching the handler and failing closed, not 503.
 
 ---
 
@@ -149,6 +161,98 @@ to a working inbox — and it is the highest-volume channel for a Malaysian bran
 4. From the app dashboard: **App ID**, **App Secret**, **Phone Number ID**, **WABA ID**, and a
    permanent **System User access token**.
 
+### 2.1a Getting there from zero
+
+Meta renames these screens often. The *names* below may drift; the sequence and the artefacts do not.
+
+**The shape of it.** There are three separate approvals people routinely confuse, and only the first
+two apply to WhatsApp:
+
+| | What it gates | How long |
+|---|---|---|
+| **Business verification** | Sending to real customers; raising messaging limits | 1–3 weeks |
+| **Display-name review** | The name customers see next to your messages | hours–days |
+| **App Review** | Instagram DM and Facebook Page messaging **only** | 2–4 weeks |
+
+**You do not have to wait for any of them to start.** Meta issues a free **test number** the moment
+the WhatsApp product is added. It sends to up to five recipient numbers you nominate, and it exposes
+a real Phone Number ID and a real token — which means the whole pipeline in this repo can be wired,
+webhooked and tested end to end while verification is still in the queue. Do that in parallel. The
+only step that then remains is swapping two environment values for the production number.
+
+---
+
+**Step 1 — A personal Facebook account.**
+A Business Portfolio cannot exist without one; Meta uses it as the human administrator. It is not
+shown to customers and it does not have to be an active social profile, but it does need to be a
+real account in a real name — Meta disables portfolios administered by obvious throwaways, and it
+takes the portfolio down with them. Use one you will still control in two years, and turn on
+two-factor authentication before going further: Business Manager will demand it at the point where
+losing access is most expensive.
+
+**Step 2 — Create the Business Portfolio** at [business.facebook.com](https://business.facebook.com)
+(formerly "Business Manager", now often surfaced as "Meta Business Suite").
+
+The business name you type here is the single highest-risk field in the entire process. **It must
+match the legal name on your SSM document character for character** — the same suffix, the same
+spacing, the same `SDN. BHD.` punctuation. Not the brand name. "Kalima" is the storefront; the
+portfolio wants whatever the SSM certificate says. A mismatch here is the most common rejection, and
+a rejected verification cannot simply be resubmitted — you wait out a cooldown.
+
+You will also give a business email (use a `@kalima.my` address, not Gmail — Meta weights a
+domain-matched address) and a business address.
+
+**Step 3 — Business verification.** Business Settings → **Security Centre** → *Start verification*.
+
+For a Malaysian entity, prepare:
+
+- **Proof of legal existence** — SSM: the Section 17 certificate or Superform for a Sdn. Bhd.;
+  Borang A/D for a sole proprietorship or enterprise. A clear scan or PDF of the original, not a
+  photo of a screen.
+- **Proof of address or phone** — a utility bill, bank statement, or business licence issued within
+  the last 90 days, showing the **same** business name and the **same** address you entered.
+- A business phone number Meta can reach for a code, and a business email on your own domain.
+
+The address on the document and the address in the portfolio must agree. Kalima's `store_settings`
+currently records only a Selangor postcode (40170) with no street lines — fill those in from the SSM
+document so the shop, the courier pickup address and the Meta portfolio all tell the same story.
+
+**Step 4 — Create the app.** [developers.facebook.com](https://developers.facebook.com) → *My Apps*
+→ **Create App** → use case **Other** → type **Business** → link it to the portfolio from step 2.
+Linking at creation time matters; an app created loose has to be transferred later, which is fiddlier
+than it sounds.
+
+Then **Add product → WhatsApp**. This creates the WABA and hands you the test number.
+
+**Step 5 — Note the credentials.** App dashboard → *App Settings → Basic* gives **App ID** and
+**App Secret** (the secret is behind a *Show* button and re-prompts for your password — it is also
+the webhook signing key, per §2.4). *WhatsApp → API Setup* gives the **Phone Number ID** and the
+**WABA ID**.
+
+**Step 6 — A permanent token.** The token shown on the API Setup page expires in 24 hours; it is
+fine for a first smoke test and useless for a deployment. For the real one:
+
+Business Settings → **Users → System Users** → *Add* → give it a name and the **Admin** role →
+*Add Assets* → assign **the app** and **the WABA** → *Generate New Token* → select the app, set
+expiry **Never**, and tick:
+
+- `whatsapp_business_messaging` — sending and receiving
+- `whatsapp_business_management` — reading the number and its configuration, which is what the
+  **Connect WhatsApp** button in `/admin/inbox` calls to prove the token really can see the number
+
+The token is displayed **once**. Copy it straight into Vercel; there is no way to read it back, only
+to generate a replacement.
+
+**Step 7 — The production number**, when verification clears. *WhatsApp → API Setup → Add phone
+number*. It must be able to receive an SMS or a voice call, and it must not currently be registered
+to WhatsApp or WhatsApp Business — including the app on someone's phone. If it is, uninstall and
+**delete the account from inside the app** (Settings → Account → Delete my account); merely
+uninstalling leaves the registration alive on Meta's side and the number will be rejected. Give the
+number a few days to clear before retrying.
+
+Adding the production number changes only `META_WHATSAPP_PHONE_ID`. Everything else, including the
+webhook subscription, carries over untouched.
+
 ### 2.2 Environment variables
 
 All five are in `.env.example`. The adapter reports itself configured only when **all** of them are
@@ -157,7 +261,7 @@ set — a partial set would produce a channel that accepts messages it cannot an
 ```bash
 META_APP_ID=
 META_APP_SECRET=            # also the webhook signing key — see 2.4
-META_REDIRECT_URI=https://kalima.my/api/channels/whatsapp/callback
+META_REDIRECT_URI=https://www.kalima.my/api/channels/whatsapp/callback
 META_VERIFY_TOKEN=          # a string YOU invent: openssl rand -hex 24
 META_WHATSAPP_PHONE_ID=     # the sending number's id
 META_WHATSAPP_TOKEN=        # permanent System User access token
@@ -180,8 +284,18 @@ required — wrapping it in JSON fails the handshake. Verified: the correct toke
 challenge, a wrong one and a same-length wrong one are both refused 403.
 
 In the Meta dashboard: **WhatsApp → Configuration → Webhook**, set the callback URL to
-`https://kalima.my/api/channels/whatsapp/messages/webhook`, paste the verify token, then subscribe
+`https://www.kalima.my/api/channels/whatsapp/messages/webhook`, paste the verify token, then subscribe
 to the **`messages`** field.
+
+**Register production, not staging — even though the build is happening on staging.** Meta allows one
+callback URL per product per app, so it is a choice, and production is the right side of it for two
+reasons. It is the URL that does not change, so it survives launch without a re-registration. And
+because staging and production currently share **one Supabase project**, an inbound message recorded
+through the production webhook lands in the same `conversations` table that `staging.kalima.my/admin/inbox`
+reads — so you develop against real traffic without pointing a live customer channel at a branch
+deployment. Set the `META_*` variables on the **Production** environment in Vercel; add them to
+**Preview** as well if you want to send replies from staging, since sending is an outbound call and
+does not depend on which URL Meta delivers to.
 
 ### 2.4 Signature verification
 
@@ -259,7 +373,7 @@ Largely shared with WhatsApp — same app, same `x-hub-signature-256` scheme, sa
 ### 3.4 Register
 
 Meta app → **Instagram → Configuration → Webhooks**, callback URL
-`https://kalima.my/api/channels/instagram/messages/webhook`, same verify token.
+`https://www.kalima.my/api/channels/instagram/messages/webhook`, same verify token.
 
 ---
 
@@ -268,7 +382,7 @@ Meta app → **Instagram → Configuration → Webhooks**, callback URL
 Same Meta app, same review track as Instagram — the permission is `pages_messaging`. Submit both in
 one App Review to save a round trip.
 
-- Webhook: `https://kalima.my/api/channels/facebook/messages/webhook`, subscribe to the Page's
+- Webhook: `https://www.kalima.my/api/channels/facebook/messages/webhook`, subscribe to the Page's
   `messages` field.
 - You need a **Page access token** for the Page in question.
 - 24-hour window, same as the others.
@@ -298,7 +412,7 @@ Plan for this to be the slowest and least predictable approval. Do not put it on
 ```bash
 SHOPEE_PARTNER_ID=
 SHOPEE_PARTNER_KEY=
-SHOPEE_REDIRECT_URI=https://kalima.my/api/channels/shopee/callback
+SHOPEE_REDIRECT_URI=https://www.kalima.my/api/channels/shopee/callback
 ```
 
 ### 5.4 Signing
@@ -345,7 +459,7 @@ apply here.
 ```bash
 TIKTOK_APP_KEY=
 TIKTOK_APP_SECRET=
-TIKTOK_REDIRECT_URI=https://kalima.my/api/channels/tiktok/callback
+TIKTOK_REDIRECT_URI=https://www.kalima.my/api/channels/tiktok/callback
 ```
 
 ### 6.4 Notes

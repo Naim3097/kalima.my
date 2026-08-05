@@ -18,7 +18,7 @@ import { resolveAudience, type Segment } from "./audience";
 */
 
 const FROM = process.env.RESEND_FROM || "Kalima <hello@kalima.my>";
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://kalima.my";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://www.kalima.my";
 /** Resend's default is 2 requests/second; stay comfortably under it. */
 const PAUSE_MS = 120;
 
