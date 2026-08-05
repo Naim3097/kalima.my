@@ -337,6 +337,9 @@ export async function verifyWhatsAppCredentials(): Promise<{
 export const whatsappAdapter: ChannelAdapter = {
   channel: "whatsapp",
 
+  /* Written and live against the Cloud API — see sendWhatsAppMessage below. */
+  wired: true,
+
   /*
     All four are required to do anything useful: the secret authenticates
     inbound, the verify token completes the handshake, and the phone id plus
@@ -345,6 +348,23 @@ export const whatsappAdapter: ChannelAdapter = {
   */
   configured: () =>
     Boolean(APP_SECRET && VERIFY_TOKEN && WHATSAPP_PHONE_ID && WHATSAPP_TOKEN),
+
+  /*
+    Same four, named. A partial set is the likeliest state during setup —
+    Meta hands these out from four different screens — so the admin screen
+    should say which one is missing rather than make someone diff the list.
+  */
+  missingEnv: () =>
+    (
+      [
+        ["META_APP_SECRET", APP_SECRET],
+        ["META_VERIFY_TOKEN", VERIFY_TOKEN],
+        ["META_WHATSAPP_PHONE_ID", WHATSAPP_PHONE_ID],
+        ["META_WHATSAPP_TOKEN", WHATSAPP_TOKEN],
+      ] as const
+    )
+      .filter(([, value]) => !value)
+      .map(([name]) => name),
 
   authUrl: notAnOauthChannel,
   exchangeCode: notAnOauthChannel,

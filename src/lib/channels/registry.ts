@@ -51,9 +51,35 @@ export function connectBlockedReason(channel: Channel): string | null {
   if (adapter.configured()) return null;
 
   const label = CHANNEL_LABEL[channel];
-  return CREDENTIALS_PRESENT[channel]()
-    ? `${label} credentials are set, but its API adapter has not been implemented yet — it is awaiting platform approval and a sandbox to build against.`
-    : `${label} is not configured — its API credentials are not set in the environment.`;
+
+  /*
+    Ask the adapter, not the credentials.
+
+    This used to infer "adapter not written" from "credentials present but not
+    configured", which was true only while every Meta channel was a stub. Once
+    WhatsApp was wired, a half-filled environment started reporting itself as
+    missing code — and the message sent someone looking through src/ for an
+    adapter that had been finished and deployed for weeks. Exactly the wrong
+    turn this function exists to prevent.
+  */
+  if (!adapter.wired) {
+    return CREDENTIALS_PRESENT[channel]()
+      ? `${label} credentials are set, but its API adapter has not been implemented yet — it is awaiting platform approval and a sandbox to build against.`
+      : `${label} is not configured — its API credentials are not set in the environment.`;
+  }
+
+  const missing = adapter.missingEnv();
+  if (!missing.length) {
+    /* Wired, nothing missing, still not configured: the adapter's own rule
+       refused it. Say so plainly rather than blame the environment. */
+    return `${label} is not ready — its adapter reports an incomplete configuration.`;
+  }
+
+  return `${label} is not connected — ${
+    missing.length === 1 ? "this variable is" : "these variables are"
+  } not set on this environment: ${missing.join(", ")}. Add ${
+    missing.length === 1 ? "it" : "them"
+  } in Vercel and redeploy (they are read at module load).`;
 }
 
 /** Channels that can actually complete an OAuth round trip today. */
