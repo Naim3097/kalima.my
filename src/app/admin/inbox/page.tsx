@@ -38,7 +38,8 @@ export default async function AdminInboxPage({
   const [threads, cannedReplies, cards] = await Promise.all([
     listThreads(),
     getCannedReplies(),
-    getChannelCards(),
+    /* Messaging channels, not the stock default — see getChannelCards. */
+    getChannelCards(MESSAGING_CHANNELS),
   ]);
 
   const activeId = c ?? threads[0]?.id ?? null;
