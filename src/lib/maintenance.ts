@@ -27,6 +27,16 @@ export function maintenanceEnabled(): boolean {
   The rest are the doors staff use to get in. /admin keeps its own role gate in
   proxy.ts, so listing it here opens nothing — it just means a signed-out
   staff member gets the login page instead of the closed sign.
+
+  /pages/privacy is the odd one out: it is a public page, not a door or a
+  webhook. Meta refuses to take the WhatsApp app out of Development mode
+  without a Privacy Policy URL it can fetch, and it re-checks that URL later —
+  a 503 reads as invalid and would take the messaging channel down with it.
+  Opening it costs nothing, because a privacy notice is a legal statement about
+  a closed shop rather than a way into one, and PDPA 2010 s.7 requires it to be
+  available to anyone whose data we already hold regardless of whether we are
+  currently selling. Note this is the exact path, not the /pages/ prefix: the
+  rest of the content pages stay closed.
 */
 const OPEN_DURING_MAINTENANCE = [
   "/api/payments/webhook",
@@ -38,6 +48,7 @@ const OPEN_DURING_MAINTENANCE = [
   "/auth",
   "/reset-password",
   "/admin",
+  "/pages/privacy",
 ];
 
 export function isOpenDuringMaintenance(pathname: string): boolean {
