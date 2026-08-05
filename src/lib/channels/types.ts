@@ -165,6 +165,26 @@ export type ChannelOrderInput = {
 */
 export interface ChannelAdapter {
   readonly channel: Channel;
+
+  /*
+    False while this adapter is still a stub awaiting a vendor contract.
+
+    Distinct from configured(), which asks whether the credentials are present.
+    Both answer "you cannot connect", but for opposite reasons and to opposite
+    people: an unwired adapter is development work, an unconfigured one is a
+    variable somebody needs to paste into Vercel. Collapsing the two is what
+    told us WhatsApp's adapter "has not been implemented yet" while it sat
+    there fully written, with a phone id missing from the environment.
+  */
+  readonly wired: boolean;
+
+  /*
+    Env var names this adapter needs and cannot currently see, so the admin
+    screen can name them instead of saying "not configured" and leaving someone
+    to guess which of six. Names only — never values.
+  */
+  missingEnv(): readonly string[];
+
   /** True when the environment carries this platform's credentials. */
   configured(): boolean;
   /** Where to send the merchant to authorize. `state` is opaque CSRF proof. */
@@ -258,6 +278,9 @@ export function unwiredAdapter(channel: Channel): ChannelAdapter {
   };
   return {
     channel,
+    wired: false,
+    /* Nothing to name: the blocker is unwritten code, not a missing variable. */
+    missingEnv: () => [],
     configured: () => false,
     authUrl: notConfigured,
     exchangeCode: notConfigured,
