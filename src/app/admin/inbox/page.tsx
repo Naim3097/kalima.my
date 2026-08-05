@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Card, CardHeader } from "@/components/admin/ui";
 import InboxPanes from "@/components/admin/InboxPanes";
 import ConnectWhatsApp from "@/components/admin/ConnectWhatsApp";
-import { getCannedReplies, getThread, listThreads } from "@/lib/channels/inbox";
+import { getCannedReplies, getThread, listThreads, markRead } from "@/lib/channels/inbox";
 import { getChannelCards } from "@/lib/channels/admin";
 import { CHANNELS, CHANNEL_LABEL, REPLY_WINDOW_HOURS, channelDoes } from "@/lib/channels/types";
 import { connectBlockedReason } from "@/lib/channels/registry";
@@ -35,14 +35,39 @@ export default async function AdminInboxPage({
 }) {
   const { c } = await searchParams;
 
-  const [threads, cannedReplies, cards] = await Promise.all([
+  const [allThreads, cannedReplies, cards] = await Promise.all([
     listThreads(),
     getCannedReplies(),
     /* Messaging channels, not the stock default — see getChannelCards. */
     getChannelCards(MESSAGING_CHANNELS),
   ]);
 
-  const activeId = c ?? threads[0]?.id ?? null;
+  const activeId = c ?? allThreads[0]?.id ?? null;
+
+  /*
+    Mark read here, on the server, because a thread is open the moment this
+    renders — not when someone clicks it.
+
+    The click handler in InboxPanes could never clear the first thread, which is
+    auto-selected above without any click ever happening. With a single
+    conversation the badge could not be cleared at all. It was also an <a href>
+    doing a full navigation, so the action it fired could be torn down before it
+    reached the server even when a click did occur.
+
+    Rendering is the honest trigger: what is on screen has been read.
+  */
+  if (activeId) await markRead(activeId);
+
+  /*
+    Zero it locally too. listThreads() ran before the update, so the row it
+    returned still carries the old count and the badge would linger for one more
+    render — the exact staleness this is meant to remove. Cheaper than
+    re-querying for a number we already know.
+  */
+  const threads = activeId
+    ? allThreads.map((t) => (t.id === activeId ? { ...t, unread: 0 } : t))
+    : allThreads;
+
   const detail = activeId ? await getThread(activeId) : null;
 
   const connectedByChannel = new Map(cards.map((k) => [k.channel, k.status]));
