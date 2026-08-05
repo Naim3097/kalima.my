@@ -50,7 +50,11 @@ Nothing else in the codebase changes when a channel comes online.
 | 1 | ~~**DNS cutover for `kalima.my`**~~ **Done.** | Every platform requires a **public HTTPS** webhook URL. `localhost` is rejected by all of them, and none accept an IP. |
 | 2 | ~~**Deploy to production**~~ **Done.** | The URL you register must actually respond. A preview URL works for testing but changes on every deploy, and re-registering a webhook on each push is not a workflow. |
 | 3 | **`NEXT_PUBLIC_APP_URL=https://www.kalima.my`** in Vercel | OAuth callbacks build absolute redirect URLs from it. Unset, it falls back to `http://localhost:3000` and will bounce a merchant to localhost mid-connection. |
-| 4 | **Meta Business verification** | Gates WhatsApp, Instagram *and* Facebook. Takes 1–3 weeks. It is also required for the Phase 5 broadcast feature, so this one application unblocks two features. **Start it today** — it is the longest pole. |
+| 4 | ~~**Meta Business verification**~~ **Submitted 5 Aug 2026, in review.** | Gates WhatsApp, Instagram *and* Facebook, and the Phase 5 broadcast. Meta quoted **about two working days**, not the 1–3 weeks widely reported. It gates *sending to real customers* — it does **not** gate development: the free test number issued with the WhatsApp product carries a real Phone Number ID, and the whole pipeline was built and proven against it while this sat in review. |
+
+**WhatsApp is live end to end as of 5 August 2026** on the test number — inbound messages reach
+`/admin/inbox`. §2.7 records exactly what was verified and what was not. Swapping to the production
+Malaysian number changes one variable, `META_WHATSAPP_PHONE_ID`, and nothing else.
 
 Your webhook URLs will be:
 
@@ -297,6 +301,53 @@ deployment. Set the `META_*` variables on the **Production** environment in Verc
 **Preview** as well if you want to send replies from staging, since sending is an outbound call and
 does not depend on which URL Meta delivers to.
 
+### 2.3a Two more switches, and nothing in the dashboard tells you they are off
+
+A verified webhook is not a delivering webhook. Both of these were true for us with a green tick on
+Configure Webhooks, `messages` showing Subscribed, and Meta's own **Test** button working — and no
+real message ever arrived.
+
+**1. The app must be in Live mode.** The toggle is in the App Dashboard top bar. Meta states it
+plainly and it is easy to read past: *"No production data, including from app admins, developers or
+testers, will be delivered unless the app is in live mode."* Development mode drops real traffic
+silently — Meta does not queue it, so messages sent while it was off are gone and will not replay.
+
+Going Live requires a **Privacy Policy URL** that Meta can fetch. `https://www.kalima.my/pages/privacy`
+serves this. It is in `OPEN_DURING_MAINTENANCE` precisely so the fetch does not hit the 503 — Meta
+re-checks that URL later, so it has to keep answering 200 whether or not the shop is open.
+
+**2. ⚠️ The WABA must be subscribed to YOUR app.** This is the one that leaves no trace anywhere in
+the UI, and it is separate from the webhook-field toggles.
+
+A test number arrives already subscribed to **Meta's own first-party app**, so the dashboard's "Try
+it out" flow works out of the box. Yours is not subscribed, and nothing says so. Real messages are
+delivered — to Meta. The **Test** button does not catch it, because Test posts straight to whatever
+callback URL your app config names and bypasses subscription entirely. That asymmetry is the tell:
+**Test works, real messages do not.**
+
+Only the Graph API reveals it:
+
+```bash
+export WA_TOKEN='<System User token>'
+curl -s "https://graph.facebook.com/v21.0/<WABA_ID>/subscribed_apps?access_token=$WA_TOKEN"
+```
+
+Wrong — someone else's app, and note it is *not* empty, which is what makes this easy to misread as
+correct:
+
+```json
+{"data":[{"whatsapp_business_api_data":{"name":"WA DevX Webhook Events 1P App","id":"2202427980234937"}}]}
+```
+
+Fix it by subscribing the app that owns the token:
+
+```bash
+curl -s -X POST "https://graph.facebook.com/v21.0/<WABA_ID>/subscribed_apps?access_token=$WA_TOKEN"
+```
+
+Expect `{"success":true}`, then re-run the GET and confirm your own app id is listed. Meta's DevX app
+may remain alongside it; that is harmless. Messages arrived within seconds of this call.
+
 ### 2.4 Signature verification
 
 Already implemented (`verifyMetaSignature`): HMAC-SHA256 over the raw body keyed on the **App
@@ -322,17 +373,43 @@ is worth showing a staff member rather than flattening to "send failed".
 
 ⚠️ **`wa_id` arrives WITHOUT the leading `+`** — `60123456789`, while `profiles.phone` stores
 `+60123456789`. The adapter normalises it. Without that one character the auto-link silently never
-matches and every WhatsApp thread shows an unknown sender, even for existing customers. Verified
-end to end: a signed payload linked to a real profile.
+matches and every WhatsApp thread shows an unknown sender, even for existing customers.
+
+**Not yet verified against a real profile.** A live inbound message stored `external_thread_id`
+`60176079379` — bare, exactly as documented — but `customer_id` came back null because no row in
+`profiles` carried that number. That is the correct outcome for an unknown sender, so it confirms
+the fallback and *not* the match. To close it, put a real WhatsApp number on a profile and message
+in again.
+
+Worth knowing when you do: `record_inbound_message` retries the lookup on **every** inbound message
+while `customer_id` is still null, not only when the thread is created. So an existing unlinked
+thread links itself retroactively as soon as a matching profile exists — no backfill needed.
 
 ### 2.7 Test it
 
-1. Message the WABA number from your own phone.
-2. `/admin/inbox` should show the thread within seconds, unread, with the window open.
-3. Reply from the admin; confirm it arrives on your phone.
-4. Add an internal note; confirm it appears in the thread **and never sends**.
-5. Leave it 24 h (or set `last_inbound_at` back in the database) and confirm the composer disables
+Test in this order — each step isolates a different link, so a failure tells you where you are.
+
+1. **Press Connect WhatsApp** in `/admin/inbox`. This calls Graph with your token and asks it to
+   describe the phone number, so a green result proves the System User token and Phone Number ID
+   work. A red one shows Meta's own error text. Writes a `channel_connections` row.
+2. **Press Test** beside the `messages` field in WhatsApp → Configuration. Meta posts a signed
+   sample payload, which exercises reachability, HMAC verification and the parser without involving
+   a phone. It creates a throwaway thread with a 2017 timestamp — delete it afterwards.
+3. **Message the number from your own phone.** This is the only step that proves delivery is
+   actually subscribed to your app (§2.3a). If step 2 passed and this does not arrive, that is the
+   signature, and `subscribed_apps` is where to look.
+4. `/admin/inbox` should show the thread within seconds, unread, with the window open.
+5. Reply from the admin; confirm it arrives on your phone.
+6. Add an internal note; confirm it appears in the thread **and never sends**.
+7. Leave it 24 h (or set `last_inbound_at` back in the database) and confirm the composer disables
    with the reason.
+
+**Status as of 5 August 2026.** Steps 1–4 verified on the free test number: Connect wrote a
+connection row carrying the phone id and Meta's `verified_name`; Meta's Test payload landed; a real
+message from a Malaysian phone appeared in `conversations` about four seconds after sending. Step 7
+was confirmed incidentally — the Test payload's 2017 timestamp put it far outside the window, and
+the composer disabled itself with the reason while still allowing an internal note. Steps 5 and 6
+are not yet exercised.
 
 ---
 
@@ -506,7 +583,9 @@ code being finished. Then build the WhatsApp adapter while you wait.
 | The same message appears twice | `externalMessageId` is null or not stable. It is the idempotency anchor. |
 | Composer disabled unexpectedly | Working as designed. Check `last_inbound_at` — the window measures from the **customer's** last message, and our replies deliberately do not extend it. |
 | Reply says "not connected" | `configured()` is `false`, or no row in `channel_connections` with `status='connected'`. |
-| `/admin/sync` shows a channel as unavailable | The message distinguishes "credentials not set" (supply keys) from "adapter not implemented" (development work). Read which one it says. |
+| **Meta's Test button works but real messages never arrive** | The WABA is subscribed to someone else's app — see §2.3a. This is the default state of a new test number and nothing in the dashboard shows it. Check `GET /{WABA_ID}/subscribed_apps`. |
+| **Nothing arrives at all, Test included** | The app is in Development mode, which drops real traffic silently and does not queue it. Also check the `messages` field is Subscribed — the green tick on Configure Webhooks only means the URL verified. |
+| `/admin/sync` shows a channel as unavailable | The message distinguishes "credentials not set" (supply keys) from "adapter not implemented" (development work). A wired adapter names the exact environment variables it cannot see. Read which one it says. |
 
 **Where to look:** every failed import is written to `channel_sync_log` and surfaces in the admin
 activity feed, so check there before the server logs.
