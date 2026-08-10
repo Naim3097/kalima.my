@@ -568,9 +568,20 @@ export function parseMessengerWebhook(body: unknown): InboundMessage[] {
 }
 
 /*
-  Both surfaces post to the same Graph edge with the same Page token; only the
-  id in the path differs — the Page's for Messenger, the Instagram professional
-  account's for Instagram.
+  BOTH surfaces send through the PAGE id. Not the Instagram account's id, even
+  for Instagram.
+
+  This was wrong at first and Meta's error did not say so. Posting to
+  {INSTAGRAM_ID}/messages returns "(#3) Application does not have the capability
+  to make this API call" — which reads as a missing permission and sends you
+  looking at scopes. The token had `instagram_manage_messages` the whole time.
+  The same token, the same body and the same recipient IGSID succeed against
+  {PAGE_ID}/messages, and the message arrives in Instagram.
+
+  Which is the Messenger Platform model: an Instagram professional account is
+  reached through the Page it is linked to, and the recipient id is what decides
+  which surface the message lands on. META_INSTAGRAM_ID is therefore an identity
+  we verify and display, never a send target.
 
   `messaging_type: "RESPONSE"` declares this as a reply to a user-initiated
   message, which is what keeps it inside the standard messaging window. Anything
@@ -579,12 +590,11 @@ export function parseMessengerWebhook(body: unknown): InboundMessage[] {
 */
 async function sendViaMessenger(
   channel: Exclude<MetaMessagingChannel, "whatsapp">,
-  senderId: string,
   input: OutboundMessage,
 ): Promise<{ externalMessageId: string | null }> {
-  if (!PAGE_TOKEN || !senderId) throw new ChannelNotConfigured(channel);
+  if (!PAGE_TOKEN || !PAGE_ID) throw new ChannelNotConfigured(channel);
 
-  const res = await fetch(`${GRAPH}/${senderId}/messages`, {
+  const res = await fetch(`${GRAPH}/${PAGE_ID}/messages`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${PAGE_TOKEN}`,
@@ -662,19 +672,25 @@ function messengerAdapter(
     channel,
     wired: true,
 
-    configured: () => Boolean(APP_SECRET && VERIFY_TOKEN && id && PAGE_TOKEN),
+    /*
+      PAGE_ID is required by BOTH channels, because both send through the Page —
+      see sendViaMessenger. Instagram additionally needs its own id, which is
+      what the connect check verifies and what the admin card displays.
+    */
+    configured: () => Boolean(APP_SECRET && VERIFY_TOKEN && id && PAGE_ID && PAGE_TOKEN),
 
-    missingEnv: () =>
-      (
-        [
-          ["META_APP_SECRET", APP_SECRET],
-          ["META_VERIFY_TOKEN", VERIFY_TOKEN],
-          [idVarName, id],
-          ["META_PAGE_TOKEN", PAGE_TOKEN],
-        ] as const
-      )
-        .filter(([, value]) => !value)
-        .map(([name]) => name),
+    missingEnv: () => {
+      const required: readonly (readonly [string, string])[] = [
+        ["META_APP_SECRET", APP_SECRET],
+        ["META_VERIFY_TOKEN", VERIFY_TOKEN],
+        [idVarName, id],
+        ["META_PAGE_ID", PAGE_ID],
+        ["META_PAGE_TOKEN", PAGE_TOKEN],
+      ];
+      /* Deduped: for Facebook, idVarName IS META_PAGE_ID, and naming the same
+         variable twice would read as two separate problems. */
+      return [...new Set(required.filter(([, value]) => !value).map(([name]) => name))];
+    },
 
     authUrl: () => notAnOauthMessagingChannel(channel),
     exchangeCode: () => notAnOauthMessagingChannel(channel),
@@ -690,7 +706,7 @@ function messengerAdapter(
     verifyWebhook: verifyMetaSignature,
     verifySubscription: verifyMetaSubscription,
     parseMessageWebhook: parseMessengerWebhook,
-    sendMessage: (input) => sendViaMessenger(channel, id, input),
+    sendMessage: (input) => sendViaMessenger(channel, input),
   };
 }
 
