@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
 import { Card, CardHeader } from "@/components/admin/ui";
 import InboxPanes from "@/components/admin/InboxPanes";
-import ConnectWhatsApp from "@/components/admin/ConnectWhatsApp";
+import ConnectChannel from "@/components/admin/ConnectChannel";
 import { getCannedReplies, getThread, listThreads, markRead } from "@/lib/channels/inbox";
 import { getChannelCards } from "@/lib/channels/admin";
-import { CHANNELS, CHANNEL_LABEL, REPLY_WINDOW_HOURS, channelDoes } from "@/lib/channels/types";
+import {
+  CHANNELS,
+  CHANNEL_LABEL,
+  REPLY_WINDOW_HOURS,
+  channelDoes,
+  isMetaMessagingChannel,
+} from "@/lib/channels/types";
 import { connectBlockedReason } from "@/lib/channels/registry";
 
 /*
@@ -113,9 +119,18 @@ export default async function AdminInboxPage({
                   <p className="text-right text-[12px] text-navy-300">
                     {blocked ?? (status === "connected" ? "Connected" : "Not connected")}
                   </p>
-                  {/* Only WhatsApp: the others connect by OAuth, or not at all yet. */}
-                  {channel === "whatsapp" && !blocked && (
-                    <ConnectWhatsApp connected={status === "connected"} />
+                  {/*
+                    Every Meta channel, not just WhatsApp: all three take a token
+                    from the environment rather than an OAuth round trip, so all
+                    three connect the same way. Shopee and TikTok are excluded
+                    because they genuinely do go through OAuth.
+                  */}
+                  {isMetaMessagingChannel(channel) && !blocked && (
+                    <ConnectChannel
+                      channel={channel}
+                      label={CHANNEL_LABEL[channel]}
+                      connected={status === "connected"}
+                    />
                   )}
                 </div>
               </li>
