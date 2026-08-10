@@ -3,11 +3,12 @@ import "server-only";
 import crypto from "node:crypto";
 
 import {
+  CHANNEL_LABEL,
   ChannelNotConfigured,
-  unwiredAdapter,
   type Channel,
   type ChannelAdapter,
   type InboundMessage,
+  type MetaMessagingChannel,
   type OutboundMessage,
   type TokenPair,
 } from "./types";
@@ -15,16 +16,24 @@ import {
 /*
   Meta — WhatsApp Cloud API, Instagram DM and Facebook Page messages.
 
-  WhatsApp is WIRED. Instagram and Facebook are not: they additionally require
-  Meta App Review for `instagram_business_manage_messages` and `pages_messaging`
-  (2–4 weeks), which has not been applied for. They keep the unwired adapter and
-  so continue to fail closed.
+  All three are wired. All three sit behind ONE Meta app, one Business
+  verification and one signing secret, which is why they share this file:
+  verifyMetaSignature and verifyMetaSubscription serve every surface unchanged.
 
-  All three sit behind ONE Meta app, one Business verification and one signing
-  secret, which is why they share this file. The primitives below — signature
-  verification and the subscription handshake — are already correct for all
-  three; Instagram and Facebook need only their own parse and send when their
-  review lands.
+  Instagram and Facebook still need Meta App Review for
+  `instagram_business_manage_messages` and `pages_messaging` before they can
+  message the public. That review requires a screencast of the feature working,
+  so the code has to exist first — Standard Access lets it run against accounts
+  holding a role on the app, which is enough to build, test and record. See
+  INSTRUCTION.md §3.1; getting that order backwards costs a rejection.
+
+  The two message formats are genuinely different and each has a trap that looks
+  like the other's correct behaviour:
+
+    WhatsApp   entry[].changes[].value.messages[]   timestamp in SECONDS
+               receipts arrive as `statuses`
+    IG / FB    entry[].messaging[]                  timestamp in MILLISECONDS
+               our own replies arrive back as `is_echo`
 
   See INSTRUCTION.md §2 for the account setup this expects.
 */
@@ -34,6 +43,22 @@ const APP_SECRET = process.env.META_APP_SECRET ?? "";
 const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN ?? "";
 const WHATSAPP_PHONE_ID = process.env.META_WHATSAPP_PHONE_ID ?? "";
 const WHATSAPP_TOKEN = process.env.META_WHATSAPP_TOKEN ?? "";
+
+/*
+  Instagram and Facebook Page messaging.
+
+  One Page access token serves both: Instagram professional accounts are
+  addressed through the Page they are linked to, which is why there is no
+  separate Instagram token here. Generate it for the same System User that holds
+  the WhatsApp token, with `pages_messaging` and
+  `instagram_business_manage_messages` and the Page assigned as an asset.
+
+  PAGE_ID is the Facebook Page's numeric id; INSTAGRAM_ID is the Instagram
+  professional account id (NOT the @handle, and not the Page id).
+*/
+const PAGE_ID = process.env.META_PAGE_ID ?? "";
+const INSTAGRAM_ID = process.env.META_INSTAGRAM_ID ?? "";
+const PAGE_TOKEN = process.env.META_PAGE_TOKEN ?? "";
 
 /*
   Pinned deliberately. Meta deprecates Graph versions on a schedule, and an
@@ -383,20 +408,302 @@ export const whatsappAdapter: ChannelAdapter = {
 };
 
 /* -------------------------------------------------------------------------
-   Instagram + Facebook — awaiting Meta App Review
+   Instagram DM + Facebook Page messages
    ------------------------------------------------------------------------- */
 
 /*
-  Left unwired on purpose. Both need App Review approval that has not been
-  applied for, and an adapter that authenticated payloads it could not parse or
-  answer would be worse than one that refuses.
+  Instagram and Messenger send the SAME webhook shape — the Messenger platform
+  format — so one parser serves both. It is a different shape from WhatsApp's,
+  which is why this is not simply reused:
 
-  When the review lands, each needs only parseMessageWebhook and sendMessage:
-  verifyMetaSignature and verifyMetaSubscription above already serve them,
-  since it is the same app and the same signing secret.
+    WhatsApp   entry[].changes[].value.messages[]
+    IG / FB    entry[].messaging[]
+
+  Written and testable NOW, before App Review. Standard Access covers accounts
+  holding a role on the app, so this can be exercised end to end against
+  Kalima's own Page and Instagram account — which is exactly what the review
+  requires a screencast of. Submitting first and building after gets rejected;
+  see INSTRUCTION.md §3.1.
 */
-export const instagramAdapter: ChannelAdapter = unwiredAdapter("instagram");
-export const facebookAdapter: ChannelAdapter = unwiredAdapter("facebook");
+type MetaMessagingEvent = {
+  sender?: { id?: string };
+  recipient?: { id?: string };
+  timestamp?: number;
+  message?: {
+    mid?: string;
+    text?: string;
+    /*
+      TRUE on messages the Page itself sent, echoed back to us.
+
+      Skipping these is not optional. Every reply staff send from /admin/inbox
+      comes straight back through this webhook, and recording it would file our
+      own outbound message a second time as an inbound one — the customer would
+      appear to have sent us our own words, and the 24-hour reply window would
+      reset off our own traffic. WhatsApp's equivalent trap is `statuses`.
+    */
+    is_echo?: boolean;
+    attachments?: {
+      type?: string;
+      payload?: { url?: string; title?: string };
+    }[];
+  };
+  /* Delivery receipts, read receipts and postbacks arrive in the same array. */
+  delivery?: unknown;
+  read?: unknown;
+  reaction?: { emoji?: string; action?: string };
+  postback?: { title?: string; payload?: string };
+};
+
+/*
+  Renders an attachment-only message as something a staff member can act on,
+  for the same reason bodyOf does it for WhatsApp: a blank bubble hides the fact
+  that a customer sent anything at all.
+
+  `share` and `story_mention` are Instagram-specific and worth naming — a story
+  mention is a common way customers start a conversation, and reading
+  "[story mention]" tells staff to open Instagram rather than wonder.
+*/
+function messengerBodyOf(event: MetaMessagingEvent): string | null {
+  const text = event.message?.text;
+  if (text) return text;
+
+  if (event.postback?.title) return event.postback.title;
+  if (event.reaction?.emoji) return `[reacted ${event.reaction.emoji}]`;
+
+  const first = event.message?.attachments?.[0];
+  if (!first) return null;
+
+  switch (first.type) {
+    case "image":
+      return "[photo]";
+    case "video":
+      return "[video]";
+    case "audio":
+      return "[voice message]";
+    case "file":
+      return "[file]";
+    case "share":
+      return first.payload?.title ? `[shared: ${first.payload.title}]` : "[shared post]";
+    case "story_mention":
+      return "[mentioned you in a story]";
+    default:
+      return first.type ? `[${first.type}]` : null;
+  }
+}
+
+/*
+  Unlike WhatsApp, these attachments arrive as real fetchable URLs rather than
+  media ids. They are short-lived CDN links though, so they are recorded to be
+  mirrored later rather than relied on — the same reasoning as the WhatsApp
+  media ids, arrived at from the opposite direction.
+*/
+function messengerAttachmentsOf(event: MetaMessagingEvent): InboundMessage["attachments"] {
+  return (event.message?.attachments ?? [])
+    .filter((a) => a.payload?.url)
+    .map((a) => ({
+      url: a.payload!.url!,
+      mime: null,
+      name: a.payload?.title ?? null,
+    }));
+}
+
+export function parseMessengerWebhook(body: unknown): InboundMessage[] {
+  const payload = body as { entry?: { messaging?: MetaMessagingEvent[] }[] };
+  const out: InboundMessage[] = [];
+
+  for (const entry of payload?.entry ?? []) {
+    for (const event of entry?.messaging ?? []) {
+      /* Receipts are valid traffic carrying no message. Not an error. */
+      if (event.delivery || event.read) continue;
+      /* Our own reply, echoed back. See the note on is_echo. */
+      if (event.message?.is_echo) continue;
+
+      const senderId = event.sender?.id;
+      if (!senderId) continue;
+
+      const body = messengerBodyOf(event);
+      const attachments = messengerAttachmentsOf(event);
+      /* Nothing a human could read or open — a typing indicator, an unhandled
+         event type. Recording an empty row would only clutter the thread. */
+      if (!body && !attachments.length) continue;
+
+      out.push({
+        /* The sender is the thread: a PSID on Messenger, an IGSID on Instagram.
+           Both are scoped to this app, so they are stable for us and useless to
+           anyone else. */
+        externalThreadId: senderId,
+        externalMessageId: event.message?.mid ?? null,
+        externalUserId: senderId,
+        /*
+          Not in the payload, and it cannot be fetched here: parseMessageWebhook
+          is synchronous by contract. Resolving a display name needs a separate
+          Graph call, so threads show the scoped id until someone adds that.
+          Recorded as a known gap in INSTRUCTION.md §3.3 rather than guessed at.
+        */
+        externalHandle: null,
+        body,
+        attachments,
+        /*
+          MILLISECONDS here — WhatsApp sends SECONDS. Multiplying these by 1000
+          would date every Instagram message to the year 57000 and sort the
+          inbox to nonsense; the WhatsApp path has the mirror-image trap.
+        */
+        sentAt:
+          typeof event.timestamp === "number" && Number.isFinite(event.timestamp)
+            ? new Date(event.timestamp).toISOString()
+            : null,
+        /*
+          Neither platform gives a phone or an email, so threads stay unlinked to
+          a customer and staff link them by hand. Passing null is the honest
+          answer; record_inbound_message handles it and retries on every inbound
+          if a profile appears later.
+        */
+        contactPhone: null,
+        contactEmail: null,
+      });
+    }
+  }
+
+  return out;
+}
+
+/*
+  Both surfaces post to the same Graph edge with the same Page token; only the
+  id in the path differs — the Page's for Messenger, the Instagram professional
+  account's for Instagram.
+
+  `messaging_type: "RESPONSE"` declares this as a reply to a user-initiated
+  message, which is what keeps it inside the standard messaging window. Anything
+  else needs a message tag and a separate policy justification, and Kalima sends
+  neither.
+*/
+async function sendViaMessenger(
+  channel: Exclude<MetaMessagingChannel, "whatsapp">,
+  senderId: string,
+  input: OutboundMessage,
+): Promise<{ externalMessageId: string | null }> {
+  if (!PAGE_TOKEN || !senderId) throw new ChannelNotConfigured(channel);
+
+  const res = await fetch(`${GRAPH}/${senderId}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${PAGE_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      recipient: { id: input.externalThreadId },
+      message: { text: input.body },
+      messaging_type: "RESPONSE",
+    }),
+    cache: "no-store",
+  });
+
+  const json = (await res.json().catch(() => ({}))) as {
+    message_id?: string;
+    error?: { message?: string };
+  };
+
+  if (!res.ok) {
+    /* Meta's wording again — "This message is sent outside of allowed window"
+       is worth a staff member seeing verbatim. */
+    throw new Error(json.error?.message ?? `${CHANNEL_LABEL[channel]} send failed (${res.status})`);
+  }
+
+  /* Note `message_id`, singular and top-level — WhatsApp answers with
+     `messages[0].id`. Same company, different shape. */
+  return { externalMessageId: json.message_id ?? null };
+}
+
+/*
+  Confirms the Page token can actually see the id it is configured with, so
+  "Connected" in the admin means a verified round trip rather than a pasted
+  value — the same standard verifyWhatsAppCredentials sets.
+*/
+export async function verifyMetaMessagingCredentials(
+  channel: Exclude<MetaMessagingChannel, "whatsapp">,
+): Promise<{ id: string; name: string | null }> {
+  const id = channel === "instagram" ? INSTAGRAM_ID : PAGE_ID;
+  if (!PAGE_TOKEN || !id) throw new ChannelNotConfigured(channel);
+
+  const fields = channel === "instagram" ? "username,name" : "name";
+  const res = await fetch(`${GRAPH}/${id}?fields=${fields}`, {
+    headers: { Authorization: `Bearer ${PAGE_TOKEN}` },
+    cache: "no-store",
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    name?: string;
+    username?: string;
+    error?: { message?: string };
+  };
+  if (!res.ok) {
+    throw new Error(
+      json.error?.message ?? `Could not verify the ${CHANNEL_LABEL[channel]} credentials (${res.status})`,
+    );
+  }
+
+  return { id, name: json.username ? `@${json.username}` : (json.name ?? null) };
+}
+
+function notAnOauthMessagingChannel(channel: Channel): never {
+  /*
+    Same shape as WhatsApp: the credential is a Page token from the environment,
+    not an OAuth round trip. Kalima owns its own Page; the OAuth dance exists for
+    software connecting Pages it does not own.
+  */
+  throw new ChannelNotConfigured(channel);
+}
+
+function messengerAdapter(
+  channel: Exclude<MetaMessagingChannel, "whatsapp">,
+  idVarName: string,
+  id: string,
+): ChannelAdapter {
+  return {
+    channel,
+    wired: true,
+
+    configured: () => Boolean(APP_SECRET && VERIFY_TOKEN && id && PAGE_TOKEN),
+
+    missingEnv: () =>
+      (
+        [
+          ["META_APP_SECRET", APP_SECRET],
+          ["META_VERIFY_TOKEN", VERIFY_TOKEN],
+          [idVarName, id],
+          ["META_PAGE_TOKEN", PAGE_TOKEN],
+        ] as const
+      )
+        .filter(([, value]) => !value)
+        .map(([name]) => name),
+
+    authUrl: () => notAnOauthMessagingChannel(channel),
+    exchangeCode: () => notAnOauthMessagingChannel(channel),
+    refresh: (): Promise<TokenPair> => notAnOauthMessagingChannel(channel),
+
+    /* Neither carries stock. */
+    pushStock: () => {
+      throw new ChannelNotConfigured(channel);
+    },
+    parseWebhook: () => [],
+
+    /* Shared with WhatsApp — one app, one signing secret, one verify token. */
+    verifyWebhook: verifyMetaSignature,
+    verifySubscription: verifyMetaSubscription,
+    parseMessageWebhook: parseMessengerWebhook,
+    sendMessage: (input) => sendViaMessenger(channel, id, input),
+  };
+}
+
+export const instagramAdapter: ChannelAdapter = messengerAdapter(
+  "instagram",
+  "META_INSTAGRAM_ID",
+  INSTAGRAM_ID,
+);
+export const facebookAdapter: ChannelAdapter = messengerAdapter(
+  "facebook",
+  "META_PAGE_ID",
+  PAGE_ID,
+);
 
 /** The Meta-family channels, so callers can reason about the shared app. */
 export const META_CHANNELS: readonly Channel[] = ["whatsapp", "instagram", "facebook"] as const;
