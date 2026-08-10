@@ -37,6 +37,27 @@ export function isChannel(value: unknown): value is Channel {
   return typeof value === "string" && (CHANNELS as readonly string[]).includes(value);
 }
 
+/*
+  The Meta family. Grouped because they share one app, one signing secret, one
+  verify token and one Business verification — and because all three take a
+  permanent token from the environment instead of an OAuth round trip, which is
+  what lets one connect action and one button serve all of them.
+
+  Lives here rather than in meta.ts so client components can narrow to it
+  without importing a server-only module.
+*/
+export type MetaMessagingChannel = "whatsapp" | "instagram" | "facebook";
+
+const META_MESSAGING_CHANNELS: readonly MetaMessagingChannel[] = [
+  "whatsapp",
+  "instagram",
+  "facebook",
+];
+
+export function isMetaMessagingChannel(channel: Channel): channel is MetaMessagingChannel {
+  return (META_MESSAGING_CHANNELS as readonly string[]).includes(channel);
+}
+
 export const CHANNEL_LABEL: Record<Channel, string> = {
   shopee: "Shopee",
   tiktok: "TikTok Shop",

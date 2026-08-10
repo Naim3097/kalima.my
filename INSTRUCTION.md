@@ -50,7 +50,7 @@ Nothing else in the codebase changes when a channel comes online.
 | 1 | ~~**DNS cutover for `kalima.my`**~~ **Done.** | Every platform requires a **public HTTPS** webhook URL. `localhost` is rejected by all of them, and none accept an IP. |
 | 2 | ~~**Deploy to production**~~ **Done.** | The URL you register must actually respond. A preview URL works for testing but changes on every deploy, and re-registering a webhook on each push is not a workflow. |
 | 3 | **`NEXT_PUBLIC_APP_URL=https://www.kalima.my`** in Vercel | OAuth callbacks build absolute redirect URLs from it. Unset, it falls back to `http://localhost:3000` and will bounce a merchant to localhost mid-connection. |
-| 4 | ~~**Meta Business verification**~~ **Submitted 5 Aug 2026, in review.** | Gates WhatsApp, Instagram *and* Facebook, and the Phase 5 broadcast. Meta quoted **about two working days**, not the 1–3 weeks widely reported. It gates *sending to real customers* — it does **not** gate development: the free test number issued with the WhatsApp product carries a real Phone Number ID, and the whole pipeline was built and proven against it while this sat in review. |
+| 4 | ~~**Meta Business verification**~~ **Complete, 5 Aug 2026.** | Gates WhatsApp, Instagram *and* Facebook, and the Phase 5 broadcast. Widely reported as 1–3 weeks; Meta quoted about two working days and it cleared the same day. It gates *sending to real customers* — it never gated development: the free test number issued with the WhatsApp product carries a real Phone Number ID, and the whole pipeline was built and proven against it while this was still in review. Do that again for the next platform rather than waiting. |
 
 **WhatsApp is live end to end as of 5 August 2026** on the test number — inbound messages reach
 `/admin/inbox`. §2.7 records exactly what was verified and what was not. Swapping to the production
@@ -271,6 +271,15 @@ META_WHATSAPP_PHONE_ID=     # the sending number's id
 META_WHATSAPP_TOKEN=        # permanent System User access token
 ```
 
+Instagram and Facebook add three more, sharing `META_APP_SECRET` and `META_VERIFY_TOKEN` with
+WhatsApp — see §3 and §4:
+
+```bash
+META_PAGE_ID=               # the Facebook Page's numeric id
+META_INSTAGRAM_ID=          # the Instagram professional account id, not the @handle
+META_PAGE_TOKEN=            # one Page token serves both surfaces
+```
+
 **There is no OAuth step for WhatsApp.** Embedded Signup exists for providers onboarding many
 merchants; Kalima is one store with one WABA, so the credential is a permanent System User token in
 the environment — the same shape decision EasyParcel forced. `META_WHATSAPP_TOKEN` is never written
@@ -418,7 +427,7 @@ are not yet exercised.
 **Prerequisite:** an Instagram **professional/business** account, linked to a Facebook Page, on the
 same Meta app as WhatsApp.
 
-### 3.1 The approval
+### 3.1 The approval — and why it comes LAST, not first
 
 Requires **Meta App Review** for `instagram_business_manage_messages`. Budget **2–4 weeks**, and
 expect it to be stricter than most:
@@ -429,41 +438,84 @@ expect it to be stricter than most:
 - You will be asked for a **screencast** showing the actual flow: a customer message arriving, an
   agent replying from your inbox.
 
-That screencast is easy to record once WhatsApp is live, because it is the same screen. Another
-reason to do WhatsApp first.
+⚠️ **Do not submit before the feature works.** Business verification was pure paperwork, so
+"submit and build while it queues" was the right play there — that instinct is wrong here and it is
+an easy mistake to make twice. App Review is a **demonstration**, and you cannot screencast a
+feature that does not exist. Submitting early earns a rejection, and rejections make the next
+attempt slower.
+
+The order is: accounts → products (Standard Access, no review) → **build** → test → record →
+submit.
 
 ### 3.2 Before approval
 
-You can test against up to **25 test users** added in the app dashboard without App Review. Use that
-to build and verify the adapter, then submit.
+**Standard Access is granted the moment you add the product**, with no review, and it covers any
+account holding a role on the app — plus up to **25 test users** added in the dashboard. That is
+enough to send and receive for real against Kalima's own Page and Instagram account, which is
+exactly what the screencast needs to show.
+
+The adapter is **written and building** (`src/lib/channels/meta.ts`). What remains is account
+setup, the three environment variables, and recording the demo.
 
 ### 3.3 Implementation
 
 Largely shared with WhatsApp — same app, same `x-hub-signature-256` scheme, same handshake, same
-24-hour window. Differences:
+24-hour window, same ingestion route and inbox. `verifyMetaSignature` and `verifyMetaSubscription`
+serve all three surfaces unchanged.
 
-- Subscribe to Instagram messaging webhook fields rather than `messages`.
-- The sender is an **Instagram-scoped user id**, not a phone number. There is usually **no phone or
-  email**, so pass `contactPhone: null, contactEmail: null` — threads stay unlinked, which is
-  expected and handled. Staff can still see the handle.
+What genuinely differs, and each one is a trap that looks like WhatsApp behaving correctly:
+
+| | WhatsApp | Instagram / Facebook |
+|---|---|---|
+| Payload | `entry[].changes[].value.messages[]` | `entry[].messaging[]` |
+| Timestamp | unix **seconds** | unix **milliseconds** |
+| Noise to skip | `statuses` (receipts) | **`is_echo`** (our own replies) |
+| Send response | `messages[0].id` | `message_id` |
+
+⚠️ **`is_echo` is the dangerous one.** Every reply staff send comes straight back through the
+webhook. Recording it would file our own outbound message a second time as inbound — the customer
+appears to have sent us our own words, and the reply window resets off our own traffic.
+
+Other differences:
+
+- Subscribe to the Instagram `messages` webhook field, not WhatsApp's.
+- The sender is an **Instagram-scoped id** (IGSID) or a **Page-scoped id** (PSID), not a phone
+  number. There is **no phone or email**, so `contactPhone` and `contactEmail` are null — threads
+  stay unlinked and staff link them by hand. Expected and handled.
+- **Known gap:** the display handle is not in the payload, and `parseMessageWebhook` is synchronous
+  by contract so it cannot fetch one. Threads show the scoped id until someone adds a Graph lookup.
+- Attachments arrive as real (short-lived) URLs rather than WhatsApp's media ids.
 
 ### 3.4 Register
 
 Meta app → **Instagram → Configuration → Webhooks**, callback URL
-`https://www.kalima.my/api/channels/instagram/messages/webhook`, same verify token.
+`https://www.kalima.my/api/channels/instagram/messages/webhook`, same verify token. Facebook Page
+messages use `.../facebook/messages/webhook` under the Messenger product — each product carries its
+own callback URL, so the two do not collide.
+
+Then press **Connect Instagram** / **Connect Facebook Page** in `/admin/inbox`, which verifies the
+Page token against the configured id before recording anything.
 
 ---
 
 ## 4. Facebook Page
 
 Same Meta app, same review track as Instagram — the permission is `pages_messaging`. Submit both in
-one App Review to save a round trip.
+one App Review to save a round trip, and read §3.1 first: the same "build before you submit" rule
+applies.
+
+**Already implemented**, and by the same code as Instagram — Messenger and Instagram send an
+identical webhook shape, so `parseMessengerWebhook` and `sendViaMessenger` serve both. Only the id
+in the request path differs.
 
 - Webhook: `https://www.kalima.my/api/channels/facebook/messages/webhook`, subscribe to the Page's
   `messages` field.
-- You need a **Page access token** for the Page in question.
+- You need a **Page access token** — `META_PAGE_TOKEN`, the same one Instagram uses, because an
+  Instagram professional account is addressed through the Page it is linked to.
+- `META_PAGE_ID` is the Page's numeric id, from Page → About → Page transparency.
 - 24-hour window, same as the others.
-- Sender is a Page-scoped user id; same linking caveat as Instagram.
+- Sender is a Page-scoped user id (PSID); same linking caveat as Instagram, and the same missing
+  display handle.
 
 ---
 

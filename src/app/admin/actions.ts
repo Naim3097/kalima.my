@@ -9,10 +9,15 @@ import { awardLoyaltyPoints } from "@/lib/commerce";
 import { easyparcelClient, getShippingConfig } from "@/lib/shipping/config";
 import { getRatesForOrder, receiverFrom, senderFrom } from "@/lib/shipping/rates";
 import { disconnectChannel, markConnectedViaEnvironment } from "@/lib/channels/tokens";
-import { verifyWhatsAppCredentials } from "@/lib/channels/meta";
+import { verifyMetaMessagingCredentials, verifyWhatsAppCredentials } from "@/lib/channels/meta";
 import { enqueueFullResync } from "@/lib/channels/sync";
 import { addNote, sendReply } from "@/lib/channels/inbox";
-import { channelDoes, isChannel } from "@/lib/channels/types";
+import {
+  CHANNEL_LABEL,
+  channelDoes,
+  isChannel,
+  type MetaMessagingChannel,
+} from "@/lib/channels/types";
 import {
   CATEGORIES,
   parseBool,
@@ -1957,15 +1962,24 @@ export async function updateConversation(input: {
 }
 
 /*
-  Connects WhatsApp.
+  Connects a Meta messaging channel — WhatsApp, Instagram or Facebook Page.
 
-  Unlike the marketplaces there is no OAuth round trip: Cloud API for a single
-  business uses a permanent System User token from the environment. So this
-  verifies that token can actually see the configured phone number, then records
-  the connection. "Connected" on the admin card therefore means a real round
-  trip succeeded, not that someone pasted a value into an env file.
+  Unlike the marketplaces there is no OAuth round trip: all three take a
+  permanent token from the environment, so there is nothing to exchange. What
+  this does instead is ask Meta to describe the configured id using that token,
+  and only record the connection if Meta answers. "Connected" on the admin card
+  therefore means a real round trip succeeded, not that someone pasted a value
+  into an env file.
+
+  One action for all three rather than one per channel: the shape is identical
+  and the only difference is which call verifies. Instagram and Facebook were
+  left out when this was written for WhatsApp alone, which left their rows
+  reading "Not connected" forever with no way to change it — the same class of
+  lie as the getChannelCards filter.
 */
-export async function connectWhatsApp(): Promise<ActionResult & { number?: string | null }> {
+export async function connectMetaChannel(
+  channel: MetaMessagingChannel,
+): Promise<ActionResult & { name?: string | null }> {
   let db;
   let current;
   try {
@@ -1975,20 +1989,31 @@ export async function connectWhatsApp(): Promise<ActionResult & { number?: strin
     return { error: "Not authorized." };
   }
 
+  const label = CHANNEL_LABEL[channel];
+
   try {
-    const info = await verifyWhatsAppCredentials();
-    await markConnectedViaEnvironment("whatsapp", {
-      shopName: info.verifiedName ?? info.displayPhoneNumber,
-      externalShopId: info.phoneNumberId,
+    const info =
+      channel === "whatsapp"
+        ? await verifyWhatsAppCredentials().then((w) => ({
+            id: w.phoneNumberId,
+            name: w.verifiedName ?? w.displayPhoneNumber,
+          }))
+        : await verifyMetaMessagingCredentials(channel);
+
+    await markConnectedViaEnvironment(channel, {
+      shopName: info.name,
+      externalShopId: info.id,
       connectedBy: current?.user.id ?? null,
     });
     await logAudit(db, {
-      action: "channel.connected", entityType: "channel", entityId: "whatsapp",
-      summary: `WhatsApp connected (${info.displayPhoneNumber ?? info.phoneNumberId})`,
+      action: "channel.connected", entityType: "channel", entityId: channel,
+      summary: `${label} connected (${info.name ?? info.id})`,
     });
     revalidatePath("/admin/inbox");
-    return { ok: true, number: info.displayPhoneNumber };
+    return { ok: true, name: info.name };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not verify the WhatsApp credentials." };
+    return {
+      error: e instanceof Error ? e.message : `Could not verify the ${label} credentials.`,
+    };
   }
 }
