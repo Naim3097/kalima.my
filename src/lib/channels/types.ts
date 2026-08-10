@@ -206,6 +206,20 @@ export interface ChannelAdapter {
   */
   missingEnv(): readonly string[];
 
+  /*
+    Look up a sender's display name, for platforms that omit it from the webhook.
+
+    Separate from parseMessageWebhook because that is synchronous by contract
+    and this is a network call. The route invokes it only when a thread still
+    has no handle, so an established conversation costs nothing.
+
+    MUST return null rather than throw on any failure. A rate limit, a deleted
+    account or a user who blocked the Page are all ordinary; none of them is a
+    reason to drop the customer's message, which is what an exception here would
+    do. The thread keeps showing the scoped id and a later message tries again.
+  */
+  resolveHandle(externalUserId: string): Promise<string | null>;
+
   /** True when the environment carries this platform's credentials. */
   configured(): boolean;
   /** Where to send the merchant to authorize. `state` is opaque CSRF proof. */
@@ -302,6 +316,8 @@ export function unwiredAdapter(channel: Channel): ChannelAdapter {
     wired: false,
     /* Nothing to name: the blocker is unwritten code, not a missing variable. */
     missingEnv: () => [],
+    /* No credentials, so no lookup. Null, not a throw — see the contract. */
+    resolveHandle: async () => null,
     configured: () => false,
     authUrl: notConfigured,
     exchangeCode: notConfigured,

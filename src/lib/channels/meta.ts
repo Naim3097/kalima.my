@@ -404,6 +404,9 @@ export const whatsappAdapter: ChannelAdapter = {
   verifyWebhook: verifyMetaSignature,
   verifySubscription: verifyMetaSubscription,
   parseMessageWebhook: parseWhatsAppWebhook,
+  /* WhatsApp already sends the profile name in `contacts[].profile.name`, so
+     the handle is never missing and this is never called. */
+  resolveHandle: async () => null,
   sendMessage: sendWhatsAppMessage,
 };
 
@@ -654,6 +657,56 @@ export async function verifyMetaMessagingCredentials(
   return { id, name: json.username ? `@${json.username}` : (json.name ?? null) };
 }
 
+/*
+  Turn a scoped id into a name a staff member recognises.
+
+  Neither platform puts the sender's name in the webhook, so without this every
+  Instagram and Facebook thread reads as a 17-digit id — which is unusable for
+  triage and, more immediately, makes an App Review screencast of "customer
+  support" look like a support demo with no customer in it.
+
+  Different fields per surface, requested exactly: Graph errors on a field the
+  object does not have, so asking for everything and taking what comes back
+  would fail both. Instagram carries a public @username, which is more useful to
+  staff than a display name because it is what they would search for.
+
+  Never throws. Every failure path returns null and the thread keeps its id.
+*/
+async function resolveMessengerHandle(
+  channel: Exclude<MetaMessagingChannel, "whatsapp">,
+  externalUserId: string,
+): Promise<string | null> {
+  if (!PAGE_TOKEN || !externalUserId) return null;
+
+  const fields = channel === "instagram" ? "username,name" : "first_name,last_name";
+
+  try {
+    const res = await fetch(`${GRAPH}/${externalUserId}?fields=${fields}`, {
+      headers: { Authorization: `Bearer ${PAGE_TOKEN}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+
+    const json = (await res.json().catch(() => ({}))) as {
+      username?: string;
+      name?: string;
+      first_name?: string;
+      last_name?: string;
+    };
+
+    if (channel === "instagram") {
+      return json.username ? `@${json.username}` : (json.name ?? null);
+    }
+
+    const full = [json.first_name, json.last_name].filter(Boolean).join(" ").trim();
+    return full || null;
+  } catch {
+    /* A lookup is a nicety. Ingestion already succeeded; losing the name is not
+       worth surfacing as an error, and must never bubble into the route. */
+    return null;
+  }
+}
+
 function notAnOauthMessagingChannel(channel: Channel): never {
   /*
     Same shape as WhatsApp: the credential is a Page token from the environment,
@@ -706,6 +759,7 @@ function messengerAdapter(
     verifyWebhook: verifyMetaSignature,
     verifySubscription: verifyMetaSubscription,
     parseMessageWebhook: parseMessengerWebhook,
+    resolveHandle: (externalUserId) => resolveMessengerHandle(channel, externalUserId),
     sendMessage: (input) => sendViaMessenger(channel, input),
   };
 }
