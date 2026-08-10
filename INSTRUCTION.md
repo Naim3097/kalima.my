@@ -427,6 +427,26 @@ are not yet exercised.
 **Prerequisite:** an Instagram **professional/business** account, linked to a Facebook Page, on the
 same Meta app as WhatsApp.
 
+### 3.0 Two tracks, and only one of them matches this code
+
+Meta offers Instagram messaging two ways, and the dashboard will happily walk you into the wrong
+one. The Instagram product's landing page defaults to **"API setup with Instagram business login"**;
+the link you want is the one in its first paragraph — *"switch to the API setup with Facebook
+login."*
+
+| | Instagram business login | **Facebook login** ← this code |
+|---|---|---|
+| Send endpoint | `graph.instagram.com` | `graph.facebook.com/{PAGE_ID}/messages` |
+| Webhook signed with | a **separate Instagram app secret** | `META_APP_SECRET` |
+| Credential | Instagram user token, own OAuth | one **Page** token |
+| Needs a Facebook Page | no | yes |
+| Tester role | "Instagram Testers" | app role + Accounts Centre link |
+
+Facebook login is right for Kalima because the Page is needed for Messenger anyway, one Page token
+then serves both surfaces, and one app secret verifies all three channels — which is what makes
+`verifyMetaSignature` correct everywhere. Configure Instagram under **Messenger → Instagram
+settings**, never the Instagram product page.
+
 ### 3.1 The approval — and why it comes LAST, not first
 
 Requires **Meta App Review** for `instagram_business_manage_messages`. Budget **2–4 weeks**, and
@@ -476,9 +496,24 @@ What genuinely differs, and each one is a trap that looks like WhatsApp behaving
 webhook. Recording it would file our own outbound message a second time as inbound — the customer
 appears to have sent us our own words, and the reply window resets off our own traffic.
 
+⚠️ **Instagram sends through the PAGE id, not its own.** `POST {META_INSTAGRAM_ID}/messages`
+fails with *"(#3) Application does not have the capability to make this API call"* — which reads as
+a missing permission and sends you auditing scopes for an hour. It is not. The same token, body and
+recipient succeed against `{META_PAGE_ID}/messages`, and the message arrives in Instagram. The
+recipient id is what selects the surface. `META_INSTAGRAM_ID` is identity only — verified by the
+connect button, shown on the admin card, never a send target.
+
 Other differences:
 
 - Subscribe to the Instagram `messages` webhook field, not WhatsApp's.
+- ⚠️ Instagram messaging is configured under **Messenger → Instagram settings**, *not* the
+  Instagram product page. The Instagram product's own setup screen belongs to the
+  **Instagram-login** track, which signs webhooks with a *separate Instagram app secret* — so a
+  webhook registered there fails `verifyMetaSignature` and answers 401 with nothing to show for it.
+  Pick the Facebook-login track and stay on it; §3.0 below.
+- ⚠️ **"Instagram Testers" is the wrong role for this track.** It belongs to Instagram-login. Here
+  the requirement is an app role (admin/developer/tester) **plus** the Instagram account being
+  connected to that Facebook account in Accounts Centre.
 - The sender is an **Instagram-scoped id** (IGSID) or a **Page-scoped id** (PSID), not a phone
   number. There is **no phone or email**, so `contactPhone` and `contactEmail` are null — threads
   stay unlinked and staff link them by hand. Expected and handled.
