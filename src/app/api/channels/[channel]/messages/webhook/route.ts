@@ -120,9 +120,42 @@ export async function POST(
         continue;
       }
 
-      const r = (data ?? {}) as { recorded?: boolean };
+      const r = (data ?? {}) as {
+        recorded?: boolean;
+        conversation_id?: string;
+        handle_missing?: boolean;
+      };
       if (r.recorded) recorded += 1;
       else duplicates += 1;
+
+      /*
+        Fill in the sender's name, for platforms that omit it from the payload.
+
+        Instagram and Facebook send only a scoped id, so without this every
+        thread reads as 17 digits. The lookup is a network call and cannot live
+        in parseMessageWebhook, which is synchronous by contract — so it happens
+        here, and only when the thread actually has no name. An established
+        conversation reports handle_missing false and costs nothing.
+
+        Deliberately after the message is recorded, and deliberately unable to
+        fail the request: the customer's message is already safely stored, and a
+        rate limit or a deleted account is not a reason to hand the platform a
+        non-200 and invite a redelivery. resolveHandle returns null rather than
+        throwing; this is the belt to that braces.
+      */
+      if (r.recorded && r.handle_missing && r.conversation_id && m.externalUserId) {
+        try {
+          const handle = await adapter.resolveHandle(m.externalUserId);
+          if (handle) {
+            await db.rpc("set_conversation_handle", {
+              p_conversation_id: r.conversation_id,
+              p_handle: handle,
+            });
+          }
+        } catch {
+          /* Thread keeps its id; a later message tries again. */
+        }
+      }
     }
 
     return NextResponse.json({ received: true, recorded, duplicates });
