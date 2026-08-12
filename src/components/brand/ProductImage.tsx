@@ -1,5 +1,6 @@
 import Image from "next/image";
 import PlaceholderImage from "./PlaceholderImage";
+import { blurSeed } from "@/lib/images";
 import { cn } from "@/lib/utils";
 
 /*
@@ -21,20 +22,6 @@ type Props = {
   sizes?: string;
   priority?: boolean;
 };
-
-/** 1×1 blur seed tinted to the garment tone — avoids a flash of empty box. */
-function blurFor(tone: string) {
-  const hex = tone.replace("#", "");
-  const full =
-    hex.length === 3
-      ? hex
-          .split("")
-          .map((c) => c + c)
-          .join("")
-      : hex.padEnd(6, "0").slice(0, 6);
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="4" height="5"><rect width="4" height="5" fill="#${full}"/></svg>`;
-  return `data:image/svg+xml;base64,${btoa(svg)}`;
-}
 
 export default function ProductImage({
   image,
@@ -58,7 +45,7 @@ export default function ProductImage({
         sizes={sizes}
         priority={priority}
         placeholder="blur"
-        blurDataURL={blurFor(tone)}
+        blurDataURL={blurSeed(tone)}
         draggable={false}
         className="object-cover select-none"
         style={{ objectPosition: position }}

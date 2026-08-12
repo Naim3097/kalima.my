@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRightIcon } from "@/components/brand/Icons";
-import { productPhoto } from "@/lib/images";
+import { blurSeed, productPhoto } from "@/lib/images";
 
 /* Server Component — editorial band, purely presentational. */
 export default function CollectionSpotlight() {
@@ -26,6 +26,8 @@ export default function CollectionSpotlight() {
             <Image
               src={productPhoto("serra-scallop", "burgundy")}
               alt="Serra Scallop cardigan abaya in burgundy"
+              placeholder="blur"
+              blurDataURL={blurSeed("#631934")}
               fill
               sizes="(max-width: 1024px) 100vw, 32rem"
               draggable={false}

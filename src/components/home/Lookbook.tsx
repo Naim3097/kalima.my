@@ -1,15 +1,15 @@
 import Image from "next/image";
 import Link from "next/link";
 import SectionHeader from "@/components/brand/SectionHeader";
-import { productPhoto } from "@/lib/images";
+import { blurSeed, productPhoto } from "@/lib/images";
 
 /* One shot per piece, chosen for contrast across the row. */
 const SHOTS = [
-  { slug: "ruwa-caftan", colour: "burgundy", alt: "Ruwa Caftan in burgundy satin" },
-  { slug: "danisya-set", colour: "magenta", alt: "Danisya Set in magenta satin" },
-  { slug: "serra-scallop", colour: "teal-green", alt: "Serra Scallop cardigan abaya in teal green" },
-  { slug: "anna-top", colour: "peony-garden", alt: "Anna Top in the Peony Garden print" },
-  { slug: "luna-palazzo", colour: "sand", alt: "Luna Palazo in sand" },
+  { tone: "#8d2d33", slug: "ruwa-caftan", colour: "burgundy", alt: "Ruwa Caftan in burgundy satin" },
+  { tone: "#be1a84", slug: "danisya-set", colour: "magenta", alt: "Danisya Set in magenta satin" },
+  { tone: "#126c82", slug: "serra-scallop", colour: "teal-green", alt: "Serra Scallop cardigan abaya in teal green" },
+  { tone: "#7a9c86", slug: "anna-top", colour: "peony-garden", alt: "Anna Top in the Peony Garden print" },
+  { tone: "#c8bcb0", slug: "luna-palazzo", colour: "sand", alt: "Luna Palazo in sand" },
 ];
 
 /* Server Component — a static grid of links; no wishlist or state here. */
@@ -24,6 +24,8 @@ export default function Lookbook() {
               <Image
                 src={productPhoto(shot.slug, shot.colour)}
                 alt={shot.alt}
+                placeholder="blur"
+                blurDataURL={blurSeed(shot.tone)}
                 fill
                 sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
                 draggable={false}
