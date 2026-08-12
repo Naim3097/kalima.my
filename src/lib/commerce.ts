@@ -383,6 +383,61 @@ export async function reconcileOrderPayment(
 }
 
 /*
+  Sweep stale pending orders. For each order older than the cutoff we ask the
+  gateway one last time — because a callback can be lost, and a customer who
+  genuinely paid must be settled, never cancelled. Only an order the gateway
+  does NOT report as paid is cancelled.
+
+  The cutoff must comfortably exceed the gateway's own bill lifetime, so no
+  successful payment can still be in flight when we cancel. reconcileOrderPayment
+  does the gateway pull and the settle-if-paid; this only adds the cancel for
+  the ones that come back not-paid.
+
+  Returns a small report for the cron log. Never throws for a single bad order —
+  one stuck row must not stop the sweep.
+*/
+export async function expireStalePendingOrders(
+  olderThanMinutes = 30,
+): Promise<{ scanned: number; settled: number; cancelled: number; skipped: number }> {
+  const cutoff = new Date(Date.now() - olderThanMinutes * 60_000).toISOString();
+
+  const { data: stale, error } = await admin()
+    .from("orders")
+    .select("id, reference")
+    .eq("status", "pending")
+    .lt("created_at", cutoff)
+    .limit(200);
+  if (error) throw new Error(`expireStalePendingOrders scan failed: ${error.message}`);
+
+  let settled = 0,
+    cancelled = 0,
+    skipped = 0;
+
+  for (const o of stale ?? []) {
+    try {
+      // Ask the gateway first; this settles the order if the callback was lost.
+      const verdict = await reconcileOrderPayment(o.reference);
+      if (verdict === "paid") {
+        settled += 1;
+        continue;
+      }
+      // "failed" or still "pending" (no definite paid answer) → cancel it.
+      await admin().rpc("cancel_pending_order", {
+        p_order_id: o.id,
+        p_reason: `unpaid after ${olderThanMinutes} minutes`,
+      });
+      cancelled += 1;
+    } catch (e) {
+      // One order's problem is not the sweep's problem.
+      console.error(`[expire] ${o.reference} skipped:`, (e as Error).message);
+      skipped += 1;
+    }
+  }
+
+  return { scanned: stale?.length ?? 0, settled, cancelled, skipped };
+}
+
+/*
   Resolves a webhook's bill_no back to its order (primary match). Falls back to
   the invoice_ref (order reference) when no pending payment row is found.
 */
