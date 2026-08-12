@@ -148,19 +148,38 @@ async function fetchServicesForModel(
   return parseServices(json, paymentType);
 }
 
-// Query both payment models and merge — some banks only surface under B2B
-// (matches the proven reference integration). Dedup by payment_service_id.
+/*
+  Query both payment models and merge — some banks only surface under B2B
+  (BNP Paribas, Deutsche Bank and the corporate Citibank arrive that way).
+
+  Dedup is by NAME, not payment_service_id: a bank offered under both models
+  carries a different id in each, so an id-keyed set keeps both and the shopper
+  is asked to choose between "AmBank" and "AMBANK". On this account that was ten
+  banks listed twice. B2C is listed first and wins, which also keeps the better
+  casing — the corporate list SHOUTS.
+*/
 async function fetchServices(paymentType: "WEB_PAYMENT" | "DIGITAL_PAYMENT"): Promise<PaymentService[]> {
   const kind = paymentType === "WEB_PAYMENT" ? "fpx" : "ewallet";
   const [b2c, b2b] = await Promise.all([
     fetchServicesForModel(paymentType, 1),
     fetchServicesForModel(paymentType, 2),
   ]);
+
+  /*
+    "CIMB Clicks" and "CIMB BANK" are the same bank to a shopper, as are
+    "Affin Bank" and "AFFINMAX". Strip separators FIRST, then the boilerplate —
+    matching on word boundaries misses the run-together corporate spellings,
+    which is exactly where the duplicates come from.
+  */
+  const key = (name: string) =>
+    name.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/BANK|BERHAD|PERSONAL|CLICKS|MAX/g, "");
+
   const seen = new Set<string>();
   const merged: PaymentService[] = [];
   for (const s of [...b2c, ...b2b]) {
-    if (seen.has(s.id)) continue;
-    seen.add(s.id);
+    const k = key(s.name) || s.id;
+    if (seen.has(k)) continue;
+    seen.add(k);
     merged.push({ ...s, kind });
   }
   return merged;

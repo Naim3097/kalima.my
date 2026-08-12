@@ -24,10 +24,10 @@ export async function GET(request: Request) {
     credentials, and is the only way to see the bank list before an order
     exists — the picker needs a placed order, which needs stock.
 
-    It reports names and ids, which every shopper sees at checkout anyway, plus
-    `unnamed`: the count the account returned that we had to drop for having no
-    usable label. A non-zero count there is the field-name variance the guide
-    warns about, showing up on this account.
+    It reports the names and ids every shopper sees at checkout anyway. Read the
+    names, not just the count: the guide's §0.1 failure shows up as entries the
+    parser had to drop for having no usable label, so a count far below what the
+    dashboard has enabled is that field-name variance on this account.
   */
   if (new URL(request.url).searchParams.get("probe") === "services") {
     const provider = getPaymentProvider();
