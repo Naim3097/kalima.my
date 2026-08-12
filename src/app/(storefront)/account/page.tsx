@@ -189,6 +189,28 @@ export default async function AccountPage({
         </section>
       )}
 
+      {/*
+        The referral programme had no link anywhere on the site — not the
+        header, the footer, or here — so it could only be reached by typing the
+        URL. Someone who has just seen their points balance is the readiest
+        person on the site to share a link, which makes this the right place
+        for the door.
+      */}
+      <section className="mt-10 border border-navy/10 bg-white px-5 py-6 sm:flex sm:items-center sm:justify-between sm:gap-6">
+        <div>
+          <h2 className="font-display text-xl text-navy">Refer a friend</h2>
+          <p className="mt-1 max-w-md text-[13px] leading-relaxed text-navy-400">
+            Share your link. They discover Kalima, you earn on what they buy.
+          </p>
+        </div>
+        <Link
+          href="/affiliate"
+          className="mt-4 inline-flex shrink-0 items-center gap-2 border border-navy px-5 py-2.5 label-caps !text-[12px] text-navy transition-colors hover:bg-navy hover:text-white sm:mt-0"
+        >
+          Get my link
+        </Link>
+      </section>
+
       {/* Orders — real */}
       <section className="mt-10">
         <h2 className="label-caps mb-4 !text-[13px]">Order History</h2>

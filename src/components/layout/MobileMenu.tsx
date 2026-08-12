@@ -86,6 +86,8 @@ export default function MobileMenu() {
             {[
               { label: "My Account", href: "/account" },
               { label: "Wishlist", href: "/wishlist" },
+              { label: "Kalima Club", href: "/kalima-club" },
+              { label: "Refer a Friend", href: "/affiliate" },
               { label: "Stores", href: "/pages/stores" },
               // Back Office is appended below, only for staff.
             ].map((l) => (
