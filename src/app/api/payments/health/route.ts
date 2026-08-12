@@ -18,7 +18,35 @@ import { getPaymentProvider } from "@/lib/payments";
 */
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  /*
+    ?probe=services performs the first call that actually exercises the
+    credentials, and is the only way to see the bank list before an order
+    exists — the picker needs a placed order, which needs stock.
+
+    It reports names and ids, which every shopper sees at checkout anyway, plus
+    `unnamed`: the count the account returned that we had to drop for having no
+    usable label. A non-zero count there is the field-name variance the guide
+    warns about, showing up on this account.
+  */
+  if (new URL(request.url).searchParams.get("probe") === "services") {
+    const provider = getPaymentProvider();
+    if (!provider) return NextResponse.json({ error: "No provider configured" }, { status: 503 });
+    try {
+      const { fpx, ewallet } = await provider.listPaymentServices();
+      return NextResponse.json({
+        fpx: { count: fpx.length, services: fpx },
+        ewallet: { count: ewallet.length, services: ewallet },
+        note:
+          fpx.length + ewallet.length === 0
+            ? "Empty. Usually a Payment Channels setting on the collection, not a code fault."
+            : undefined,
+      });
+    } catch (e) {
+      return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+    }
+  }
+
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
