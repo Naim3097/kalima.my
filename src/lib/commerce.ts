@@ -300,6 +300,71 @@ export async function recordPendingPayment(
 }
 
 /*
+  Asks the gateway what happened to an order's bill, and settles it if the
+  answer is definite.
+
+  Needed because LeanX pushes a callback on SUCCESS ONLY — a cancelled or
+  failed bill is never announced. Without this an abandoned checkout sits
+  `pending` forever and the buyer is told their order "has been received".
+
+  Returns the verdict, and only ever moves an order on an explicit one:
+  "unknown" (a flaky lookup, a 404 for a bill that exists) leaves it alone.
+  Settlement goes through mark_order_paid, so this shares the webhook's
+  idempotency and its amount check rather than inventing a second way to pay.
+*/
+export async function reconcileOrderPayment(
+  reference: string,
+): Promise<"paid" | "failed" | "pending"> {
+  const { getPaymentProvider } = await import("@/lib/payments");
+  const provider = getPaymentProvider();
+  if (!provider) return "pending";
+
+  const { data: order } = await admin()
+    .from("orders")
+    .select("id")
+    .eq("reference", reference)
+    .maybeSingle();
+  const orderId = order?.id as string | undefined;
+  if (!orderId) return "pending";
+
+  const { data: payment } = await admin()
+    .from("payments")
+    .select("provider_ref, amount_sen")
+    .eq("order_id", orderId)
+    .eq("provider", provider.name)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const billNo = payment?.provider_ref as string | undefined;
+  if (!billNo) return "pending";
+
+  const verdict = await provider.checkStatus(billNo);
+
+  if (verdict.status === "completed") {
+    // The gateway's amount must still match ours — same rule as the webhook.
+    if (
+      typeof verdict.amountSen === "number" &&
+      typeof payment?.amount_sen === "number" &&
+      verdict.amountSen !== payment.amount_sen
+    ) {
+      return "pending";
+    }
+    await markOrderPaid({
+      orderId,
+      provider: provider.name,
+      providerRef: billNo,
+      amountSen: verdict.amountSen ?? (payment?.amount_sen as number),
+      raw: verdict.raw,
+    });
+    return "paid";
+  }
+
+  if (verdict.status === "failed" || verdict.status === "cancelled") return "failed";
+  return "pending";
+}
+
+/*
   Resolves a webhook's bill_no back to its order (primary match). Falls back to
   the invoice_ref (order reference) when no pending payment row is found.
 */

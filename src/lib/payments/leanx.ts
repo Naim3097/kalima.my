@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import type {
   PaymentProvider,
   PaymentService,
+  PaymentStatus,
   CheckoutRequest,
   CheckoutSession,
   WebhookResult,
@@ -91,6 +92,8 @@ const NAME_KEYS = [
   "label",
 ] as const;
 
+/* Empty when nothing usable is found — the caller drops the entry. A button
+   labelled "65" is worse than one bank fewer. */
 function pickName(o: Record<string, unknown>): string {
   for (const k of NAME_KEYS) {
     const v = o[k];
@@ -98,13 +101,17 @@ function pickName(o: Record<string, unknown>): string {
       return v.trim().replace(/ B2B$/i, "");
     }
   }
-  return String(o.payment_service_id ?? "");
+  return "";
 }
 
 // Active unless a status field explicitly says otherwise. Live responses carry
 // `record_status` ("Active") / `record_status_id` (1); older shapes use
 // `status`. Absent → treat as active (the request already filters active).
 function isActive(o: Record<string, unknown>): boolean {
+  // A numeric record_status_id is the most explicit signal; 1 = active.
+  if (o.record_status_id != null && o.record_status_id !== "") {
+    return String(o.record_status_id) === "1";
+  }
   const s = o.status ?? o.payment_status ?? o.record_status ?? o.payment_service_status;
   if (s === undefined || s === null || s === "") return true;
   const v = String(s).toLowerCase();
@@ -117,7 +124,7 @@ function normaliseList(arr: unknown[]): { id: string; name: string }[] {
       const o = s as Record<string, unknown>;
       return { id: String(o.payment_service_id ?? ""), name: pickName(o), ok: isActive(o) };
     })
-    .filter((s) => s.id && s.ok)
+    .filter((s) => s.id && s.name && s.ok)
     .map(({ id, name }) => ({ id, name }));
 }
 
@@ -170,6 +177,45 @@ function verifySignature(rawBody: string, signature: string, secret: string): bo
   return crypto.timingSafeEqual(Buffer.from(signature, "utf-8"), Buffer.from(expected, "utf-8"));
 }
 
+const b64urlDecode = (s: string) =>
+  Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf-8");
+
+/*
+  The other callback envelope: `{ data: "<HS256 JWT>" }` with no signature
+  header, the token signed with the collection's Hash Key. The token IS the
+  authentication. Returns the claims, or null if anything fails to verify.
+
+  `alg` is pinned to HS256 deliberately. Trusting the header's own `alg` lets a
+  forged token nominate "none", at which point the check verifies nothing.
+*/
+function verifyJwtHS256(token: string, secret: string): Record<string, unknown> | null {
+  if (!secret) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [headerB64, payloadB64, signatureB64] = parts;
+
+  let alg: unknown;
+  try {
+    alg = (JSON.parse(b64urlDecode(headerB64)) as Record<string, unknown>).alg;
+  } catch {
+    return null;
+  }
+  if (alg !== "HS256") return null;
+
+  const expected = crypto
+    .createHmac("sha256", secret)
+    .update(`${headerB64}.${payloadB64}`)
+    .digest("base64url");
+  if (signatureB64.length !== expected.length) return null;
+  if (!crypto.timingSafeEqual(Buffer.from(signatureB64), Buffer.from(expected))) return null;
+
+  try {
+    return JSON.parse(b64urlDecode(payloadB64)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 const STATUS_MAP: Record<string, string> = {
   success: "completed", paid: "completed",
   pending: "processing", processing: "processing",
@@ -202,7 +248,13 @@ export const leanx: PaymentProvider = {
         phone_number: normalisePhone(req.phone),
         redirect_url: req.returnUrl,
         callback_url: req.callbackUrl,
-        payment_service_id: req.paymentServiceId,
+        /*
+          NUMBER, not string. We carry the id as a string everywhere else
+          (it arrives inside form values and URLs), but the API types this as
+          a number and a live account rejected the string form with an
+          undocumented `4566 FAILED` — every payment fails. Guide §0 item 2.
+        */
+        payment_service_id: Number(req.paymentServiceId),
       }),
       cache: "no-store",
     });
@@ -215,19 +267,50 @@ export const leanx: PaymentProvider = {
     return { redirectUrl: json.data.redirect_url, providerRef: String(json.data.bill_no ?? "") };
   },
 
-  async verifyWebhook(request: Request): Promise<WebhookResult> {
-    // Raw body FIRST — HMAC is over the exact bytes.
-    const raw = await request.text();
-    const sig = request.headers.get("x-leanx-signature") ?? "";
+  /*
+    Two callback envelopes exist and are indistinguishable from the outside:
 
-    if (!verifySignature(raw, sig, WEBHOOK_SECRET)) {
-      throw new Error("LeanX webhook signature invalid");
+      1. { data: "<HS256 JWT>" }        — the token is the proof, no header
+      2. plain JSON + x-leanx-signature — HMAC over the raw body
+
+    Which one an account sends is not something we control, so accept either.
+    Each stands on its own proof; neither weakens the other, and an unsigned
+    body still fails closed. Guide §0 item 3.
+  */
+  async verifyWebhook(request: Request): Promise<WebhookResult> {
+    // Raw body FIRST — the HMAC is over the exact bytes, before any parsing.
+    const raw = await request.text();
+
+    let outer: Record<string, unknown>;
+    try {
+      outer = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      throw new Error("LeanX webhook body is not JSON");
     }
 
-    const body = JSON.parse(raw) as Record<string, unknown>;
-    const billNo = String(body.bill_no ?? body.transaction_id ?? "");
-    const invoiceRef = String(body.invoice_ref ?? body.order_id ?? "");
-    const rawStatus = String(body.status ?? "").toLowerCase();
+    let body: Record<string, unknown>;
+    if (typeof outer.data === "string") {
+      const claims = verifyJwtHS256(outer.data, WEBHOOK_SECRET);
+      if (!claims) throw new Error("LeanX webhook JWT invalid");
+      body = claims;
+    } else {
+      const sig = request.headers.get("x-leanx-signature") ?? "";
+      if (!verifySignature(raw, sig, WEBHOOK_SECRET)) {
+        throw new Error("LeanX webhook signature invalid");
+      }
+      body = outer;
+    }
+
+    /*
+      The JWT claims carry LeanX's own invoice_no, and `order_id` arrives as the
+      literal string "None" when unset — so the order is resolved from the bill
+      number we stored at creation, never from a ref the payload chooses.
+    */
+    const billNo = String(body.bill_no ?? body.invoice_no ?? body.transaction_id ?? "");
+    const refRaw = String(body.invoice_ref ?? body.merchant_invoice_no ?? body.order_id ?? "");
+    const invoiceRef = refRaw && refRaw !== "None" ? refRaw : "";
+
+    const rawStatus = String(body.status ?? body.invoice_status ?? "").toLowerCase();
     const status = STATUS_MAP[rawStatus] ?? "processing";
     const amountSen = body.amount != null ? Math.round(parseFloat(String(body.amount)) * 100) : undefined;
 
@@ -239,5 +322,39 @@ export const leanx: PaymentProvider = {
       amountSen,
       raw: body,
     };
+  },
+
+  /*
+    Pull a bill's status. The endpoint takes invoice_no as a QUERY PARAM with no
+    body — sending a JSON body to /transaction-status instead answers
+    "Requested endpoint is forbidden", which reads like a missing account
+    permission and is not. Guide §0 item 4.
+
+    Every failure maps to "unknown", never "failed": a flaky lookup must not be
+    able to cancel a paid order.
+  */
+  async checkStatus(billNo: string) {
+    if (!billNo) return { status: "unknown" as const };
+    try {
+      const res = await fetch(
+        `${HOST}/api/v1/merchant/manual-checking-transaction?invoice_no=${encodeURIComponent(billNo)}`,
+        { method: "POST", headers: headers(), cache: "no-store" },
+      );
+      const json = await res.json();
+      if (json.response_code !== SUCCESS) return { status: "unknown" as const, raw: json };
+
+      const details = json.data?.transaction_details ?? {};
+      const mapped = STATUS_MAP[String(details.invoice_status ?? "").toLowerCase()];
+      if (!mapped) return { status: "unknown" as const, raw: json };
+
+      return {
+        status: mapped as PaymentStatus["status"],
+        amountSen:
+          details.amount != null ? Math.round(parseFloat(String(details.amount)) * 100) : undefined,
+        raw: json,
+      };
+    } catch {
+      return { status: "unknown" as const };
+    }
   },
 };

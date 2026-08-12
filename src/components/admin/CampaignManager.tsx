@@ -124,7 +124,7 @@ export function CampaignManager({
               <div>
                 <Label htmlFor="c-name">Campaign name</Label>
                 <Input id="c-name" value={name} onChange={(e) => setName(e.target.value)}
-                  placeholder="Raya 2026 preview" className="mt-1" />
+                  placeholder="New arrivals preview" className="mt-1" />
               </div>
               <div>
                 <Label htmlFor="c-subject">Email subject</Label>
@@ -136,7 +136,7 @@ export function CampaignManager({
             <div>
               <Label htmlFor="c-body">Message</Label>
               <Textarea id="c-body" value={body} onChange={(e) => setBody(e.target.value)} rows={8}
-                placeholder={"Hi {{name}},\n\nOur Raya collection arrives Friday…"} className="mt-1" />
+                placeholder={"Hi {{name}},\n\nOur new pieces arrive Friday…"} className="mt-1" />
               <p className="mt-1 text-[11px] tracking-wide text-navy-400">
                 Blank lines start new paragraphs. <code>{"{{name}}"}</code> becomes the
                 customer&apos;s first name, or “there” when unknown.

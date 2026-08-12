@@ -60,7 +60,6 @@ export default async function AdminProductsPage() {
                     <div>
                       <p className="font-medium group-hover:underline">{p.name}</p>
                       <p className="text-[11px] uppercase tracking-wider text-navy-300">
-                        {p.collection ? `${p.collection} · ` : ""}
                         {p.category}
                       </p>
                     </div>

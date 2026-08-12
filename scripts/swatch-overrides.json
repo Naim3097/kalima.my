@@ -1,0 +1,43 @@
+{
+  "_why": "Hand corrections applied on top of the sampled values in swatches.json, made by eye against scripts/out/sheets/*.png. The sampler is reliable on plain-backdrop studio shots (both kurtas needed no correction at all) but drifts grey on location shots, where an archway wall or the model's cream top out-votes the garment. Prints are approximations by nature - see _prints.",
+  "_prints": "A single hex cannot represent a multi-colour floral. The values for ANNA TOP and ANAYA COTTON are the dominant accent of each print, chosen so the swatches stay distinguishable from each other. Better UX would render the print photo itself as the swatch - product_images already stores a per-colour image, so this is a UI change, not a data one.",
+
+  "ANAYA COTTON": {
+    "CODE 1": ["#9cb9a4", "sampled the white wall; print is sage green with white hibiscus"],
+    "CODE 2": ["#7ba7b0", "sampled a black window; print is dusty teal with white medallions"]
+  },
+  "ANNA TOP": {
+    "DREAMY GARDEN": ["#cf8fa0", "print accent - pink florals"],
+    "DUSTY LILY": ["#c08b93", "sampled value was close; warmed slightly toward the rose print"],
+    "LAVENDER GARDEN": ["#c3a3c4", "print accent - lilac florals"],
+    "PEONY GARDEN": ["#7a9c86", "sampled the wall; print reads green-teal"],
+    "POLKA BLACK": ["#16161a", "black ground with white polka dots"],
+    "SUMMER GARDEN": ["#cfa15f", "sampled a black skirt, not the top; print is warm multi-floral"],
+    "SUNSET GARDEN": ["#e0956f", "sampled the wall; print accent is sunset orange"],
+    "VINTAGE GARDEN": ["#c88a63", "sampled the wall; print accent is rust"]
+  },
+  "DANISYA SETS": {
+    "MOCHA": ["#a08663", "sampled grey shadow; garment is a warm sandy tan"]
+  },
+  "ITALIAN CHIFFON SHAWL": {
+    "BLACK": ["#1f1d1c", "sampled value ran warm/light"],
+    "BLUSH": ["#c08d80", "sampled the wall; shawl is dusty rose"],
+    "BUTTER": ["#efdca4", "sampled near-white; shawl is pale butter yellow"],
+    "EMERALD": ["#1f4a47", "sampled grey; shawl is deep emerald teal"],
+    "GREEN APPLE": ["#9fb96a", "brightened toward the actual apple green"],
+    "LATTE": ["#b08f81", "sampled grey; shawl is warm mauve-taupe"],
+    "MAGENTA": ["#a3175e", "sampled value sat in the shadow folds, far too dark"],
+    "MOCHA": ["#9c7a6c", "sampled value too dark; shawl is mid warm brown"]
+  },
+  "LUNA PALAZO": {
+    "SAND": ["#c8bcb0", "warmed - sampled value read as neutral grey"],
+    "TEAL BLUE": ["#5b7a95", "sampled grey paving; garment is denim blue"]
+  },
+  "RUWA CAFTAN": {
+    "MOCHA": ["#a5805f", "sampled grey; caftan is warm camel"]
+  },
+  "SERRA SCALLOP": {
+    "MOCHA": ["#a1826b", "sampled grey; abaya is warm tan"],
+    "TEAL BLUE": ["#46617a", "sampled grey paving; abaya is steel blue"]
+  }
+}

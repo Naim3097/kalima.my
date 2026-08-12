@@ -1,13 +1,15 @@
 import Image from "next/image";
 import Link from "next/link";
 import SectionHeader from "@/components/brand/SectionHeader";
+import { productPhoto } from "@/lib/images";
 
+/* One shot per piece, chosen for contrast across the row. */
 const SHOTS = [
-  { image: "/products/maya-chiffon.jpg", href: "/products/maya-chiffon" },
-  { image: "/products/bella-dress.jpg", href: "/products/bella-dress" },
-  { image: "/products/amanda-sparkle.jpg", href: "/products/amanda-sparkle" },
-  { image: "/products/ruwa-kaftan-blue.jpg", href: "/products/ruwa-kaftan" },
-  { image: "/products/sofea-dress.jpg", href: "/products/sofea-dress" },
+  { slug: "ruwa-caftan", colour: "burgundy", alt: "Ruwa Caftan in burgundy satin" },
+  { slug: "danisya-set", colour: "magenta", alt: "Danisya Set in magenta satin" },
+  { slug: "serra-scallop", colour: "teal-green", alt: "Serra Scallop cardigan abaya in teal green" },
+  { slug: "anna-top", colour: "peony-garden", alt: "Anna Top in the Peony Garden print" },
+  { slug: "luna-palazzo", colour: "sand", alt: "Luna Palazo in sand" },
 ];
 
 /* Server Component — a static grid of links; no wishlist or state here. */
@@ -17,11 +19,11 @@ export default function Lookbook() {
       <SectionHeader title="Lookbook" cta={{ label: "View Instagram", href: "/pages/contact" }} />
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
         {SHOTS.map((shot) => (
-          <Link key={shot.image} href={shot.href} className="group block overflow-hidden">
+          <Link key={shot.slug} href={`/products/${shot.slug}`} className="group block overflow-hidden">
             <div className="relative aspect-[4/5] w-full overflow-hidden">
               <Image
-                src={shot.image}
-                alt="Kalima lookbook"
+                src={productPhoto(shot.slug, shot.colour)}
+                alt={shot.alt}
                 fill
                 sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
                 draggable={false}

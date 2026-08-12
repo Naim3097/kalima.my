@@ -17,6 +17,149 @@ Everything here is verified against LeanX's live API. Where a field is
 
 ---
 
+## 0. Corrections from a second live integration (NanoRev, 2026-08-05)
+
+Wiring this guide into a second codebase against a **different live merchant
+account** contradicted it in four places. Each was found by a real API call, not
+by reading. Where this section and the body of the guide disagree, **this
+section is the one that was observed**; the originals are kept below so the
+difference is visible, since a third account may behave like the first.
+
+Cross-checked against the official reference at
+[docs.leanx.io](https://docs.leanx.io/api-docs) (full index: `/api-docs/llms.txt`,
+and every page is available as Markdown by appending `.md`).
+
+| # | This guide says | A live account did | Consequence if you follow the guide |
+|---|---|---|---|
+| 1 | Bank list returns `payment_service_name` and `status` | Returns **`name`** and **`record_status`** / `record_status_id` | Every bank button renders blank — the customer cannot tell Maybank from CIMB |
+| 2 | `payment_service_id` is a string | Docs type it **Number**; a string is rejected | `create-bill-silent` fails with undocumented `4566 FAILED` |
+| 3 | Webhook is plain JSON + `x-leanx-signature` | Docs specify **`{data: <HS256 JWT signed with the Hash Key>}`**, no header | Every callback 401s. The customer is charged and the order stays `pending` forever |
+| 4 | Status endpoint is `/merchant/transaction-status` with a JSON body | It is **`/merchant/manual-checking-transaction`** with `invoice_no` as a **query param** | Every lookup returns `"Requested endpoint is forbidden"` — which reads like a missing account permission and is not |
+
+### 0.1 Normalise the bank list at the boundary
+
+A live account returns:
+
+```jsonc
+{ "payment_service_id": 65, "name": "Affin Bank",
+  "record_status": "Active", "record_status_id": 1, "rate": 0.8 }
+```
+
+Accept **both** spellings, coerce the id, and drop anything unlabelled — a blank
+button is worse than a missing one:
+
+```ts
+const name = s.payment_service_name || s.name
+if (!name || s.payment_service_id == null) return null
+const state = (s.status || s.record_status || '').toLowerCase()
+if (state && state !== 'active') return null
+if (s.record_status_id != null && s.record_status_id !== 1) return null
+return { payment_service_id: String(s.payment_service_id), payment_service_name: name }
+```
+
+Then convert **back to a number** when creating the bill (see §4).
+
+### 0.2 The webhook may be a signed JWT
+
+The [official callback docs](https://docs.leanx.io/api-docs/cloud-payment/bill/callback.md)
+describe a different envelope from §6 of this guide:
+
+```jsonc
+{ "data": "eyJhbGciOiJIUzI1NiIs…", "response_code": 2100 }
+```
+
+The JWT is HS256-signed with the collection's **Hash Key** — the token *is* the
+authentication, and there is no signature header. Decoded claims:
+
+```jsonc
+{ "invoice_no": "BP1701155880uBMwB9q0", "invoice_status": "SUCCESS",
+  "amount": "456.20", "payment_service_id": 89,
+  "client_data": { "merchant_invoice_no": "...", "order_id": "None" },
+  "fpx_debit_status": "Approved", "fpx_buyer_name": "..." }
+```
+
+Two traps:
+
+- **`order_id` is the literal string `"None"`** when unset, and the claims carry
+  LeanX's `invoice_no`, not your `invoice_ref`. Resolve the order by the bill
+  number **you stored at creation** — a mapping the payload cannot influence.
+- **Pin the algorithm to HS256.** If you accept whatever `alg` the header names,
+  a forged token can select `none` and your HMAC check becomes decorative.
+
+Because the two formats are indistinguishable from the outside, accept either —
+each on its own proof, neither weakening the other:
+
+```ts
+const jwt = body.data
+if (typeof jwt === 'string') return verifyJwtHS256(jwt, hashKey)   // shape 1
+if (!verifyHmacHeader(rawBody, signature, hashKey)) return null    // shape 2
+```
+
+### 0.3 The callback fires on SUCCESS ONLY
+
+> *"Upon every successful transaction, a callback will be send…"*
+
+Cancelled and failed bills are **never pushed**. The merchant dashboard shows
+them as `Failed` regardless — LeanX knows, it just does not tell you. The only
+way to learn is to **pull** (§0.4).
+
+Design for this explicitly, or an abandoned checkout sits `pending` forever and
+the buyer watches a spinner waiting for a message that will never arrive. Give
+the return page a definite verdict after a bounded number of polls: *"no
+confirmation arrived; if you cancelled you were not charged."*
+
+### 0.4 The status endpoint
+
+```
+POST https://api.leanx.io/api/v1/merchant/manual-checking-transaction?invoice_no=<bill_no>
+Headers: auth-token: <Auth Token>            # no body
+```
+
+```jsonc
+{ "response_code": 2000,
+  "data": { "transaction_details": {
+      "invoice_no": "BP-AD5112621A-LNP", "amount": "15.00",
+      "invoice_status": "SUCCESS", "bank_provider": "Maybank2U",
+      "amount_with_fee": 15.80, "fee": 0.80 },
+    "customer_details": { "name": "...", "phone_number": "...", "email": "..." } } }
+```
+
+Still treat any error as **unknown, never failed** — only an explicit verdict
+may move an order. Related endpoints if this one is unavailable:
+`POST /merchant/bill-id` (get a bill).
+
+### 0.5 Merchant-portal settings that silently break payments
+
+Nothing in the API surfaces these; they are collection checkboxes.
+
+- **Payment Channels** — a channel that is unticked simply never appears in the
+  bank list. An empty e-wallet list is a *dashboard* setting, not a bug.
+- **Fixed Amount** — undocumented. On a collection whose amount varies per
+  order, turn it **off**; the risk is a customer charged an amount that does not
+  match their order, which your own amount check will then refuse to fulfil.
+- **A new collection means a new UUID *and* a new Hash Key.** The Auth Token is
+  account-level and does not change. Rotating the collection without updating
+  `LEANX_WEBHOOK_SECRET` gives you the §2 footgun by a different route: bills
+  create fine, callbacks 401.
+
+### 0.6 Host-level traps (not LeanX's fault, same outcome)
+
+- **Vercel Deployment Protection.** With *Vercel Authentication* set to
+  "all except custom domains", every deployment-specific URL answers the SSO
+  wall. If your `callback_url` is built from `VERCEL_URL` rather than an
+  explicit public origin, the gateway's POST never reaches your code and
+  **nothing appears in your logs** — no rejection, no request, silence.
+  Echo the computed callback URL from a health endpoint; the one value that can
+  break payments invisibly is otherwise unreadable once marked sensitive.
+- **Debounced writes.** If your store batches writes, the pending order must be
+  flushed **before** you hand the buyer to the gateway, and the settlement
+  flushed **before** you answer the webhook 200 — that 200 tells the gateway to
+  stop redelivering. Both windows lose a sale on a crash.
+- **Revenue reporting.** The moment orders can be `pending`/`failed`, any
+  dashboard that sums all orders starts reporting money that never arrived.
+
+---
+
 ## 1. The mental model
 
 LeanX is a **redirect + webhook** gateway, using the "Silent Bill" flow:
@@ -303,6 +446,11 @@ else if (Array.isArray(data.data?.list?.data)) {
 // filter to active, then present to the customer to choose
 ```
 
+> ⚠️ **The field names above are not universal — see §0.1.** A live account
+> returned `name` / `record_status` instead of `payment_service_name` / `status`,
+> and a numeric `payment_service_id`. Handling only the shape shown here renders
+> a grid of blank, unlabelled buttons. Normalise both spellings.
+
 Show the returned banks/e-wallets to the customer, capture the selected
 `payment_service_id`, and pass it to `create-bill-silent`.
 
@@ -312,6 +460,15 @@ Show the returned banks/e-wallets to the customer, capture the selected
 
 LeanX POSTs the payment result to your `callback_url`. **This is the only trusted
 "paid" signal.**
+
+> ⚠️ **There are two callback formats — see §0.2.** The official docs specify a
+> Hash-Key-signed JWT (`{data: "<JWT>"}`) with **no signature header**, not the
+> plain JSON + `x-leanx-signature` shown below. Implement only this one and a
+> real payment 401s: the customer is charged and the order never settles.
+> Accept both.
+>
+> ⚠️ **Callbacks fire on SUCCESS only — see §0.3.** Cancellations and failures
+> are never pushed. Reconciliation (§7) is the only way to see them.
 
 ### Verifying authenticity (HMAC-SHA256) — do this FIRST, every time
 
@@ -413,6 +570,16 @@ Do not rely on the webhook alone. Two independent fallbacks:
 
 ### a) Server-side status check — `transaction-status`
 
+> ⚠️ **This path is wrong — see §0.4.** The endpoint is
+> `/api/v1/merchant/manual-checking-transaction` with `invoice_no` as a **query
+> parameter** and no body; the response nests under
+> `data.transaction_details`. The path below answers `"Requested endpoint is
+> forbidden"`, which looks like a permission your merchant has to request —
+> it is not, and asking support for it wastes days.
+>
+> This is not merely a fallback. Since callbacks fire on success only (§0.3),
+> **this call is the only way to ever learn that a payment was cancelled.**
+
 ```
 POST https://api.leanx.io/api/v1/merchant/transaction-status
 Headers: auth-token: <Auth Token>
@@ -494,6 +661,22 @@ Minimum columns for a robust integration:
 - [ ] Webhook env var name used by the presence-check **equals** the one the HMAC
       reads.
 
+Added after the NanoRev integration (§0) — every one of these was a real defect:
+
+- [ ] Bank list **normalised** for both field spellings; unlabelled entries dropped.
+- [ ] `payment_service_id` sent as a **number**, whatever your transport used.
+- [ ] Webhook accepts the **JWT envelope** as well as the header signature, with
+      `alg` **pinned to HS256**.
+- [ ] The order is resolved from **your stored bill number**, not a ref in the payload.
+- [ ] The return page reaches a **definite verdict** — cancellations are never
+      pushed, so "confirming…" must not spin forever.
+- [ ] The pending order is **durable before** the buyer leaves for the gateway, and
+      the settlement durable **before** the webhook is answered 200.
+- [ ] The **callback origin is verifiable at runtime** (echo it from a health route).
+- [ ] Revenue reporting counts **paid orders only**.
+- [ ] The collection's **Payment Channels** include everything you intend to offer,
+      and **Fixed Amount is off** for variable-amount collections.
+
 ---
 
 ## 10. Troubleshooting — real failures and their fixes
@@ -502,6 +685,13 @@ Minimum columns for a robust integration:
 | ----------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | Bill created but payment "won't go through"           | Empty `email` or `phone_number`                                        | Send non-empty values (real or placeholder) — see §3                            |
 | `INVALID_UUID` / response code `5699`                 | Wrong host (`.dev`) or malformed/mismatched `collection_uuid`          | Use `https://api.leanx.io`; verify the Collection UUID                          |
+| **`4566` / description `FAILED`** (undocumented)      | `payment_service_id` sent as a string, or a UUID from another collection | Send it as a **Number** (§0.1); re-copy the UUID from the collection you are billing |
+| **Blank/unlabelled bank buttons**                     | Account returns `name`, not `payment_service_name`                     | Normalise both spellings (§0.1)                                                 |
+| **Every webhook 401s, payments stay `pending`**       | Account sends the **JWT** envelope; handler only reads the header HMAC | Accept both formats (§0.2)                                                      |
+| **`"Requested endpoint is forbidden"`**               | Wrong path — `transaction-status` does not exist                       | `POST /merchant/manual-checking-transaction?invoice_no=…` (§0.4). **Not** a permission to request |
+| **Cancelled orders never resolve**                    | Callbacks fire on success only                                         | Poll the status endpoint; give the return page a bounded verdict (§0.3)         |
+| **Bank list is empty for a whole channel**            | Channel unticked in the merchant portal                                | Collection → Payment Channels → enable → Update (§0.5)                          |
+| **No webhook request in your logs at all**            | `callback_url` points at a host behind auth (e.g. Vercel SSO)          | Set an explicit public origin; echo it from a health route (§0.6)               |
 | `missing payment_service_id`                          | Silent Bill sent without a bank id                                     | Fetch the bank list (§5), include `payment_service_id`                          |
 | Amount rejected                                       | Sent a number/float                                                    | Send a 2-decimal **string** (`"79.00"`)                                         |
 | Auth fails on create-bill                             | Used `Authorization: Bearer`                                           | Use the `auth-token` header                                                     |
@@ -521,7 +711,8 @@ Minimum columns for a robust integration:
 | ------------------ | ---------------------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Create payment     | `POST /api/v1/merchant/create-bill-silent`     | `auth-token` header | `collection_uuid, amount, invoice_ref, full_name, email, phone_number, redirect_url, callback_url, payment_service_id` |
 | List banks/wallets | `POST /api/v1/merchant/list-payment-services`  | `auth-token` header | `payment_type, payment_status, payment_model_reference_id`                                                             |
-| Check status       | `POST /api/v1/merchant/transaction-status`     | `auth-token` header | `bill_no` **or** `invoice_ref`                                                                                         |
+| Check status       | ~~`POST /api/v1/merchant/transaction-status`~~ **`POST /api/v1/merchant/manual-checking-transaction`** | `auth-token` header | **`?invoice_no=` as a QUERY param, no body** (§0.4) |
+| Get a bill         | `POST /api/v1/merchant/bill-id`                | `auth-token` header | `invoice_no`                                                                                                           |
 | Webhook (inbound)  | your `callback_url` receives a POST from LeanX | `x-leanx-signature` | `bill_no, invoice_ref, status, amount, payment_method`                                                                 |
 
 All success responses carry `response_code: 2000`. All hosts are

@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { ArrowRightIcon } from "@/components/brand/Icons";
 import ProductImage from "@/components/brand/ProductImage";
+import { productPhoto } from "@/lib/images";
 
+/* tone is the ground shown while the photo loads — taken from each shot. */
 const TILES = [
-  { label: "Women", href: "/collections/women", tone: "#4a4a3f", image: "/products/ruwa-kaftan-lilac.jpg" },
-  { label: "Men", href: "/collections/men", tone: "#3b4636" },
-  { label: "Accessories", href: "/collections/accessories", tone: "#cbb89d", image: "/products/amanda-sparkle.jpg" },
+  { label: "Women", href: "/collections/women", tone: "#7b6050", image: productPhoto("ruwa-caftan", "mocha") },
+  { label: "Men", href: "/collections/men", tone: "#2b3342", image: productPhoto("kurta-zaid", "navy") },
+  { label: "Accessories", href: "/collections/accessories", tone: "#b08f81", image: productPhoto("italian-chiffon-shawl", "latte") },
 ];
 
 /* Server Component — static tiles, no state or handlers. */
