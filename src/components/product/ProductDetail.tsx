@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import type { Product } from "@/data/catalog";
+import { variantKey, type Product } from "@/data/catalog";
 import { formatRM } from "@/lib/format";
 import { useCart } from "@/stores/cart";
 import { useWishlist } from "@/stores/wishlist";
@@ -40,8 +40,37 @@ export default function ProductDetail({ product }: { product: Product }) {
   const wished = mounted && ids.includes(product.id);
   const mainImage = color.image ?? (colorIndex === 0 ? product.image : undefined);
 
+  /*
+    Stock, resolved for the selected colour. Undefined stockByVariant (the seed
+    fallback) means "unknown", which we treat as available so the offline demo
+    still adds to bag; a real catalogue always carries the map. A size with no
+    entry for this colour is not a real variant, so it counts as unavailable.
+  */
+  const stockOf = (sz: string): number | undefined =>
+    product.stockByVariant?.[variantKey(color.name, sz)];
+  const sizeAvailable = (sz: string) => {
+    const s = stockOf(sz);
+    return s === undefined ? product.stockByVariant === undefined : s > 0;
+  };
+  const selectedInStock = size ? sizeAvailable(size) : false;
+  // Every size of this colour gone → the colour itself is sold out.
+  const colorSoldOut = product.stockByVariant !== undefined && !product.sizes.some(sizeAvailable);
+
+  /*
+    Switching colour can strand the chosen size — Black/M may be in stock while
+    Cream/M is gone. Drop a size that the new colour cannot fulfil, so the
+    shopper never lands on a selection that silently can't be added.
+  */
+  const pickColor = (i: number) => {
+    setColorIndex(i);
+    const c = product.colors[i];
+    if (size && product.stockByVariant && (product.stockByVariant[variantKey(c.name, size)] ?? 0) <= 0) {
+      setSize(null);
+    }
+  };
+
   const addToBag = () => {
-    if (!size) return;
+    if (!size || !selectedInStock) return;
     add({
       productId: product.id,
       slug: product.slug,
@@ -85,7 +114,7 @@ export default function ProductDetail({ product }: { product: Product }) {
             return (
               <button
                 key={c.name}
-                onClick={() => setColorIndex(i)}
+                onClick={() => pickColor(i)}
                 className="cursor-pointer"
                 aria-label={`View ${c.name}`}
               >
@@ -127,7 +156,7 @@ export default function ProductDetail({ product }: { product: Product }) {
               <button
                 key={c.name}
                 title={c.name}
-                onClick={() => setColorIndex(i)}
+                onClick={() => pickColor(i)}
                 aria-label={`Colour: ${c.name}`}
                 className={`h-8 w-8 rounded-full border-2 transition-transform cursor-pointer ${
                   i === colorIndex ? "border-navy scale-105" : "border-black/10 hover:border-navy/40"
@@ -149,19 +178,27 @@ export default function ProductDetail({ product }: { product: Product }) {
             </Link>
           </div>
           <div className="flex flex-wrap gap-2.5">
-            {product.sizes.map((s) => (
-              <button
-                key={s}
-                onClick={() => setSize(s)}
-                className={`min-w-12 border px-4 py-2.5 text-[13px] tracking-wide transition-colors cursor-pointer ${
-                  size === s
-                    ? "border-navy bg-navy text-white"
-                    : "border-navy/25 text-navy hover:border-navy"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
+            {product.sizes.map((s) => {
+              const available = sizeAvailable(s);
+              return (
+                <button
+                  key={s}
+                  onClick={() => available && setSize(s)}
+                  disabled={!available}
+                  aria-disabled={!available}
+                  title={available ? undefined : "Sold out in this colour"}
+                  className={`min-w-12 border px-4 py-2.5 text-[13px] tracking-wide transition-colors ${
+                    !available
+                      ? "cursor-not-allowed border-navy/10 text-navy-300 line-through"
+                      : size === s
+                        ? "cursor-pointer border-navy bg-navy text-white"
+                        : "cursor-pointer border-navy/25 text-navy hover:border-navy"
+                  }`}
+                >
+                  {s}
+                </button>
+              );
+            })}
           </div>
         </div>
 
@@ -171,9 +208,15 @@ export default function ProductDetail({ product }: { product: Product }) {
             size="editorial"
             className="flex-1"
             onClick={addToBag}
-            disabled={!size}
+            disabled={!size || !selectedInStock}
           >
-            {size ? "Add to Bag" : "Select a Size"}
+            {colorSoldOut
+              ? "Sold Out"
+              : !size
+                ? "Select a Size"
+                : !selectedInStock
+                  ? "Sold Out"
+                  : "Add to Bag"}
           </Button>
           <button
             onClick={() => toggle(product.id)}

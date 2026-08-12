@@ -5,6 +5,7 @@ import { createPublicClient } from "@/lib/supabase/server";
 import {
   PRODUCTS,
   COLLECTIONS,
+  variantKey,
   type Product,
   type ColorOption,
   type CollectionMeta,
@@ -119,6 +120,9 @@ function mapProduct(row: ProductRow): Product {
     tone: row.tone,
     image: primaryImage,
     stock: row.product_variants.reduce((total, v) => total + v.stock_on_hand, 0),
+    stockByVariant: Object.fromEntries(
+      row.product_variants.map((v) => [variantKey(v.color_name, v.size), v.stock_on_hand]),
+    ),
   };
 }
 
