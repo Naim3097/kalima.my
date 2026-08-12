@@ -1,0 +1,71 @@
+<!--
+  Supabase Auth &mdash; "Confirm sign up" email.
+
+  Paste the block below into Authentication → Emails → Confirm sign up → Body
+  (Source view). Subject: "Confirm your email &mdash; Kalima".
+
+  {{ .ConfirmationURL }} is Supabase's variable; leave it exactly as-is &mdash; it
+  becomes the real one-time link when the email is sent. Kept here in the repo
+  so the template is version-controlled and matches src/lib/email (the order
+  emails share this shell): cream ground, navy ink, square corners, the KALIMA
+  wordmark. Table layout + inline styles, because email clients strip <style>
+  and ignore modern CSS.
+-->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0;background:#f7f3ec;font-family:Georgia,'Times New Roman',serif;color:#383c61">
+  <tr>
+    <td align="center" style="padding:32px 16px">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="width:480px;max-width:100%;background:#fbf9f5;border:1px solid #e3d7c6">
+
+        <!-- Masthead -->
+        <tr>
+          <td style="padding:30px 32px;text-align:center;border-bottom:1px solid #e3d7c6">
+            <div style="font-size:22px;letter-spacing:6px;color:#383c61">KALIMA</div>
+            <div style="font-size:9px;letter-spacing:4px;color:#686c8f;text-transform:uppercase;margin-top:5px">Timeless Modest Luxury</div>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:36px 32px 8px">
+            <h1 style="font-size:23px;font-weight:normal;margin:0 0 18px;color:#383c61">Confirm your email</h1>
+            <p style="font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.7;color:#686c8f;margin:0 0 24px">
+              Welcome to Kalima. Confirm your email address to finish creating your
+              account &mdash; then your orders, wishlist and Kalima Club points all live in one place.
+            </p>
+
+            <!-- CTA -->
+            <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 26px">
+              <tr>
+                <td style="background:#383c61">
+                  <a href="{{ .ConfirmationURL }}"
+                     style="display:inline-block;padding:14px 30px;font-family:Helvetica,Arial,sans-serif;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#ffffff;text-decoration:none">
+                    Confirm email address
+                  </a>
+                </td>
+              </tr>
+            </table>
+
+            <!-- Plaintext fallback for clients that don't render the button -->
+            <p style="font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#9b9cb0;margin:0 0 24px">
+              Or paste this link into your browser:<br>
+              <a href="{{ .ConfirmationURL }}" style="color:#686c8f;word-break:break-all">{{ .ConfirmationURL }}</a>
+            </p>
+
+            <p style="font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#9b9cb0;margin:0 0 8px;border-top:1px solid #e3d7c6;padding-top:18px">
+              This link can be used once and expires in 24 hours. If you didn&rsquo;t create a
+              Kalima account, you can safely ignore this email &mdash; nothing will happen.
+            </p>
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="padding:22px 32px;border-top:1px solid #e3d7c6;text-align:center;font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#9b9cb0">
+            Kalima &middot; Designed in Malaysia &middot; kalima.my
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
