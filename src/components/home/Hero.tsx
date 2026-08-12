@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { HeroSlide } from "@/lib/cms";
+import { blurSeed } from "@/lib/images";
 import { Button } from "@/components/ui/button";
 
 /*
@@ -49,6 +50,15 @@ export default function Hero({ slides }: { slides: HeroSlide[] }) {
               sizes="100vw"
               /* First slide is the LCP element — never lazy-load it */
               priority={i === 0}
+              /*
+                Seeded with the section's own beige rather than the garment's
+                colour. The slide is editable from the CMS, so any hardcoded
+                tone would be wrong the moment someone swaps the photo — and a
+                seam that matches the surrounding canvas resolves quietly,
+                where a mismatched colour would flash and then correct itself.
+              */
+              placeholder="blur"
+              blurDataURL={blurSeed("#efe7db")}
               draggable={false}
               aria-hidden={i !== index}
               className={`object-cover select-none transition-opacity duration-[1200ms] ease-in-out ${
