@@ -48,6 +48,10 @@ const LINKS: { heading: string; items: { label: string; href: string }[] }[] = [
          still saying "launching soon". Point people at the working one. */
       { label: "Kalima Club", href: "/kalima-club" },
       { label: "Refer a Friend", href: "/affiliate" },
+      /* The only account link that does not depend on the header's role
+         logic — shoppers expect one at the bottom of the page, and staff
+         have no other desktop route to their own account. */
+      { label: "My Account", href: "/account" },
     ],
   },
 ];
