@@ -19,13 +19,40 @@ function client(): Resend | null {
 
 const FROM = process.env.RESEND_FROM || "Kalima <orders@kalima.my>";
 
+/*
+  Where a customer's reply goes, when that differs from the From address.
+
+  The From address must be on a domain we can prove we own — DKIM signing and
+  SPF are checked against it, and no provider will let us send as @gmail.com
+  because we cannot publish records in Google's DNS. Replies have no such
+  requirement, so support can live in an ordinary mailbox while the mail itself
+  is sent from the verified domain and passes authentication.
+*/
+const REPLY_TO = process.env.RESEND_REPLY_TO?.trim() || undefined;
+
 async function send(to: string, subject: string, html: string): Promise<void> {
   const resend = client();
-  if (!resend) return; // not configured — silently skip
+  if (!resend) {
+    // Not configured. Say so once per send — a silent no-op looks identical to
+    // a delivered email, and that is how an order confirmation goes missing
+    // for weeks without anyone noticing.
+    console.warn(`[email] RESEND_API_KEY unset — "${subject}" to ${to} was NOT sent`);
+    return;
+  }
   try {
-    await resend.emails.send({ from: FROM, to, subject, html });
-  } catch {
-    // Never let a mail failure break an order. Real delivery monitoring is Phase 10.
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to,
+      subject,
+      html,
+      ...(REPLY_TO ? { replyTo: REPLY_TO } : {}),
+    });
+    // Resend reports rejection in the body, not by throwing: an unverified
+    // sending domain arrives here, not in the catch.
+    if (error) console.error(`[email] rejected "${subject}" to ${to}:`, error.message);
+  } catch (e) {
+    // Never let a mail failure break an order — but never lose it either.
+    console.error(`[email] failed "${subject}" to ${to}:`, (e as Error).message);
   }
 }
 
@@ -101,4 +128,61 @@ export async function sendPaymentConfirmedEmail(reference: string, email: string
       <tr><td>Total paid</td><td align="right"><strong>${formatRM(order.total_sen / 100)}</strong></td></tr>
     </table>`;
   await send(email, `Payment confirmed — ${reference}`, shell("Payment confirmed", body));
+}
+
+/*
+  "You have a paid order" — to the shop, not the customer.
+
+  Without this nobody learns a sale happened until someone opens the admin.
+  Sent alongside the customer's confirmation, on the same paid transition, so
+  it inherits that path's exactly-once guarantee.
+
+  Addressed to store_settings.store_email so it follows the shop rather than a
+  hardcoded address, and carries what is needed to pack the parcel — the items,
+  the address, and a way to reach the buyer.
+*/
+export async function sendNewOrderNotification(reference: string, email: string): Promise<void> {
+  const order = await getOrderByReference(reference, email);
+  if (!order) return;
+
+  const { createAdminClient } = await import("@/lib/supabase/server");
+  const db = createAdminClient();
+  if (!db) return;
+
+  const { data: settings } = await db
+    .from("store_settings")
+    .select("store_email")
+    .eq("id", 1)
+    .maybeSingle();
+
+  const to = (settings?.store_email as string | undefined)?.trim();
+  if (!to) {
+    console.warn(`[email] no store_email set — nobody was told about ${reference}`);
+    return;
+  }
+
+  const a = order.shipping_address;
+  const address = a
+    ? [a.recipient, a.line1, a.line2, `${a.postcode} ${a.city}`, a.state, a.phone]
+        .filter(Boolean)
+        .join("<br>")
+    : "No address on the order";
+
+  const body = `
+    <p style="font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#686c8f">
+      <strong style="color:#383c61">${order.reference}</strong> has been paid —
+      ${formatRM(order.total_sen / 100)}.
+    </p>
+    ${itemsTable(order.items)}
+    <table role="presentation" width="100%" style="font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#383c61">
+      <tr><td>Total paid</td><td align="right"><strong>${formatRM(order.total_sen / 100)}</strong></td></tr>
+    </table>
+    <p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.7;color:#383c61;margin-top:20px">
+      <strong>Ship to</strong><br>${address}
+    </p>
+    <p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#686c8f">
+      ${order.email}
+    </p>`;
+
+  await send(to, `New paid order — ${reference}`, shell("New paid order", body));
 }
