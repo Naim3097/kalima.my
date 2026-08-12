@@ -19,6 +19,17 @@ function client(): Resend | null {
 
 const FROM = process.env.RESEND_FROM || "Kalima <orders@kalima.my>";
 
+/*
+  Where a customer's reply goes, when that differs from the From address.
+
+  The From address must be on a domain we can prove we own — DKIM signing and
+  SPF are checked against it, and no provider will let us send as @gmail.com
+  because we cannot publish records in Google's DNS. Replies have no such
+  requirement, so support can live in an ordinary mailbox while the mail itself
+  is sent from the verified domain and passes authentication.
+*/
+const REPLY_TO = process.env.RESEND_REPLY_TO?.trim() || undefined;
+
 async function send(to: string, subject: string, html: string): Promise<void> {
   const resend = client();
   if (!resend) {
@@ -29,7 +40,13 @@ async function send(to: string, subject: string, html: string): Promise<void> {
     return;
   }
   try {
-    const { error } = await resend.emails.send({ from: FROM, to, subject, html });
+    const { error } = await resend.emails.send({
+      from: FROM,
+      to,
+      subject,
+      html,
+      ...(REPLY_TO ? { replyTo: REPLY_TO } : {}),
+    });
     // Resend reports rejection in the body, not by throwing: an unverified
     // sending domain arrives here, not in the catch.
     if (error) console.error(`[email] rejected "${subject}" to ${to}:`, error.message);
