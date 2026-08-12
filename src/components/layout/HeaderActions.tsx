@@ -67,9 +67,12 @@ export default function HeaderActions({ side }: { side: "left" | "right" }) {
       </button>
       {/*
         Staff get the back office where a customer gets their account: it is
-        where they actually work. /account still exists for them — the owner
-        places test orders and needs to see them as a customer does — this only
-        changes the default door. UX only; the guard is server-side.
+        where they actually work. UX only; the guard is server-side.
+
+        They also get a second, quieter link to /account beside it. The comment
+        that used to sit here claimed /account "still exists for them" — true,
+        but nothing linked to it on desktop, so the owner placing a test order
+        had no way to see it as a customer does without editing the URL.
       */}
       <Link
         href={
@@ -80,6 +83,15 @@ export default function HeaderActions({ side }: { side: "left" | "right" }) {
         <UserIcon size={16} />{" "}
         {authReady && !signedIn ? "Sign in" : isStaff ? "Back office" : "Account"}
       </Link>
+      {authReady && isStaff && (
+        <Link
+          href="/account"
+          title="Your customer account"
+          className="hidden lg:inline-flex items-center label-caps text-navy-300 hover:text-navy transition-colors"
+        >
+          Account
+        </Link>
+      )}
       <Link
         href="/wishlist"
         className="relative inline-flex items-center gap-2 label-caps text-navy-400 hover:text-navy transition-colors"
