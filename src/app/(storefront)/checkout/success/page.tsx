@@ -87,11 +87,16 @@ export default async function CheckoutSuccessPage() {
       </p>
 
       {failed && (
-        <p className="mx-auto mt-6 max-w-md border border-navy/15 bg-cream-50 px-4 py-3 text-[13px] leading-relaxed text-navy-400">
-          No confirmation came back from the bank. If you cancelled, you have not been
-          charged. Your order is saved — you can pay for it from your account, or contact
-          us and we&apos;ll help.
-        </p>
+        <div className="mx-auto mt-6 max-w-md border border-navy/15 bg-cream-50 px-4 py-4">
+          <p className="text-[13px] leading-relaxed text-navy-400">
+            No confirmation came back from the bank. If you cancelled, you have not been
+            charged. Your order is saved and your items are still reserved.
+          </p>
+          {/* The order is still `pending`, so the picker will take it. */}
+          <Button asChild variant="kalima" size="editorial" className="mt-4">
+            <Link href="/checkout/pay">Try payment again</Link>
+          </Button>
+        </div>
       )}
 
       {!paid && !failed && (
