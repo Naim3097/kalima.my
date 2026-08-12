@@ -92,25 +92,42 @@ export async function placeOrder(
     };
   }
 
-  const order = await createOrder({
-    items: lines,
-    email,
-    phone: form.phone.trim() || undefined,
-    address: {
-      recipient: form.recipient.trim(),
+  /*
+    create_order raises for conditions the shopper needs to hear about — an
+    item sold out between browsing and paying, most of all. Those raises are
+    written for a customer's eyes ("Ruwa Caftan (Burgundy · S/M) is sold out"),
+    so surface the message rather than letting an uncaught throw become the
+    generic crash page. An unrecognised error still fails safe and generic.
+  */
+  let order: Awaited<ReturnType<typeof createOrder>>;
+  try {
+    order = await createOrder({
+      items: lines,
+      email,
       phone: form.phone.trim() || undefined,
-      line1: form.line1.trim(),
-      line2: form.line2.trim() || undefined,
-      city: form.city.trim(),
-      postcode: form.postcode.trim(),
-      state: form.state,
-      country: "MY",
-    },
-    shippingMethod: form.shippingMethod,
-    discountCode: form.discountCode.trim() || undefined,
-    // A request, not a price — the database clamps it against the real balance.
-    redeemPoints: form.redeemPoints,
-  });
+      address: {
+        recipient: form.recipient.trim(),
+        phone: form.phone.trim() || undefined,
+        line1: form.line1.trim(),
+        line2: form.line2.trim() || undefined,
+        city: form.city.trim(),
+        postcode: form.postcode.trim(),
+        state: form.state,
+        country: "MY",
+      },
+      shippingMethod: form.shippingMethod,
+      discountCode: form.discountCode.trim() || undefined,
+      // A request, not a price — the database clamps it against the real balance.
+      redeemPoints: form.redeemPoints,
+    });
+  } catch (e) {
+    const msg = (e as Error).message.replace(/^createOrder failed:\s*/, "");
+    // The conditions create_order raises are all safe to show; anything else
+    // is unexpected and gets a neutral message instead of leaking internals.
+    const known = /sold out|left of|not available|cart is empty|email is required|invalid quantity/i;
+    console.error("[checkout] placeOrder failed:", msg);
+    return { error: known.test(msg) ? msg : "Something went wrong placing your order. Please try again." };
+  }
 
   // Order-received email (no-op until Resend is configured).
   await sendOrderReceivedEmail(order.reference, email).catch(() => {});
