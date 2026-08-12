@@ -57,12 +57,31 @@ export type WebhookResult = {
   raw?: unknown;
 };
 
+/*
+  The result of asking the gateway directly what happened to a bill.
+
+  `status: "unknown"` is load-bearing. LeanX's status endpoint is flaky and
+  answers 404 for bills that exist; treating a failed lookup as "failed" would
+  cancel paid orders. Only an explicit verdict may move an order.
+*/
+export type PaymentStatus = {
+  status: "completed" | "processing" | "failed" | "cancelled" | "refunded" | "unknown";
+  amountSen?: number;
+  raw?: unknown;
+};
+
 export interface PaymentProvider {
   readonly name: string;
   /** Active FPX banks + e-wallets for the shopper to choose. */
   listPaymentServices(): Promise<{ fpx: PaymentService[]; ewallet: PaymentService[] }>;
   /** Create a hosted-payment session for an order + chosen service. */
   createCheckout(req: CheckoutRequest): Promise<CheckoutSession>;
-  /** Verify a webhook request (HMAC over the raw body) and extract the outcome. */
+  /** Verify a webhook request (JWT envelope or HMAC header) and extract the outcome. */
   verifyWebhook(request: Request): Promise<WebhookResult>;
+  /*
+    Pull a bill's status. Needed because callbacks fire on SUCCESS ONLY —
+    a cancelled or failed bill is never pushed, so without this an abandoned
+    checkout stays pending forever.
+  */
+  checkStatus(billNo: string): Promise<PaymentStatus>;
 }

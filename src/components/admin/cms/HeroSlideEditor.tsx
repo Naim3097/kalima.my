@@ -151,7 +151,7 @@ export function HeroSlideEditor({ slide }: Props) {
               id="hero-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="The Raya edit"
+              placeholder="New Arrivals"
             />
           </div>
 
@@ -177,7 +177,7 @@ export function HeroSlideEditor({ slide }: Props) {
                 id="hero-image"
                 value={image}
                 onChange={(e) => setImage(e.target.value)}
-                placeholder="/products/maya-chiffon.jpg"
+                placeholder="/products/ruwa-caftan.jpg"
               />
             </div>
             <div className="space-y-2">
@@ -213,7 +213,7 @@ export function HeroSlideEditor({ slide }: Props) {
                 id="hero-phref"
                 value={primaryHref}
                 onChange={(e) => setPrimaryHref(e.target.value)}
-                placeholder="/collections/raya"
+                placeholder="/collections/new-arrivals"
               />
             </div>
           </div>
