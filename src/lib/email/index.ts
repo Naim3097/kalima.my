@@ -2,7 +2,7 @@ import "server-only";
 
 import { Resend } from "resend";
 import { formatRM } from "@/lib/format";
-import { getOrderByReference } from "@/lib/commerce";
+import { getOrderByReference, type OrderAddress } from "@/lib/commerce";
 
 /*
   Transactional email via Resend. Null-until-configured: with no RESEND_API_KEY
@@ -94,6 +94,62 @@ function itemsTable(items: { product_name: string; color_name: string; size: str
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid #e3d7c6;margin:16px 0">${rows}</table>`;
 }
 
+/*
+  Every line between the items and the amount charged.
+
+  Showing only a total is how a customer ends up reading RM59 of items against
+  RM69 paid, with the shipping never named — which reads as an overcharge and
+  arrives as a support message. Rows that are zero are omitted rather than shown
+  as RM0.00, except shipping: "FREE" is worth saying out loud.
+*/
+function totalsTable(
+  order: {
+    subtotal_sen: number;
+    discount_sen: number;
+    shipping_sen: number;
+    total_sen: number;
+  },
+  label: string,
+): string {
+  const cell = "font-family:Helvetica,Arial,sans-serif;font-size:13px;padding:3px 0";
+  const row = (name: string, value: string, colour = "#686c8f") =>
+    `<tr><td style="${cell};color:${colour}">${name}</td>
+         <td align="right" style="${cell};color:${colour}">${value}</td></tr>`;
+
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+            style="border-top:1px solid #e3d7c6;padding-top:8px">
+    ${row("Subtotal", formatRM(order.subtotal_sen / 100))}
+    ${order.discount_sen > 0 ? row("Discount", `−${formatRM(order.discount_sen / 100)}`, "#2f7a52") : ""}
+    ${row("Shipping", order.shipping_sen === 0 ? "FREE" : formatRM(order.shipping_sen / 100))}
+    <tr><td style="${cell};color:#383c61;border-top:1px solid #e3d7c6;padding-top:8px">
+          <strong>${label}</strong></td>
+        <td align="right" style="${cell};color:#383c61;border-top:1px solid #e3d7c6;padding-top:8px">
+          <strong>${formatRM(order.total_sen / 100)}</strong></td></tr>
+  </table>`;
+}
+
+/*
+  The delivery address, so a customer can catch a wrong one while it is still
+  cheap to fix — before the parcel is packed rather than after it is lost.
+*/
+function addressBlock(address: OrderAddress | null): string {
+  if (!address) return "";
+  const lines = [
+    address.recipient,
+    address.line1,
+    address.line2,
+    `${address.postcode} ${address.city}`.trim(),
+    address.state,
+    address.country,
+    address.phone,
+  ].filter(Boolean);
+
+  return `<p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.7;color:#383c61;margin:22px 0 0">
+      <span style="font-size:10px;letter-spacing:2px;color:#9b9cb0;text-transform:uppercase">Delivering to</span><br>
+      ${lines.join("<br>")}
+    </p>`;
+}
+
 /* ---- public API --------------------------------------------------------- */
 
 /** "We've received your order" — sent when a pending order is placed. */
@@ -107,9 +163,8 @@ export async function sendOrderReceivedEmail(reference: string, email: string): 
       We'll email again the moment your payment is confirmed.
     </p>
     ${itemsTable(order.items)}
-    <table role="presentation" width="100%" style="font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#383c61">
-      <tr><td>Total</td><td align="right"><strong>${formatRM(order.total_sen / 100)}</strong></td></tr>
-    </table>`;
+    ${totalsTable(order, "Total")}
+    ${addressBlock(order.shipping_address)}`;
   await send(email, `Order received — ${reference}`, shell("Order received", body));
 }
 
@@ -124,9 +179,11 @@ export async function sendPaymentConfirmedEmail(reference: string, email: string
       We'll be in touch with tracking once it ships.
     </p>
     ${itemsTable(order.items)}
-    <table role="presentation" width="100%" style="font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#383c61">
-      <tr><td>Total paid</td><td align="right"><strong>${formatRM(order.total_sen / 100)}</strong></td></tr>
-    </table>`;
+    ${totalsTable(order, "Total paid")}
+    ${addressBlock(order.shipping_address)}
+    <p style="font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#9b9cb0;margin-top:22px">
+      Wrong address? Reply to this email straight away and we'll change it before the parcel goes out.
+    </p>`;
   await send(email, `Payment confirmed — ${reference}`, shell("Payment confirmed", body));
 }
 
@@ -161,26 +218,15 @@ export async function sendNewOrderNotification(reference: string, email: string)
     return;
   }
 
-  const a = order.shipping_address;
-  const address = a
-    ? [a.recipient, a.line1, a.line2, `${a.postcode} ${a.city}`, a.state, a.phone]
-        .filter(Boolean)
-        .join("<br>")
-    : "No address on the order";
-
   const body = `
     <p style="font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#686c8f">
       <strong style="color:#383c61">${order.reference}</strong> has been paid —
       ${formatRM(order.total_sen / 100)}.
     </p>
     ${itemsTable(order.items)}
-    <table role="presentation" width="100%" style="font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#383c61">
-      <tr><td>Total paid</td><td align="right"><strong>${formatRM(order.total_sen / 100)}</strong></td></tr>
-    </table>
-    <p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.7;color:#383c61;margin-top:20px">
-      <strong>Ship to</strong><br>${address}
-    </p>
-    <p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#686c8f">
+    ${totalsTable(order, "Total paid")}
+    ${addressBlock(order.shipping_address)}
+    <p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#686c8f;margin-top:14px">
       ${order.email}
     </p>`;
 
