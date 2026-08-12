@@ -19,3 +19,6 @@ supabase/.temp
 # Product videos — 30MB of .mp4 the storefront never loads. The photography
 # beside them is versioned; the clips stay local (upload to Storage if needed).
 public/products/**/*.mp4
+
+# Locally-installed agent templates (per-developer, not shared)
+.claude/agents/

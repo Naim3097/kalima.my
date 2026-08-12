@@ -26,8 +26,19 @@ export async function subscribeToNewsletter(
   const db = createAdminClient();
   if (!db) return { error: "Subscriptions are not configured yet." };
 
+  /*
+    Note the ABSENCE of `unsubscribed_at: null`.
+
+    This action is unauthenticated — anyone can POST any address — so it must
+    not be able to overturn someone's opt-out. Setting unsubscribed_at back to
+    null on conflict let an attacker re-subscribe a person who had explicitly
+    said no, which is precisely the PDPA outcome the suppression record exists
+    to prevent. A brand-new row gets null from the column default; an existing
+    unsubscribed row keeps its timestamp untouched. A genuine re-subscribe is a
+    separate, confirmed flow, not a side effect of a form anyone can submit.
+  */
   const { error } = await db.from("newsletter_subscribers").upsert(
-    { email: clean, source, consent_at: new Date().toISOString(), unsubscribed_at: null },
+    { email: clean, source, consent_at: new Date().toISOString() },
     { onConflict: "email" },
   );
   if (error) return { error: "Could not subscribe right now. Please try again." };

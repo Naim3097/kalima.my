@@ -120,6 +120,7 @@ export async function placeOrder(
   const jar = await cookies();
   jar.set("kalima_order", JSON.stringify({ reference: order.reference, email }), {
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60,
@@ -144,12 +145,27 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
   const raw = jar.get("kalima_order")?.value;
   if (!raw) return { error: "Your checkout session expired. Please try again." };
 
-  const { reference, email } = JSON.parse(raw) as { reference: string; email: string };
+  let reference: string, email: string;
+  try {
+    ({ reference, email } = JSON.parse(raw) as { reference: string; email: string });
+  } catch {
+    return { error: "Your checkout session expired. Please try again." };
+  }
   const order = await getOrderForCheckout(reference, email);
   if (!order) return { error: "Order not found." };
   if (order.status !== "pending") return { error: "This order is no longer awaiting payment." };
 
-  const origin = (await headersOrigin()) || "http://localhost:3000";
+  /*
+    No localhost fallback here. In production headersOrigin() returns null when
+    NEXT_PUBLIC_SITE_URL is unset, and minting a bill with a localhost — or a
+    forged-Host — callback is worse than refusing: the customer would pay and
+    the callback would never reach us. Fail closed and tell them to retry.
+  */
+  const origin = await headersOrigin();
+  if (!origin) {
+    console.error("[payments] no callback origin — NEXT_PUBLIC_SITE_URL unset in production");
+    return { error: "Payment is temporarily unavailable. Please try again shortly." };
+  }
 
   const session = await provider.createCheckout({
     reference: order.reference,
@@ -179,6 +195,16 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
 async function headersOrigin(): Promise<string | null> {
   const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "");
   if (configured) return configured;
+
+  /*
+    In production the origin must be configured, not sniffed from the request.
+    x-forwarded-host and host are attacker-controllable, and this value becomes
+    the gateway callback and redirect URLs — a forged Host header would send a
+    bill's callback to someone else's server. Falling back to the request host
+    is a dev-only convenience; refuse it once deployed rather than mint a bill
+    pointing somewhere unverifiable.
+  */
+  if (process.env.NODE_ENV === "production") return null;
 
   const { headers } = await import("next/headers");
   const h = await headers();

@@ -321,12 +321,25 @@ export const leanx: PaymentProvider = {
     }
 
     /*
-      The JWT claims carry LeanX's own invoice_no, and `order_id` arrives as the
-      literal string "None" when unset — so the order is resolved from the bill
-      number we stored at creation, never from a ref the payload chooses.
+      Order resolution is anchored on the bill number we stored at creation,
+      never on a ref the payload can choose — that is the primary key and it is
+      not attacker-nameable.
+
+      Our own reference is carried too, as a secondary check, but it is nested:
+      a real captured callback (order KLM-10287) put it at
+      `client_data.invoice_ref`, with the top-level `order_id` being the literal
+      string "None". Reading only the top level made that fallback dead, leaving
+      billNo the single point of failure — if it ever failed to match, the
+      webhook 200s with "order not found" and the order silently never settles.
+      So we look inside client_data too.
     */
-    const billNo = String(body.bill_no ?? body.invoice_no ?? body.transaction_id ?? "");
-    const refRaw = String(body.invoice_ref ?? body.merchant_invoice_no ?? body.order_id ?? "");
+    const clientData = (body.client_data ?? {}) as Record<string, unknown>;
+    const billNo = String(
+      body.bill_no ?? body.invoice_no ?? clientData.merchant_invoice_no ?? body.transaction_id ?? "",
+    );
+    const refRaw = String(
+      body.invoice_ref ?? clientData.invoice_ref ?? body.merchant_invoice_no ?? body.order_id ?? "",
+    );
     const invoiceRef = refRaw && refRaw !== "None" ? refRaw : "";
 
     const rawStatus = String(body.status ?? body.invoice_status ?? "").toLowerCase();

@@ -24,7 +24,12 @@ export default async function ChoosePaymentPage() {
   const raw = jar.get("kalima_order")?.value;
   if (!raw) redirect("/checkout");
 
-  const { reference, email } = JSON.parse(raw) as { reference: string; email: string };
+  let reference: string, email: string;
+  try {
+    ({ reference, email } = JSON.parse(raw) as { reference: string; email: string });
+  } catch {
+    redirect("/checkout"); // a corrupt cookie is not a crash
+  }
   const order = await getOrderForCheckout(reference, email);
   if (!order) redirect("/checkout");
   if (order.status !== "pending") redirect("/checkout/success");
