@@ -31,7 +31,18 @@ export type Product = {
    * on the seed fallback, which carries no inventory.
    */
   stock?: number;
+  /**
+   * Per-variant units on hand, keyed `${colour}|${size}` (see variantKey).
+   * Lets the product page refuse a sold-out colour+size before the bag, rather
+   * than at the payment step. Undefined on the seed fallback; a missing key is
+   * treated as available so the offline demo still works.
+   */
+  stockByVariant?: Record<string, number>;
 };
+
+/** The key `stockByVariant` is indexed by. One place, so the PDP and the query
+ *  layer cannot disagree about the shape. */
+export const variantKey = (colour: string, size: string) => `${colour}|${size}`;
 
 export const PRODUCTS: Product[] = [
   {
