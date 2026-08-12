@@ -61,6 +61,19 @@ export async function placeOrder(
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return { error: "Enter a valid email address." };
   }
+  /*
+    Phone is required, not optional. The courier needs a number to deliver, and
+    an unreachable parcel comes back at our cost. It was accepted blank before,
+    and the payment adapter quietly substituted a placeholder so bill creation
+    would not fail — which turned a missing number into a silent one.
+
+    Malaysian mobile: 01 followed by 8 or 9 digits, spaces/dashes tolerated.
+    Landlines are deliberately not accepted; couriers text the recipient.
+  */
+  const phoneDigits = form.phone.replace(/\D/g, "");
+  if (!/^01\d{8,9}$/.test(phoneDigits)) {
+    return { error: "Enter a valid Malaysian mobile number, e.g. 012 345 6789." };
+  }
   if (!form.recipient.trim() || !form.line1.trim() || !form.city.trim()) {
     return { error: "Please complete the delivery address." };
   }

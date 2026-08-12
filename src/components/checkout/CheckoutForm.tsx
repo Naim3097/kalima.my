@@ -70,6 +70,37 @@ export default function CheckoutForm({
   });
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  /*
+    Client-side validation, for the shopper's benefit only — placeOrder repeats
+    every one of these checks on the server, which is the actual guard. The
+    point here is to stop the round trip that returns one error at a time:
+    filling a nine-field form, pressing pay, and being told about the postcode,
+    then the phone, then the state, is how a full bag gets abandoned.
+
+    Messages mirror the server's wording so the same problem never gets
+    described two different ways.
+  */
+  const [touched, setTouched] = useState<Partial<Record<keyof typeof form, boolean>>>({});
+  const [submitted, setSubmitted] = useState(false);
+
+  const problems: Partial<Record<keyof typeof form, string>> = {};
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) {
+    problems.email = "Enter a valid email address.";
+  }
+  if (!/^01\d{8,9}$/.test(form.phone.replace(/\D/g, ""))) {
+    problems.phone = "Malaysian mobile, e.g. 012 345 6789.";
+  }
+  if (!form.recipient.trim()) problems.recipient = "Who should we address it to?";
+  if (!form.line1.trim()) problems.line1 = "Street address is required.";
+  if (!form.city.trim()) problems.city = "City is required.";
+  if (!/^\d{5}$/.test(form.postcode.trim())) problems.postcode = "5 digits.";
+
+  /* Shown once a field has been left, or once pay has been pressed — never
+     while someone is still part-way through typing their email. */
+  const showProblem = (k: keyof typeof form) =>
+    (touched[k] || submitted) && problems[k] ? problems[k] : null;
+  const markTouched = (k: keyof typeof form) => () => setTouched((t) => ({ ...t, [k]: true }));
+
   const [code, setCode] = useState("");
   const [discount, setDiscount] = useState<{ code: string; discountSen: number; freeShipping: boolean } | null>(null);
   const [codeMsg, setCodeMsg] = useState<string | null>(null);
@@ -135,6 +166,20 @@ export default function CheckoutForm({
 
   function submit() {
     setError(null);
+    setSubmitted(true);
+
+    /* Nothing leaves the browser until the form is complete — and the first
+       offending field is scrolled to, since on a phone the error may well be
+       above the fold the shopper is looking at. */
+    const first = Object.keys(problems)[0] as keyof typeof form | undefined;
+    if (first) {
+      const el = document.getElementById(`co-${first}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.focus({ preventScroll: true });
+      setError("Please complete the highlighted fields.");
+      return;
+    }
+
     startPlace(async () => {
       const result = await placeOrder(cartRefs, {
         ...form,
@@ -173,12 +218,20 @@ export default function CheckoutForm({
               <div className="sm:col-span-2">
                 <Label htmlFor="co-email" className="sr-only">Email</Label>
                 <Input id="co-email" type="email" placeholder="Email address" className={fieldClass}
-                  value={form.email} onChange={(e) => set("email")(e.target.value)} />
+                  value={form.email} onChange={(e) => set("email")(e.target.value)}
+                  required aria-invalid={!!showProblem("email")} onBlur={markTouched("email")} />
+                {showProblem("email") && (
+                  <p className="mt-1 text-[12px] text-red-700">{showProblem("email")}</p>
+                )}
               </div>
               <div className="sm:col-span-2">
                 <Label htmlFor="co-phone" className="sr-only">Phone</Label>
                 <Input id="co-phone" type="tel" placeholder="Phone / WhatsApp number" className={fieldClass}
-                  value={form.phone} onChange={(e) => set("phone")(e.target.value)} />
+                  value={form.phone} onChange={(e) => set("phone")(e.target.value)}
+                  required aria-invalid={!!showProblem("phone")} onBlur={markTouched("phone")} />
+                {showProblem("phone") && (
+                  <p className="mt-1 text-[12px] text-red-700">{showProblem("phone")}</p>
+                )}
               </div>
             </div>
           </section>
@@ -189,12 +242,20 @@ export default function CheckoutForm({
               <div className="sm:col-span-2">
                 <Label htmlFor="co-recipient" className="sr-only">Recipient name</Label>
                 <Input id="co-recipient" placeholder="Recipient full name" className={fieldClass}
-                  value={form.recipient} onChange={(e) => set("recipient")(e.target.value)} />
+                  value={form.recipient} onChange={(e) => set("recipient")(e.target.value)}
+                  required aria-invalid={!!showProblem("recipient")} onBlur={markTouched("recipient")} />
+                {showProblem("recipient") && (
+                  <p className="mt-1 text-[12px] text-red-700">{showProblem("recipient")}</p>
+                )}
               </div>
               <div className="sm:col-span-2">
                 <Label htmlFor="co-line1" className="sr-only">Address line 1</Label>
                 <Input id="co-line1" placeholder="Address line 1" className={fieldClass}
-                  value={form.line1} onChange={(e) => set("line1")(e.target.value)} />
+                  value={form.line1} onChange={(e) => set("line1")(e.target.value)}
+                  required aria-invalid={!!showProblem("line1")} onBlur={markTouched("line1")} />
+                {showProblem("line1") && (
+                  <p className="mt-1 text-[12px] text-red-700">{showProblem("line1")}</p>
+                )}
               </div>
               <div className="sm:col-span-2">
                 <Label htmlFor="co-line2" className="sr-only">Address line 2</Label>
@@ -204,12 +265,20 @@ export default function CheckoutForm({
               <div>
                 <Label htmlFor="co-city" className="sr-only">City</Label>
                 <Input id="co-city" placeholder="City" className={fieldClass}
-                  value={form.city} onChange={(e) => set("city")(e.target.value)} />
+                  value={form.city} onChange={(e) => set("city")(e.target.value)}
+                  required aria-invalid={!!showProblem("city")} onBlur={markTouched("city")} />
+                {showProblem("city") && (
+                  <p className="mt-1 text-[12px] text-red-700">{showProblem("city")}</p>
+                )}
               </div>
               <div>
                 <Label htmlFor="co-postcode" className="sr-only">Postcode</Label>
                 <Input id="co-postcode" inputMode="numeric" placeholder="Postcode" className={fieldClass}
-                  value={form.postcode} onChange={(e) => set("postcode")(e.target.value)} />
+                  value={form.postcode} onChange={(e) => set("postcode")(e.target.value)}
+                  required aria-invalid={!!showProblem("postcode")} onBlur={markTouched("postcode")} />
+                {showProblem("postcode") && (
+                  <p className="mt-1 text-[12px] text-red-700">{showProblem("postcode")}</p>
+                )}
               </div>
               <div className="sm:col-span-2">
                 <Label htmlFor="co-state" className="sr-only">State</Label>
