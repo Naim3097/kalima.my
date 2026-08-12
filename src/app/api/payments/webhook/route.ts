@@ -6,7 +6,7 @@ import {
   refundOrderFromWebhook,
   resolveWebhookOrder,
 } from "@/lib/commerce";
-import { sendPaymentConfirmedEmail } from "@/lib/email";
+import { sendNewOrderNotification, sendPaymentConfirmedEmail } from "@/lib/email";
 
 /*
   Payment gateway webhook — the ONLY place an order becomes paid (guide §6;
@@ -82,6 +82,8 @@ export async function POST(request: Request) {
   // Side effects exactly once — only on the transition to paid, not on retries.
   if (outcome.status === "paid") {
     await sendPaymentConfirmedEmail(order.reference, order.email).catch(() => {});
+    // The shop needs telling too, or a sale waits until someone opens the admin.
+    await sendNewOrderNotification(order.reference, order.email).catch(() => {});
     // Affiliate commission accrues on a settled sale, not on a placed order.
     await attributeReferral(order.id);
   }
