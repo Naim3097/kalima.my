@@ -302,8 +302,8 @@ export default function CheckoutForm({
           <section>
             <h2 className="label-caps mb-2 !text-[13px]">3 · Payment</h2>
             <p className="border border-navy/15 bg-cream-50 px-4 py-3 text-[13px] leading-relaxed text-navy-400">
-              You&apos;ll be taken to our secure payment page to complete payment (FPX, card
-              or e-wallet). Your order is reserved as soon as you place it.
+              You&apos;ll choose your bank on our secure payment page to complete payment by
+              FPX. Your order is confirmed once payment goes through.
             </p>
           </section>
         </div>
