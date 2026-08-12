@@ -33,10 +33,17 @@ export type DashboardStats = {
 };
 
 /*
-  All figures are computed from *revenue-bearing* orders (status not pending /
-  cancelled). One fetch of the last 30 days drives every card; the 14-day chart
+  All figures are computed from *revenue-bearing* orders — money that arrived
+  and stayed. One fetch of the last 30 days drives every card; the 14-day chart
   and recents are derived from it.
+
+  `pending` is excluded because the money has not arrived: an order sits pending
+  from the moment it is placed until the gateway confirms, and a cancelled or
+  failed payment is never announced, so some of them stay pending forever.
+  `cancelled` and `refunded` are excluded because it left again — counting a
+  refund as revenue reports money the shop gave back.
 */
+const REVENUE_BEARING = ["paid", "fulfilled", "completed"];
 export async function getDashboardStats(): Promise<DashboardStats> {
   const supabase = db();
   const since30 = new Date(Date.now() - 30 * 864e5).toISOString();
@@ -49,7 +56,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
   if (error) throw new Error(`getDashboardStats failed: ${error.message}`);
 
   const rows = data ?? [];
-  const revenue = rows.filter((o) => !["pending", "cancelled"].includes(o.status));
+  const revenue = rows.filter((o) => REVENUE_BEARING.includes(o.status));
 
   const now = Date.now();
   const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
