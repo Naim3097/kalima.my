@@ -44,7 +44,10 @@ const LINKS: { heading: string; items: { label: string; href: string }[] }[] = [
       { label: "About Kalima", href: "/pages/about-kalima" },
       { label: "Our Fabrics", href: "/pages/fabrics" },
       { label: "Stores", href: "/pages/stores" },
-      { label: "Kalima Club", href: "/pages/kalima-club" },
+      /* /kalima-club is the live programme; /pages/kalima-club is a CMS page
+         still saying "launching soon". Point people at the working one. */
+      { label: "Kalima Club", href: "/kalima-club" },
+      { label: "Refer a Friend", href: "/affiliate" },
     ],
   },
 ];
