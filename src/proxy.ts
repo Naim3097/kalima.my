@@ -160,7 +160,15 @@ export const config = {
     /*
       Everything except static assets and image files — those never carry a
       session and would only add latency.
+
+      NOTE: the exclusion is by file EXTENSION, not by the `products/`
+      directory. `/public/products/*.jpg` is still skipped (it ends in .jpg),
+      but the product PAGE route `/products/[slug]` is not — a bare `products/`
+      here silently excluded the pages too, so the auth session refresh AND the
+      maintenance gate never ran on them, leaving the shop half-open while
+      "closed". `brand/` stays because there is no /brand page route to collide
+      with.
     */
-    "/((?!_next/static|_next/image|favicon.ico|brand/|products/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|brand/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif)$).*)",
   ],
 };
