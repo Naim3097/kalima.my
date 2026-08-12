@@ -45,23 +45,46 @@ export default async function CheckoutSuccessPage() {
     );
   }
 
-  let paid = order.status === "paid" || order.status === "fulfilled" || order.status === "completed";
+  /*
+    One of four outcomes drives the whole page — booleans could not express
+    "cancelled", which is how a dead order used to render a success tick.
+
+      paid      — settled, being prepared
+      cancelled — a terminal order (cancelled or refunded); nothing to pay
+      failed    — still unpaid and the gateway won't confirm; offer a retry
+      pending   — placed, waiting on the payment callback
+  */
+  type Outcome = "paid" | "cancelled" | "failed" | "pending";
+  let state: Outcome =
+    order.status === "paid" || order.status === "fulfilled" || order.status === "completed"
+      ? "paid"
+      : order.status === "cancelled" || order.status === "refunded"
+        ? "cancelled"
+        : "pending";
 
   /*
-    The shopper is back from the gateway but the order still reads unpaid. That
-    is either a callback we haven't received yet, or a payment they cancelled —
-    and cancellations are never pushed, so waiting would mean waiting forever.
-    Ask the gateway directly, once, and say something definite either way.
+    Still pending on arrival: either a callback we haven't received yet, or a
+    payment the shopper abandoned — and abandonments are never pushed, so
+    waiting would wait forever. Ask the gateway once and commit to a verdict.
   */
-  let failed = false;
-  if (!paid && (order.status === "pending" || order.status === "awaiting_payment")) {
+  if (state === "pending" && (order.status === "pending" || order.status === "awaiting_payment")) {
     const verdict = await reconcileOrderPayment(order.reference).catch(() => "pending" as const);
-    if (verdict === "paid") paid = true;
-    if (verdict === "failed") failed = true;
+    if (verdict === "paid") state = "paid";
+    else if (verdict === "failed") state = "failed";
   }
 
+  const paid = state === "paid";
   const recipient =
     (order.shipping_address as { recipient?: string } | null)?.recipient?.split(" ")[0] ?? "there";
+
+  const heading =
+    state === "paid"
+      ? `Terima kasih, ${recipient} 🤍`
+      : state === "cancelled"
+        ? "This order was cancelled"
+        : state === "failed"
+          ? "Payment not completed"
+          : "Order received — payment pending";
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-16 text-center">
@@ -69,38 +92,50 @@ export default async function CheckoutSuccessPage() {
 
       <div
         className={`mx-auto flex h-16 w-16 items-center justify-center rounded-full text-2xl ${
-          failed ? "border border-navy/20 bg-cream-50 text-navy" : "bg-navy text-white"
+          paid ? "bg-navy text-white" : "border border-navy/20 bg-cream-50 text-navy"
         }`}
       >
-        {failed ? "!" : "✓"}
+        {paid ? "✓" : state === "cancelled" ? "×" : "!"}
       </div>
-      <h1 className="mt-6 font-display text-4xl text-navy">
-        {failed ? "Payment not completed" : `Terima kasih, ${recipient} 🤍`}
-      </h1>
+      <h1 className="mt-6 font-display text-4xl text-navy">{heading}</h1>
       <p className="mt-3 text-[14px] tracking-wide text-navy-400">
         Order <span className="font-medium text-navy">{order.reference}</span>{" "}
-        {paid
+        {state === "paid"
           ? "is confirmed and being prepared."
-          : failed
-            ? "is still waiting for payment."
-            : "has been received."}
+          : state === "cancelled"
+            ? "was not paid and has been cancelled."
+            : state === "failed"
+              ? "is still waiting for payment."
+              : "is placed — we're waiting for your payment to confirm."}
       </p>
 
-      {failed && (
+      {state === "failed" && (
         <div className="mx-auto mt-6 max-w-md border border-navy/15 bg-cream-50 px-4 py-4">
           <p className="text-[13px] leading-relaxed text-navy-400">
             No confirmation came back from the bank. If you cancelled, you have not been
             charged. Your order is saved — complete payment to confirm it, as stock is
             not held until then.
           </p>
-          {/* The order is still `pending`, so the picker will take it. */}
+          {/* Still `pending`, so the picker will take it. */}
           <Button asChild variant="kalima" size="editorial" className="mt-4">
             <Link href="/checkout/pay">Try payment again</Link>
           </Button>
         </div>
       )}
 
-      {!paid && !failed && (
+      {state === "cancelled" && (
+        <div className="mx-auto mt-6 max-w-md border border-navy/15 bg-cream-50 px-4 py-4">
+          <p className="text-[13px] leading-relaxed text-navy-400">
+            This order was not paid and is now closed. You have not been charged. If you
+            still want these pieces, start a new order any time.
+          </p>
+          <Button asChild variant="kalima" size="editorial" className="mt-4">
+            <Link href="/collections/new-arrivals">Continue shopping</Link>
+          </Button>
+        </div>
+      )}
+
+      {state === "pending" && (
         <p className="mx-auto mt-6 max-w-md border border-navy/15 bg-cream-50 px-4 py-3 text-[13px] leading-relaxed text-navy-400">
           We&apos;ll confirm by email the moment your payment is processed.
         </p>
