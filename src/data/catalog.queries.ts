@@ -58,8 +58,6 @@ const PRODUCT_SELECT = `
   collection_products ( collections ( slug ) )
 `;
 
-/** Collections the app treats as a product's "signature" line. */
-const LINE_SLUGS = ["maya", "amanda", "luna", "raya"] as const;
 
 function mapProduct(row: ProductRow): Product {
   /*
@@ -105,12 +103,6 @@ function mapProduct(row: ProductRow): Product {
     .filter((i) => !i.color_name)
     .sort((a, b) => a.position - b.position)[0]?.url;
 
-  const line = row.collection_products
-    .map((cp) => cp.collections?.slug)
-    .find((slug): slug is (typeof LINE_SLUGS)[number] =>
-      LINE_SLUGS.includes(slug as (typeof LINE_SLUGS)[number]),
-    );
-
   return {
     id: row.id,
     slug: row.slug,
@@ -118,7 +110,6 @@ function mapProduct(row: ProductRow): Product {
     // The database stores sen as an integer; the UI works in ringgit.
     price: row.price_sen / 100,
     category: row.category,
-    collection: line,
     colors,
     sizes,
     fabric: row.fabric ?? "",
@@ -222,8 +213,7 @@ export const fetchCollection = cache(
           ? all.filter((p) => p.bestSeller)
           : slug === "new-arrivals"
             ? all.filter((p) => p.newArrival)
-            : // "signature" — the named lines, excluding the seasonal Raya drop.
-              all.filter((p) => p.collection && p.collection !== "raya");
+            : [];
       return { meta, products };
     }
 

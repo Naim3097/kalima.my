@@ -22,7 +22,7 @@ const LINKS: { heading: string; items: { label: string; href: string }[] }[] = [
       { label: "Women", href: "/collections/women" },
       { label: "Men", href: "/collections/men" },
       { label: "Accessories", href: "/collections/accessories" },
-      { label: "Raya Collection", href: "/collections/raya" },
+      { label: "New Arrivals", href: "/collections/new-arrivals" },
       { label: "Best Sellers", href: "/collections/best-sellers" },
     ],
   },

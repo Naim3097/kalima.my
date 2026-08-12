@@ -11,7 +11,9 @@ export default function BestSellers({ products }: { products: Product[] }) {
 
   return (
     <section className="mx-auto max-w-7xl px-4 py-14">
-      <SectionHeader title="Best Sellers" cta={{ label: "View All", href: "/collections/best-sellers" }} />
+      {/* Promo-facing heading; the pieces shown are still the bestSeller flag,
+          since the catalogue carries no discount price yet. */}
+      <SectionHeader title="On Sale" cta={{ label: "View All", href: "/collections/best-sellers" }} />
       <div className="grid grid-cols-2 gap-x-5 gap-y-10 md:grid-cols-3 lg:grid-cols-5">
         {bestSellers.map((p) => (
           <ProductCard key={p.id} product={p} />

@@ -65,7 +65,7 @@ export const slugify = (s: string) =>
 
 /** A ready-to-fill template for someone starting from scratch. */
 export const CSV_TEMPLATE_ROW = [
-  "maya-chiffon", "Maya Chiffon", "The signature Maya drape.", "Luxury chiffon",
-  "women", "250", "true", "false", "#e7cfc7", "true",
-  "KLM-MAYA-CHIFFON-SAGE-M", "Sage", "#9caf88", "M", "", "350", "12",
+  "ruwa-caftan", "Ruwa Caftan", "Premium satin with a lustrous drape.", "Premium satin",
+  "women", "250", "true", "false", "#7c252b", "true",
+  "KLM-RUWA-CAFTAN-BURGUNDY-S/M", "Burgundy", "#7c252b", "S/M", "", "460", "12",
 ] as const;

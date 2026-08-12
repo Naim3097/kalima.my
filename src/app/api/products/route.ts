@@ -12,7 +12,6 @@ import { fetchProducts } from "@/data/catalog.queries";
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const category = searchParams.get("category");
-  const collection = searchParams.get("collection");
   const bestSeller = searchParams.get("bestSeller");
   const newArrival = searchParams.get("newArrival");
   const q = searchParams.get("q")?.trim().toLowerCase();
@@ -20,7 +19,6 @@ export async function GET(request: NextRequest) {
   let products = await fetchProducts();
 
   if (category) products = products.filter((p) => p.category === category);
-  if (collection) products = products.filter((p) => p.collection === collection);
   if (bestSeller === "true") products = products.filter((p) => p.bestSeller);
   if (newArrival === "true") products = products.filter((p) => p.newArrival);
   if (q) products = products.filter((p) => p.name.toLowerCase().includes(q));

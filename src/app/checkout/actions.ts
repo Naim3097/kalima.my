@@ -153,7 +153,20 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
   redirect(session.redirectUrl);
 }
 
+/*
+  The origin LeanX is told to call back on.
+
+  NEXT_PUBLIC_SITE_URL wins when set, and in production it must be: the request
+  host is whatever URL the shopper happened to arrive on. On a Vercel
+  deployment-specific URL behind Deployment Protection, a callback addressed
+  there meets the SSO wall — the gateway's POST never reaches us and nothing
+  appears in the logs. No rejection, no request, silence, and a paid order that
+  stays pending. Guide §0.6.
+*/
 async function headersOrigin(): Promise<string | null> {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "");
+  if (configured) return configured;
+
   const { headers } = await import("next/headers");
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host");

@@ -102,24 +102,27 @@ export default function Hero({ slides }: { slides: HeroSlide[] }) {
               </div>
             </div>
 
-            {/* Slide navigation — stable, never over the photo */}
-            <div className="mt-14 flex items-center gap-5">
-              <div className="flex gap-2.5">
-                {slides.map((_, i) => (
-                  <button
-                    key={i}
-                    aria-label={`Slide ${i + 1}`}
-                    onClick={() => setIndex(i)}
-                    className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
-                      i === index ? "w-8 bg-navy" : "w-4 bg-navy/20 hover:bg-navy/40"
-                    }`}
-                  />
-                ))}
+            {/* Slide navigation — stable, never over the photo. A lone slide
+                needs no dots and no "01 / 01". */}
+            {slides.length > 1 && (
+              <div className="mt-14 flex items-center gap-5">
+                <div className="flex gap-2.5">
+                  {slides.map((_, i) => (
+                    <button
+                      key={i}
+                      aria-label={`Slide ${i + 1}`}
+                      onClick={() => setIndex(i)}
+                      className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
+                        i === index ? "w-8 bg-navy" : "w-4 bg-navy/20 hover:bg-navy/40"
+                      }`}
+                    />
+                  ))}
+                </div>
+                <span className="text-[11px] tracking-[0.25em] text-navy-300">
+                  0{index + 1} / 0{slides.length}
+                </span>
               </div>
-              <span className="text-[11px] tracking-[0.25em] text-navy-300">
-                0{index + 1} / 0{slides.length}
-              </span>
-            </div>
+            )}
           </div>
         </div>
       </div>

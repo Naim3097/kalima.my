@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { cookies } from "next/headers";
 import { formatRM } from "@/lib/format";
-import { getOrderByReference } from "@/lib/commerce";
+import { getOrderByReference, reconcileOrderPayment } from "@/lib/commerce";
 import { Button } from "@/components/ui/button";
 import ClearCart from "@/components/checkout/ClearCart";
 
@@ -45,7 +45,21 @@ export default async function CheckoutSuccessPage() {
     );
   }
 
-  const paid = order.status === "paid" || order.status === "fulfilled" || order.status === "completed";
+  let paid = order.status === "paid" || order.status === "fulfilled" || order.status === "completed";
+
+  /*
+    The shopper is back from the gateway but the order still reads unpaid. That
+    is either a callback we haven't received yet, or a payment they cancelled —
+    and cancellations are never pushed, so waiting would mean waiting forever.
+    Ask the gateway directly, once, and say something definite either way.
+  */
+  let failed = false;
+  if (!paid && (order.status === "pending" || order.status === "awaiting_payment")) {
+    const verdict = await reconcileOrderPayment(order.reference).catch(() => "pending" as const);
+    if (verdict === "paid") paid = true;
+    if (verdict === "failed") failed = true;
+  }
+
   const recipient =
     (order.shipping_address as { recipient?: string } | null)?.recipient?.split(" ")[0] ?? "there";
 
@@ -53,16 +67,34 @@ export default async function CheckoutSuccessPage() {
     <div className="mx-auto max-w-2xl px-4 py-16 text-center">
       <ClearCart />
 
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-navy text-2xl text-white">
-        ✓
+      <div
+        className={`mx-auto flex h-16 w-16 items-center justify-center rounded-full text-2xl ${
+          failed ? "border border-navy/20 bg-cream-50 text-navy" : "bg-navy text-white"
+        }`}
+      >
+        {failed ? "!" : "✓"}
       </div>
-      <h1 className="mt-6 font-display text-4xl text-navy">Terima kasih, {recipient} 🤍</h1>
+      <h1 className="mt-6 font-display text-4xl text-navy">
+        {failed ? "Payment not completed" : `Terima kasih, ${recipient} 🤍`}
+      </h1>
       <p className="mt-3 text-[14px] tracking-wide text-navy-400">
         Order <span className="font-medium text-navy">{order.reference}</span>{" "}
-        {paid ? "is confirmed and being prepared." : "has been received."}
+        {paid
+          ? "is confirmed and being prepared."
+          : failed
+            ? "is still waiting for payment."
+            : "has been received."}
       </p>
 
-      {!paid && (
+      {failed && (
+        <p className="mx-auto mt-6 max-w-md border border-navy/15 bg-cream-50 px-4 py-3 text-[13px] leading-relaxed text-navy-400">
+          No confirmation came back from the bank. If you cancelled, you have not been
+          charged. Your order is saved — you can pay for it from your account, or contact
+          us and we&apos;ll help.
+        </p>
+      )}
+
+      {!paid && !failed && (
         <p className="mx-auto mt-6 max-w-md border border-navy/15 bg-cream-50 px-4 py-3 text-[13px] leading-relaxed text-navy-400">
           We&apos;ll confirm by email the moment your payment is processed. Your items are
           reserved against this order.
