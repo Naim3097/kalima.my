@@ -202,7 +202,9 @@ export async function getOrderByReference(
 export async function markOrderPaid(params: {
   orderId: string;
   provider: string;
-  providerRef: string;
+  /* null when the gateway gave no bill number — never "", which is not null
+     and so would collide under the (provider, provider_ref) unique index. */
+  providerRef: string | null;
   amountSen: number;
   raw?: unknown;
 }): Promise<{ status: string; reference: string }> {
@@ -256,6 +258,16 @@ export async function refundOrderFromWebhook(params: {
 /*
   The order fields the payment step needs, gated by matching email (guest-safe).
   Returns null unless the order exists and belongs to that email.
+
+  This runs on the admin client, which bypasses RLS, so the email match IS the
+  authorization — there is no session behind a guest checkout. It must be an
+  exact, case-insensitive equality, never a pattern match: the email arrives
+  from the kalima_order cookie, and a cookie is just a request header an
+  attacker sets freely. With `ilike`, a value of "%" matched every order, and
+  since references are a public sequential sequence, that turned the pay page
+  into an order-book enumerator (and let an attacker mint a live bill against
+  someone else's pending order). `eq` on lower()'d values takes the pattern
+  metacharacters out of play entirely.
 */
 export async function getOrderForCheckout(
   reference: string,
@@ -269,14 +281,20 @@ export async function getOrderForCheckout(
   status: string;
   shipping_address: OrderAddress | null;
 } | null> {
+  const wanted = email.trim().toLowerCase();
+  if (!wanted) return null;
+
   const { data, error } = await admin()
     .from("orders")
     .select("id, reference, email, phone, total_sen, status, shipping_address")
     .eq("reference", reference)
-    .ilike("email", email)
     .maybeSingle();
   if (error) throw new Error(`getOrderForCheckout failed: ${error.message}`);
-  return data ?? null;
+  if (!data) return null;
+
+  // Compare in the app, so no attacker-supplied pattern ever reaches the query.
+  if (data.email.trim().toLowerCase() !== wanted) return null;
+  return data;
 }
 
 /*

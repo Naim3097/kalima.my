@@ -68,16 +68,45 @@ export async function POST(request: Request) {
 
   // The webhook's amount must match what we charged (never trust its number).
   if (typeof result.amountSen === "number" && result.amountSen !== order.total_sen) {
-    return NextResponse.json({ error: "Amount mismatch" }, { status: 409 });
+    /*
+      Do NOT fulfil — but acknowledge with 200. The payload will never change,
+      so a non-2xx here just makes LeanX retry the same mismatch on its full
+      schedule, forever. The mismatch means the customer was charged an amount
+      that is not their order total (the guide's §0.5 "Fixed Amount" collection
+      setting produces exactly this), so it needs a human, not a retry.
+    */
+    console.error(
+      `[payments] AMOUNT MISMATCH on ${order.reference}: charged ${result.amountSen}, order is ${order.total_sen}. Not fulfilled — needs manual review.`,
+    );
+    return NextResponse.json({ received: true, note: "amount mismatch — held for review" });
   }
 
-  const outcome = await markOrderPaid({
-    orderId: order.id,
-    provider: provider.name,
-    providerRef: result.providerRef ?? "",
-    amountSen: result.amountSen ?? order.total_sen,
-    raw: result.raw,
-  });
+  /*
+    mark_order_paid raises rather than returns on two reachable, NON-transient
+    conditions: the order was cancelled between placement and this callback, or
+    the oversell guard fires. An uncaught throw here becomes a 500, and a 500
+    tells LeanX to retry a call that can never succeed — a permanent storm with
+    the customer already charged. Catch it, log it, and 200 so the retries stop;
+    the money is real and the order needs a person, not another attempt.
+  */
+  let outcome: Awaited<ReturnType<typeof markOrderPaid>>;
+  try {
+    outcome = await markOrderPaid({
+      orderId: order.id,
+      provider: provider.name,
+      // null, not "": the payments unique index is (provider, provider_ref)
+      // WHERE provider_ref IS NOT NULL, so "" would collide across orders.
+      providerRef: result.providerRef || null,
+      amountSen: result.amountSen ?? order.total_sen,
+      raw: result.raw,
+    });
+  } catch (e) {
+    console.error(
+      `[payments] mark_order_paid FAILED for ${order.reference} — customer charged, order NOT settled:`,
+      (e as Error).message,
+    );
+    return NextResponse.json({ received: true, note: "settlement held for review" });
+  }
 
   // Side effects exactly once — only on the transition to paid, not on retries.
   if (outcome.status === "paid") {

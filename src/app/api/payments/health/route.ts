@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { getPaymentProvider } from "@/lib/payments";
+import { getCurrentUser, isStaff } from "@/lib/auth";
 
 /*
   Payment configuration, readable at runtime.
@@ -24,12 +25,18 @@ export async function GET(request: Request) {
     credentials, and is the only way to see the bank list before an order
     exists — the picker needs a placed order, which needs stock.
 
-    It reports the names and ids every shopper sees at checkout anyway. Read the
-    names, not just the count: the guide's §0.1 failure shows up as entries the
-    parser had to drop for having no usable label, so a count far below what the
-    dashboard has enabled is that field-name variance on this account.
+    STAFF ONLY. Each call makes several authenticated requests to LeanX using
+    the merchant credentials, so left open it let an anonymous caller drive the
+    account toward LeanX's rate limits. The plain health check below stays
+    public — it discloses only booleans — but the probe that spends credentials
+    is gated. Read the names, not just the count: the guide's §0.1 failure shows
+    up as entries the parser dropped for having no usable label.
   */
   if (new URL(request.url).searchParams.get("probe") === "services") {
+    const me = await getCurrentUser();
+    if (!isStaff(me?.role)) {
+      return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+    }
     const provider = getPaymentProvider();
     if (!provider) return NextResponse.json({ error: "No provider configured" }, { status: 503 });
     try {
