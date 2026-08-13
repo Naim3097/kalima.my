@@ -89,6 +89,41 @@ export async function listContentPageSlugs(): Promise<string[]> {
   return (data ?? []).map((p) => p.slug);
 }
 
+export type SocialLink = { platform: "instagram" | "tiktok" | "facebook" | "threads"; href: string };
+
+/*
+  The shop's social profiles, in the order they are shown.
+
+  Read through the public client because store_settings is public-readable and
+  the footer renders on every page — going via the admin client would drag the
+  service-role key into a layout. Anything unset is simply absent from the
+  list, so the row shrinks to whatever the shop actually has rather than
+  showing a dead icon.
+*/
+export const getSocialLinks = cache(async (): Promise<SocialLink[]> => {
+  const supabase = createPublicClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("store_settings")
+    .select("social_instagram, social_tiktok, social_facebook, social_threads")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error || !data) return [];
+
+  const order: SocialLink["platform"][] = ["instagram", "tiktok", "facebook", "threads"];
+  const byPlatform: Record<SocialLink["platform"], string | null> = {
+    instagram: data.social_instagram,
+    tiktok: data.social_tiktok,
+    facebook: data.social_facebook,
+    threads: data.social_threads,
+  };
+
+  return order
+    .filter((platform) => Boolean(byPlatform[platform]))
+    .map((platform) => ({ platform, href: byPlatform[platform] as string }));
+});
+
 /** Maps the seed HERO_SLIDES (client shape) to HeroSlide. */
 function seedHero(): HeroSlide[] {
   return HERO_SLIDES.map((s) => ({

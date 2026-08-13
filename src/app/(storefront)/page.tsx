@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { fetchProducts } from "@/data/catalog.queries";
-import { getHeroSlides } from "@/lib/cms";
+import { getHeroSlides, getSocialLinks } from "@/lib/cms";
 import Hero from "@/components/home/Hero";
 import CategoryTiles from "@/components/home/CategoryTiles";
 import CollectionSpotlight from "@/components/home/CollectionSpotlight";
 import BestSellers from "@/components/home/BestSellers";
 import UspStrip from "@/components/home/UspStrip";
 import Lookbook from "@/components/home/Lookbook";
+import Follow from "@/components/home/Follow";
 import Newsletter from "@/components/home/Newsletter";
 
 export const metadata: Metadata = {
@@ -23,7 +24,11 @@ export const metadata: Metadata = {
 export const revalidate = 3600;
 
 export default async function HomePage() {
-  const [products, heroSlides] = await Promise.all([fetchProducts(), getHeroSlides()]);
+  const [products, heroSlides, socialLinks] = await Promise.all([
+    fetchProducts(),
+    getHeroSlides(),
+    getSocialLinks(),
+  ]);
 
   return (
     <>
@@ -33,6 +38,7 @@ export default async function HomePage() {
       <BestSellers products={products} />
       <UspStrip />
       <Lookbook />
+      <Follow links={socialLinks} />
       <Newsletter />
     </>
   );

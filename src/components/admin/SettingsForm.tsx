@@ -26,6 +26,10 @@ export function SettingsForm({ settings }: { settings: StoreSettings }) {
   const [freeShipping, setFreeShipping] = useState(String(settings.freeShippingThresholdSen / 100));
   const [flatShipping, setFlatShipping] = useState(String(settings.flatShippingSen / 100));
   const [taxPercent, setTaxPercent] = useState(String(settings.taxRateBps / 100));
+  const [instagram, setInstagram] = useState(settings.socialInstagram);
+  const [tiktok, setTiktok] = useState(settings.socialTiktok);
+  const [facebook, setFacebook] = useState(settings.socialFacebook);
+  const [threads, setThreads] = useState(settings.socialThreads);
 
   function submit() {
     if (!storeName.trim()) {
@@ -46,6 +50,10 @@ export function SettingsForm({ settings }: { settings: StoreSettings }) {
         freeShippingThresholdSen,
         flatShippingSen,
         taxRateBps,
+        socialInstagram: instagram,
+        socialTiktok: tiktok,
+        socialFacebook: facebook,
+        socialThreads: threads,
       });
       if ("error" in res) {
         toast.error(res.error);
@@ -157,6 +165,37 @@ export function SettingsForm({ settings }: { settings: StoreSettings }) {
           <p className="text-[12px] leading-relaxed tracking-wide text-navy-400 sm:col-span-3">
             Orders at or above the free-shipping threshold ship free; below it, the flat rate applies. Tax
             defaults to 0% (most MY fashion SMEs aren&apos;t SST-registered).
+          </p>
+        </div>
+      </Card>
+
+      <Card>
+        <CardHeader title="Social links" />
+        <div className="grid gap-5 px-5 py-5 sm:grid-cols-2">
+          {(
+            [
+              ["set-instagram", "Instagram", instagram, setInstagram, "https://www.instagram.com/yourhandle"],
+              ["set-tiktok", "TikTok", tiktok, setTiktok, "https://www.tiktok.com/@yourhandle"],
+              ["set-facebook", "Facebook", facebook, setFacebook, "https://www.facebook.com/yourpage"],
+              ["set-threads", "Threads", threads, setThreads, "https://www.threads.com/@yourhandle"],
+            ] as const
+          ).map(([id, label, value, set, placeholder]) => (
+            <div key={id} className="space-y-2">
+              <Label htmlFor={id} className="label-caps text-navy-400">
+                {label}
+              </Label>
+              <Input
+                id={id}
+                type="url"
+                value={value}
+                onChange={(e) => set(e.target.value)}
+                placeholder={placeholder}
+              />
+            </div>
+          ))}
+          <p className="text-[12px] leading-relaxed tracking-wide text-navy-400 sm:col-span-2">
+            Shown as icons on the homepage and in the footer. Paste the full profile URL —
+            leave one empty and its icon is hidden rather than linking nowhere.
           </p>
         </div>
       </Card>

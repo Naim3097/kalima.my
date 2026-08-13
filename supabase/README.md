@@ -16,7 +16,7 @@ design; the last two are open items for Phase 10.
 
 ## What is deployed
 
-**34 migrations**, listed below in applied order. Each file is named
+**41 migrations**, listed below in applied order. Each file is named
 `<applied_version>_<applied_name>.sql` and its contents are the record of what actually
 ran — see commit `3c8b0a5`, which resynced the repo after it had drifted from the
 database. Treat that property as load-bearing: a fresh Supabase built from this
@@ -59,11 +59,23 @@ directory into a throwaway Postgres (see [Testing a migration](#testing-a-migrat
 | `20260803065200_restore_default_function_privileges.sql` |
 | `20260803070000_marketplace_sync.sql` |
 | `20260803074500_claim_sync_jobs.sql` |
+| `20260803084000_unified_inbox.sql` |
+| `20260810140000_report_missing_thread_handle.sql` |
+| `20260812071500_create_order_stock_check.sql` |
+| `20260812074307_cancel_pending_order.sql` |
+| `20260812074410_cancel_pending_order_fix.sql` |
+| `20260813064250_sale_price_size_chart_social.sql` |
+| `20260813071000_grant_social_columns.sql` |
 
 ## Commerce (Phase 2)
 
 - **Money is integer sen**; order/item prices are **snapshots** taken server-side at
   creation, so catalog edits never rewrite order history.
+- **A unit price is `coalesce(v.price_sen, p.sale_price_sen, p.price_sen)`** — a variant
+  override, else the product's sale price, else its list price. `create_order` is the
+  authority; `resolveCartLines` mirrors it only to preview a subtotal. `sale_price_sen`
+  carries a check constraint keeping it **below** `price_sen`, because the storefront
+  strikes the list price through next to it.
 - **Stock lives only on `product_variants.stock_on_hand`**; every change is a row in
   `stock_movements`. Stock is decremented at **payment**, not order creation, so an
   abandoned pending order holds no inventory.

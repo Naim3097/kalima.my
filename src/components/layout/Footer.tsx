@@ -1,6 +1,8 @@
 import Link from "next/link";
 import StaffLink from "@/components/layout/StaffLink";
 import Image from "next/image";
+import SocialLinks from "@/components/brand/SocialLinks";
+import { getSocialLinks } from "@/lib/cms";
 import {
   TruckIcon,
   ReturnIcon,
@@ -56,7 +58,9 @@ const LINKS: { heading: string; items: { label: string; href: string }[] }[] = [
   },
 ];
 
-export default function Footer() {
+export default async function Footer() {
+  const social = await getSocialLinks();
+
   return (
     <footer>
       {/* Trust bar */}
@@ -88,6 +92,12 @@ export default function Footer() {
             <p className="mt-5 max-w-xs text-[13px] leading-relaxed tracking-wide text-white/60">
               Timeless modest luxury — designed in Malaysia for every beautiful journey.
             </p>
+            <SocialLinks
+              links={social}
+              size={18}
+              className="mt-6"
+              itemClassName="border-white/20 text-white/70 hover:border-white hover:text-white"
+            />
           </div>
           {LINKS.map((col) => (
             <div key={col.heading}>

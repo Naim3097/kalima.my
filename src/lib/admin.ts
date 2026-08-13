@@ -254,6 +254,8 @@ export type DiscountRow = {
 export type StoreSettings = {
   storeName: string; storeEmail: string; storePhone: string | null; currency: string;
   freeShippingThresholdSen: number; flatShippingSen: number; taxRateBps: number;
+  /** Storefront profile URLs. Empty string = not set, so the icon is hidden. */
+  socialInstagram: string; socialTiktok: string; socialFacebook: string; socialThreads: string;
 };
 
 export async function getStoreSettings(): Promise<StoreSettings> {
@@ -263,6 +265,8 @@ export async function getStoreSettings(): Promise<StoreSettings> {
     storeName: data.store_name, storeEmail: data.store_email, storePhone: data.store_phone,
     currency: data.currency, freeShippingThresholdSen: data.free_shipping_threshold_sen,
     flatShippingSen: data.flat_shipping_sen, taxRateBps: data.tax_rate_bps,
+    socialInstagram: data.social_instagram ?? "", socialTiktok: data.social_tiktok ?? "",
+    socialFacebook: data.social_facebook ?? "", socialThreads: data.social_threads ?? "",
   };
 }
 

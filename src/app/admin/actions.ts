@@ -1788,14 +1788,45 @@ export async function saveContentPage(input: {
 
 /* ---- Settings ----------------------------------------------------------- */
 
+/*
+  A social link is rendered as an outbound href on every page of the shop, so
+  it has to be an absolute http(s) URL. A bare handle or a "javascript:" string
+  would either 404 against our own domain or be a script sink.
+*/
+function cleanUrl(value: string): string | null | undefined {
+  const raw = value.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 export async function saveSettings(input: {
   storeName: string; storeEmail: string; storePhone: string; currency: string;
   freeShippingThresholdSen: number; flatShippingSen: number; taxRateBps: number;
+  socialInstagram: string; socialTiktok: string; socialFacebook: string; socialThreads: string;
 }): Promise<ActionResult> {
   let db;
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
 
   if (!input.storeName.trim()) return { error: "Store name is required." };
+
+  const socials = {
+    social_instagram: cleanUrl(input.socialInstagram),
+    social_tiktok: cleanUrl(input.socialTiktok),
+    social_facebook: cleanUrl(input.socialFacebook),
+    social_threads: cleanUrl(input.socialThreads),
+  };
+  for (const [key, value] of Object.entries(socials)) {
+    if (value === undefined) {
+      const label = key.replace("social_", "");
+      return { error: `The ${label} link must be a full URL starting with https://` };
+    }
+  }
   if (input.freeShippingThresholdSen < 0 || input.flatShippingSen < 0) {
     return { error: "Shipping amounts can't be negative." };
   }
@@ -1811,6 +1842,7 @@ export async function saveSettings(input: {
     free_shipping_threshold_sen: input.freeShippingThresholdSen,
     flat_shipping_sen: input.flatShippingSen,
     tax_rate_bps: input.taxRateBps,
+    ...(socials as Record<string, string | null>),
   }).eq("id", 1);
 
   if (error) return { error: error.message };
