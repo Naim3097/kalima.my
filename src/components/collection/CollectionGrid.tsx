@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Product } from "@/data/catalog";
+import { effectivePrice, type Product } from "@/data/catalog";
 import ProductCard from "@/components/brand/ProductCard";
 import {
   Select,
@@ -22,8 +22,10 @@ export default function CollectionGrid({ products }: { products: Product[] }) {
 
   const sorted = useMemo(() => {
     const list = [...products];
-    if (sort === "price-asc") list.sort((a, b) => a.price - b.price);
-    if (sort === "price-desc") list.sort((a, b) => b.price - a.price);
+    // Sort on what the shopper pays — a sale item sorted by its struck-through
+    // list price would sit in the wrong place in "Price: Low to High".
+    if (sort === "price-asc") list.sort((a, b) => effectivePrice(a) - effectivePrice(b));
+    if (sort === "price-desc") list.sort((a, b) => effectivePrice(b) - effectivePrice(a));
     return list;
   }, [products, sort]);
 

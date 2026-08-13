@@ -24,7 +24,7 @@ export async function GET() {
 
   const { data, error } = await db
     .from("products")
-    .select("slug, name, description, fabric, category, price_sen, best_seller, new_arrival, tone, published, product_variants(sku, color_name, color_hex, size, price_sen, weight_grams, stock_on_hand, color_position, position)")
+    .select("slug, name, description, fabric, category, price_sen, sale_price_sen, best_seller, new_arrival, tone, published, product_variants(sku, color_name, color_hex, size, price_sen, weight_grams, stock_on_hand, color_position, position)")
     .order("name");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -40,7 +40,9 @@ export async function GET() {
     for (const v of list) {
       rows.push([
         p.slug, p.name, p.description ?? "", p.fabric ?? "", p.category,
-        p.price_sen / 100, p.best_seller, p.new_arrival, p.tone, p.published,
+        p.price_sen / 100,
+        p.sale_price_sen == null ? "" : p.sale_price_sen / 100,
+        p.best_seller, p.new_arrival, p.tone, p.published,
         v?.sku ?? "", v?.color_name ?? "", v?.color_hex ?? "", v?.size ?? "",
         v?.price_sen == null ? "" : v.price_sen / 100,
         v?.weight_grams ?? "", v?.stock_on_hand ?? "",

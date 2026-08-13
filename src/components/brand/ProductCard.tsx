@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import type { Product } from "@/data/catalog";
+import { discountPercent, type Product } from "@/data/catalog";
 import { formatRM } from "@/lib/format";
 import { useWishlist } from "@/stores/wishlist";
 import { useMounted } from "@/hooks/useMounted";
@@ -18,6 +18,7 @@ export default function ProductCard({ product }: { product: Product }) {
   const tone = color?.hex ?? product.tone;
   // Per-colour shot wins; the default product shot only represents colour #1
   const image = color?.image ?? (activeColor === 0 ? product.image : undefined);
+  const off = discountPercent(product);
 
   return (
     <div className="group">
@@ -30,6 +31,11 @@ export default function ProductCard({ product }: { product: Product }) {
             className="aspect-[4/5] w-full transition-transform duration-500 group-hover:scale-[1.02]"
           />
         </Link>
+        {off > 0 && (
+          <span className="label-caps pointer-events-none absolute left-3 top-3 bg-navy px-2 py-1 text-[10px] text-white">
+            {off}% off
+          </span>
+        )}
         <button
           onClick={() => toggle(product.id)}
           aria-label={wished ? "Remove from wishlist" : "Add to wishlist"}
@@ -48,7 +54,16 @@ export default function ProductCard({ product }: { product: Product }) {
         >
           {product.name}
         </Link>
-        <div className="text-[15px] text-navy-400">{formatRM(product.price)}</div>
+        <div className="flex items-baseline gap-2 text-[15px]">
+          {product.salePrice != null ? (
+            <>
+              <span className="text-navy-300 line-through">{formatRM(product.price)}</span>
+              <span className="font-medium text-navy">{formatRM(product.salePrice)}</span>
+            </>
+          ) : (
+            <span className="text-navy-400">{formatRM(product.price)}</span>
+          )}
+        </div>
         <div className="flex items-center gap-1.5 pt-0.5">
           {product.colors.map((c, i) => (
             <button

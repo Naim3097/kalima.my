@@ -83,7 +83,14 @@ export default function SearchOverlay() {
                         />
                         <div>
                           <p className="text-[14px]">{p.name}</p>
-                          <p className="text-[13px] text-navy-400">{formatRM(p.price)}</p>
+                          <p className="flex items-baseline gap-2 text-[13px] text-navy-400">
+                            {p.salePrice != null && (
+                              <span className="text-navy-300 line-through">{formatRM(p.price)}</span>
+                            )}
+                            <span className={p.salePrice != null ? "text-navy" : undefined}>
+                              {formatRM(p.salePrice ?? p.price)}
+                            </span>
+                          </p>
                         </div>
                       </Link>
                     </li>
