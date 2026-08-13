@@ -830,6 +830,19 @@ export async function toggleDiscount(id: string, active: boolean): Promise<Actio
 // slugify lives in @/lib/catalog-csv so the editor and the CSV importer derive
 // slugs identically.
 
+/*
+  A sale price is a promise: the storefront strikes the list price through and
+  shows this instead. So it has to be a real reduction. The same rule is a
+  check constraint on the table — this exists to say it in English before the
+  database says it in Postgres.
+*/
+function checkSalePrice(saleSen: number | null, priceSen: number): string | null {
+  if (saleSen === null) return null;
+  if (!Number.isInteger(saleSen) || saleSen < 0) return "Enter a valid sale price.";
+  if (saleSen >= priceSen) return "The sale price must be below the normal price.";
+  return null;
+}
+
 export type ProductInput = {
   id?: string;
   name: string;
@@ -838,6 +851,8 @@ export type ProductInput = {
   fabric: string;
   category: "women" | "men" | "accessories";
   priceSen: number;
+  /** Null clears the sale. Must be below priceSen — the database enforces it too. */
+  salePriceSen: number | null;
   bestSeller: boolean;
   newArrival: boolean;
   tone: string;
@@ -853,6 +868,8 @@ export async function saveProduct(input: ProductInput): Promise<ActionResult & {
   const slug = slugify(input.slug || name);
   if (!slug) return { error: "Could not derive a slug — check the name." };
   if (input.priceSen < 0) return { error: "Price cannot be negative." };
+  const saleError = checkSalePrice(input.salePriceSen, input.priceSen);
+  if (saleError) return { error: saleError };
 
   const row = {
     name, slug,
@@ -860,6 +877,7 @@ export async function saveProduct(input: ProductInput): Promise<ActionResult & {
     fabric: input.fabric.trim() || null,
     category: input.category,
     price_sen: input.priceSen,
+    sale_price_sen: input.salePriceSen,
     best_seller: input.bestSeller,
     new_arrival: input.newArrival,
     tone: input.tone.trim() || "#383c61",
@@ -1026,7 +1044,11 @@ export async function importCatalogCsv(
   const errors: { row: number; message: string }[] = [];
   type Parsed = {
     row: number; slug: string; name: string; description: string; fabric: string;
-    category: CsvCategory; priceSen: number; bestSeller: boolean; newArrival: boolean;
+    category: CsvCategory; priceSen: number;
+    /* undefined = the file has no sale_price_rm column, so leave any existing
+       sale alone; null = the column is there and blank, meaning "no sale". */
+    salePriceSen: number | null | undefined;
+    bestSeller: boolean; newArrival: boolean;
     tone: string; published: boolean;
     sku: string; colorName: string; colorHex: string; size: string;
     variantPriceSen: number | null; weightGrams: number; stock: number | null;
@@ -1055,6 +1077,24 @@ export async function importCatalogCsv(
       errors.push({ row, message: "price_rm must be a number." });
       return;
     }
+    /*
+      A file exported before sale prices existed has no such column at all.
+      Treating that as "clear the sale" would wipe a live promotion on the
+      first round-trip, so an absent column means "leave it as it is" — only a
+      present-but-blank cell clears.
+    */
+    let salePriceSen: number | null | undefined;
+    if (r.sale_price_rm !== undefined) {
+      salePriceSen = rmToSen(r.sale_price_rm);
+      if (Number.isNaN(salePriceSen)) {
+        errors.push({ row, message: "sale_price_rm must be a number or blank." });
+        return;
+      }
+      if (salePriceSen !== null && salePriceSen >= priceSen) {
+        errors.push({ row, message: "sale_price_rm must be below price_rm." });
+        return;
+      }
+    }
     const variantPriceSen = rmToSen(r.variant_price_rm ?? "");
     if (Number.isNaN(variantPriceSen)) {
       errors.push({ row, message: "variant_price_rm must be a number or blank." });
@@ -1082,7 +1122,7 @@ export async function importCatalogCsv(
 
     parsed.push({
       row, slug, name, description: r.description ?? "", fabric: r.fabric ?? "",
-      category, priceSen, bestSeller: parseBool(r.best_seller ?? "", false),
+      category, priceSen, salePriceSen, bestSeller: parseBool(r.best_seller ?? "", false),
       newArrival: parseBool(r.new_arrival ?? "", false),
       tone: (r.tone ?? "").trim() || "#383c61",
       published: parseBool(r.published ?? "", true),
@@ -1124,6 +1164,8 @@ export async function importCatalogCsv(
       new_arrival: head.newArrival,
       tone: head.tone,
       published: head.published,
+      // Omitted entirely when the file carries no sale_price_rm column.
+      ...(head.salePriceSen !== undefined ? { sale_price_sen: head.salePriceSen } : {}),
     };
 
     const { data: existing } = await db

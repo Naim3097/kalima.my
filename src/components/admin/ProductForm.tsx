@@ -42,6 +42,10 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
   const [fabric, setFabric] = useState(product?.fabric ?? "");
   const [category, setCategory] = useState<Category>(product?.category ?? "women");
   const [price, setPrice] = useState(product ? String(product.priceSen / 100) : "");
+  // Blank = not on sale. Kept as a string so clearing the box clears the sale.
+  const [salePrice, setSalePrice] = useState(
+    product?.salePriceSen != null ? String(product.salePriceSen / 100) : "",
+  );
   const [bestSeller, setBestSeller] = useState(product?.bestSeller ?? false);
   const [newArrival, setNewArrival] = useState(product?.newArrival ?? false);
   const [tone, setTone] = useState(product?.tone ?? "#383c61");
@@ -65,6 +69,20 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
     }
     const priceSen = Math.round(ringgit * 100);
 
+    let salePriceSen: number | null = null;
+    if (salePrice.trim()) {
+      const saleRinggit = Number(salePrice);
+      if (!Number.isFinite(saleRinggit) || saleRinggit < 0) {
+        toast.error("Enter a valid sale price, or leave it empty.");
+        return;
+      }
+      salePriceSen = Math.round(saleRinggit * 100);
+      if (salePriceSen >= priceSen) {
+        toast.error("The sale price must be below the normal price.");
+        return;
+      }
+    }
+
     startTransition(async () => {
       const res = await saveProduct({
         id: product?.id,
@@ -74,6 +92,7 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
         fabric,
         category,
         priceSen,
+        salePriceSen,
         bestSeller,
         newArrival,
         tone,
@@ -138,7 +157,7 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
           />
         </div>
 
-        <div className="grid gap-5 sm:grid-cols-3">
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-2">
             <Label htmlFor="pf-fabric" className="label-caps text-navy-400">
               Fabric
@@ -176,6 +195,25 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
               onChange={(e) => setPrice(e.target.value)}
               placeholder="299.00"
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="pf-sale-price" className="label-caps text-navy-400">
+              Sale price (RM)
+            </Label>
+            <Input
+              id="pf-sale-price"
+              type="number"
+              min={0}
+              step="0.01"
+              value={salePrice}
+              onChange={(e) => setSalePrice(e.target.value)}
+              placeholder="Not on sale"
+            />
+            <p className="text-[11px] tracking-wide text-navy-400">
+              {salePrice.trim() && Number(salePrice) > 0 && Number(price) > Number(salePrice)
+                ? `${Math.round((1 - Number(salePrice) / Number(price)) * 100)}% off — shoppers see RM${price} struck through.`
+                : "Leave empty for no sale."}
+            </p>
           </div>
         </div>
 
