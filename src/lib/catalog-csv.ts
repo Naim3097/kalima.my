@@ -14,6 +14,9 @@ export const CSV_COLUMNS = [
   "fabric",
   "category",
   "price_rm",
+  // Blank = not on sale. An older file with no such column at all leaves any
+  // existing sale untouched — see the importer.
+  "sale_price_rm",
   "best_seller",
   "new_arrival",
   "tone",
@@ -66,6 +69,6 @@ export const slugify = (s: string) =>
 /** A ready-to-fill template for someone starting from scratch. */
 export const CSV_TEMPLATE_ROW = [
   "ruwa-caftan", "Ruwa Caftan", "Premium satin with a lustrous drape.", "Premium satin",
-  "women", "250", "true", "false", "#7c252b", "true",
+  "women", "250", "", "true", "false", "#7c252b", "true",
   "KLM-RUWA-CAFTAN-BURGUNDY-S/M", "Burgundy", "#7c252b", "S/M", "", "460", "12",
 ] as const;

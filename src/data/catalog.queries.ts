@@ -32,6 +32,8 @@ type ProductRow = {
   fabric: string | null;
   category: Product["category"];
   price_sen: number;
+  sale_price_sen: number | null;
+  size_chart_url: string | null;
   best_seller: boolean;
   new_arrival: boolean;
   tone: string;
@@ -52,7 +54,7 @@ type ProductRow = {
 };
 
 const PRODUCT_SELECT = `
-  id, slug, name, description, fabric, category, price_sen,
+  id, slug, name, description, fabric, category, price_sen, sale_price_sen, size_chart_url,
   best_seller, new_arrival, tone,
   product_variants ( color_name, color_hex, size, color_position, position, stock_on_hand ),
   product_images ( url, color_name, position ),
@@ -110,6 +112,8 @@ function mapProduct(row: ProductRow): Product {
     name: row.name,
     // The database stores sen as an integer; the UI works in ringgit.
     price: row.price_sen / 100,
+    salePrice: row.sale_price_sen != null ? row.sale_price_sen / 100 : undefined,
+    sizeChart: row.size_chart_url ?? undefined,
     category: row.category,
     colors,
     sizes,

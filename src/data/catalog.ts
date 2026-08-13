@@ -14,7 +14,16 @@ export type Product = {
   id: string;
   slug: string;
   name: string;
+  /** List price. When salePrice is set this is what gets struck through. */
   price: number;
+  /**
+   * The "now" price, when the product is on sale. Always below `price`, which
+   * the database enforces — so `salePrice != null` alone means "on sale" and
+   * no display has to compare the two to find out.
+   */
+  salePrice?: number;
+  /** Product-level size chart image. No colour scope: one per product. */
+  sizeChart?: string;
   category: "women" | "men" | "accessories";
   colors: ColorOption[];
   sizes: string[];
@@ -43,6 +52,21 @@ export type Product = {
 /** The key `stockByVariant` is indexed by. One place, so the PDP and the query
  *  layer cannot disagree about the shape. */
 export const variantKey = (colour: string, size: string) => `${colour}|${size}`;
+
+/*
+  What the shopper actually pays, and what goes in the bag. Every price the
+  storefront charges against goes through here, so a sale can never be shown
+  on one screen and forgotten on the next. The server re-derives it at order
+  creation regardless — this is display and cart arithmetic, not authority.
+*/
+export const effectivePrice = (p: Pick<Product, "price" | "salePrice">) =>
+  p.salePrice ?? p.price;
+
+/** Whole-percent saving, for the "20% off" badge. */
+export const discountPercent = (p: Pick<Product, "price" | "salePrice">) =>
+  p.salePrice != null && p.price > 0
+    ? Math.round((1 - p.salePrice / p.price) * 100)
+    : 0;
 
 export const PRODUCTS: Product[] = [
   {

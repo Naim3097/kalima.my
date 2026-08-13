@@ -254,6 +254,8 @@ export type DiscountRow = {
 export type StoreSettings = {
   storeName: string; storeEmail: string; storePhone: string | null; currency: string;
   freeShippingThresholdSen: number; flatShippingSen: number; taxRateBps: number;
+  /** Storefront profile URLs. Empty string = not set, so the icon is hidden. */
+  socialInstagram: string; socialTiktok: string; socialFacebook: string; socialThreads: string;
 };
 
 export async function getStoreSettings(): Promise<StoreSettings> {
@@ -263,6 +265,8 @@ export async function getStoreSettings(): Promise<StoreSettings> {
     storeName: data.store_name, storeEmail: data.store_email, storePhone: data.store_phone,
     currency: data.currency, freeShippingThresholdSen: data.free_shipping_threshold_sen,
     flatShippingSen: data.flat_shipping_sen, taxRateBps: data.tax_rate_bps,
+    socialInstagram: data.social_instagram ?? "", socialTiktok: data.social_tiktok ?? "",
+    socialFacebook: data.social_facebook ?? "", socialThreads: data.social_threads ?? "",
   };
 }
 
@@ -356,7 +360,11 @@ export type EditImage = {
 export type ProductForEdit = {
   id: string; slug: string; name: string; description: string | null; fabric: string | null;
   category: "women" | "men" | "accessories"; priceSen: number;
+  /** The "now" price. Null = not on sale; the storefront then shows priceSen plain. */
+  salePriceSen: number | null;
   bestSeller: boolean; newArrival: boolean; tone: string; published: boolean;
+  /** Product-level size chart image — one per product, no colour scope. */
+  sizeChartUrl: string | null;
   variants: EditVariant[];
   images: EditImage[];
 };
@@ -393,9 +401,54 @@ export async function getProductForEdit(slug: string): Promise<ProductForEdit | 
 
   return {
     id: data.id, slug: data.slug, name: data.name, description: data.description, fabric: data.fabric,
-    category: data.category, priceSen: data.price_sen, bestSeller: data.best_seller,
-    newArrival: data.new_arrival, tone: data.tone, published: data.published, variants, images,
+    category: data.category, priceSen: data.price_sen,
+    salePriceSen: (data.sale_price_sen as number | null) ?? null,
+    bestSeller: data.best_seller,
+    newArrival: data.new_arrival, tone: data.tone, published: data.published,
+    sizeChartUrl: (data.size_chart_url as string | null) ?? null,
+    variants, images,
   };
+}
+
+/* ---- Products (list) ---------------------------------------------------- */
+
+export type AdminProductRow = {
+  id: string; slug: string; name: string; category: string;
+  priceSen: number; salePriceSen: number | null;
+  bestSeller: boolean; newArrival: boolean; published: boolean;
+  tone: string; image: string | null;
+  colorCount: number; sizeCount: number; stock: number;
+};
+
+/*
+  The products table for the back office.
+
+  Deliberately NOT fetchProducts(): that is the storefront read model and it
+  filters to published rows, which meant an unpublished product vanished from
+  the only screen that could publish it again. Staff need to see everything
+  they can edit.
+*/
+export async function listProductsForAdmin(): Promise<AdminProductRow[]> {
+  const { data, error } = await db()
+    .from("products")
+    .select("id, slug, name, category, price_sen, sale_price_sen, best_seller, new_arrival, published, tone, product_variants(color_name, size, stock_on_hand), product_images(url, color_name, position)")
+    .order("name");
+  if (error) throw new Error(`listProductsForAdmin failed: ${error.message}`);
+
+  return (data ?? []).map((p) => {
+    const variants = (p.product_variants ?? []) as { color_name: string; size: string; stock_on_hand: number }[];
+    const images = (p.product_images ?? []) as { url: string; color_name: string | null; position: number }[];
+    return {
+      id: p.id, slug: p.slug, name: p.name, category: p.category,
+      priceSen: p.price_sen, salePriceSen: (p.sale_price_sen as number | null) ?? null,
+      bestSeller: p.best_seller, newArrival: p.new_arrival, published: p.published, tone: p.tone,
+      // Same hero rule as the storefront: no colour scope, lowest position.
+      image: images.filter((i) => !i.color_name).sort((a, b) => a.position - b.position)[0]?.url ?? null,
+      colorCount: new Set(variants.map((v) => v.color_name)).size,
+      sizeCount: new Set(variants.map((v) => v.size)).size,
+      stock: variants.reduce((n, v) => n + v.stock_on_hand, 0),
+    };
+  });
 }
 
 export async function listDiscounts(): Promise<DiscountRow[]> {

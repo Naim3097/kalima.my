@@ -830,6 +830,19 @@ export async function toggleDiscount(id: string, active: boolean): Promise<Actio
 // slugify lives in @/lib/catalog-csv so the editor and the CSV importer derive
 // slugs identically.
 
+/*
+  A sale price is a promise: the storefront strikes the list price through and
+  shows this instead. So it has to be a real reduction. The same rule is a
+  check constraint on the table — this exists to say it in English before the
+  database says it in Postgres.
+*/
+function checkSalePrice(saleSen: number | null, priceSen: number): string | null {
+  if (saleSen === null) return null;
+  if (!Number.isInteger(saleSen) || saleSen < 0) return "Enter a valid sale price.";
+  if (saleSen >= priceSen) return "The sale price must be below the normal price.";
+  return null;
+}
+
 export type ProductInput = {
   id?: string;
   name: string;
@@ -838,6 +851,8 @@ export type ProductInput = {
   fabric: string;
   category: "women" | "men" | "accessories";
   priceSen: number;
+  /** Null clears the sale. Must be below priceSen — the database enforces it too. */
+  salePriceSen: number | null;
   bestSeller: boolean;
   newArrival: boolean;
   tone: string;
@@ -853,6 +868,8 @@ export async function saveProduct(input: ProductInput): Promise<ActionResult & {
   const slug = slugify(input.slug || name);
   if (!slug) return { error: "Could not derive a slug — check the name." };
   if (input.priceSen < 0) return { error: "Price cannot be negative." };
+  const saleError = checkSalePrice(input.salePriceSen, input.priceSen);
+  if (saleError) return { error: saleError };
 
   const row = {
     name, slug,
@@ -860,6 +877,7 @@ export async function saveProduct(input: ProductInput): Promise<ActionResult & {
     fabric: input.fabric.trim() || null,
     category: input.category,
     price_sen: input.priceSen,
+    sale_price_sen: input.salePriceSen,
     best_seller: input.bestSeller,
     new_arrival: input.newArrival,
     tone: input.tone.trim() || "#383c61",
@@ -884,6 +902,109 @@ export async function saveProduct(input: ProductInput): Promise<ActionResult & {
 
   revalidateProduct(slug);
   return { ok: true, slug };
+}
+
+/*
+  Bulk edit across selected products.
+
+  One action rather than one per field, because the useful gesture is "these
+  nine pieces, 20% off, published" in a single pass. Anything left undefined is
+  left alone — the patch is sparse, so a bulk publish cannot silently reset a
+  category nobody touched.
+
+  Percentage pricing is computed per product from that product's OWN list
+  price, which is why it cannot be a single UPDATE: a flat "20% off" over rows
+  at different prices is a different number for each. The rows are read first
+  and written individually, and one bad row is reported without abandoning the
+  rest — a constraint violation on one product should not undo eight good
+  edits the staffer can see happening.
+*/
+export type BulkProductPatch = {
+  published?: boolean;
+  bestSeller?: boolean;
+  newArrival?: boolean;
+  category?: "women" | "men" | "accessories";
+  /* Sale: a percentage off each product's list price, one fixed price for all
+     of them, or clear it. */
+  sale?: { kind: "percent"; percent: number } | { kind: "fixed"; sen: number } | { kind: "clear" };
+};
+
+export async function bulkUpdateProducts(
+  ids: string[],
+  patch: BulkProductPatch,
+): Promise<(ActionResult & { updated?: number; failed?: string[] }) | { error: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!ids.length) return { error: "Select at least one product." };
+  if (!Object.keys(patch).length) return { error: "Choose something to change." };
+  if (patch.sale?.kind === "percent") {
+    const pct = patch.sale.percent;
+    if (!Number.isFinite(pct) || pct <= 0 || pct >= 100) {
+      return { error: "The discount must be between 1% and 99%." };
+    }
+  }
+  if (patch.sale?.kind === "fixed" && (!Number.isInteger(patch.sale.sen) || patch.sale.sen < 0)) {
+    return { error: "Enter a valid sale price." };
+  }
+
+  const { data: rows, error: readErr } = await db
+    .from("products").select("id, slug, name, price_sen").in("id", ids);
+  if (readErr) return { error: readErr.message };
+  if (!rows?.length) return { error: "Those products no longer exist." };
+
+  const base: Record<string, unknown> = {};
+  if (patch.published !== undefined) base.published = patch.published;
+  if (patch.bestSeller !== undefined) base.best_seller = patch.bestSeller;
+  if (patch.newArrival !== undefined) base.new_arrival = patch.newArrival;
+  if (patch.category !== undefined) base.category = patch.category;
+
+  let updated = 0;
+  const failed: string[] = [];
+
+  for (const row of rows) {
+    const values = { ...base };
+
+    if (patch.sale) {
+      if (patch.sale.kind === "clear") {
+        values.sale_price_sen = null;
+      } else {
+        const priceSen = row.price_sen as number;
+        const sen = patch.sale.kind === "percent"
+          ? Math.round((priceSen * (100 - patch.sale.percent)) / 100)
+          : patch.sale.sen;
+        const problem = checkSalePrice(sen, priceSen);
+        if (problem) {
+          // Naming the product matters: "one failed" is useless in a bulk edit.
+          failed.push(`${row.name}: ${problem.toLowerCase()}`);
+          continue;
+        }
+        values.sale_price_sen = sen;
+      }
+    }
+
+    const { error } = await db.from("products").update(values).eq("id", row.id);
+    if (error) failed.push(`${row.name}: ${error.message}`);
+    else {
+      updated += 1;
+      revalidatePath(`/products/${row.slug}`);
+      revalidatePath(`/admin/products/${row.slug}`);
+    }
+  }
+
+  if (updated) {
+    await logAudit(db, {
+      action: "product.bulk_updated",
+      entityType: "product",
+      entityId: null,
+      summary: `${updated} product(s) bulk updated (${Object.keys(patch).join(", ")})`,
+      meta: { ids, patch, failed },
+    });
+    revalidateProduct();
+  }
+
+  if (!updated) return { error: failed[0] ?? "Nothing was changed." };
+  return { ok: true, updated, failed };
 }
 
 export async function addVariant(input: {
@@ -1026,7 +1147,11 @@ export async function importCatalogCsv(
   const errors: { row: number; message: string }[] = [];
   type Parsed = {
     row: number; slug: string; name: string; description: string; fabric: string;
-    category: CsvCategory; priceSen: number; bestSeller: boolean; newArrival: boolean;
+    category: CsvCategory; priceSen: number;
+    /* undefined = the file has no sale_price_rm column, so leave any existing
+       sale alone; null = the column is there and blank, meaning "no sale". */
+    salePriceSen: number | null | undefined;
+    bestSeller: boolean; newArrival: boolean;
     tone: string; published: boolean;
     sku: string; colorName: string; colorHex: string; size: string;
     variantPriceSen: number | null; weightGrams: number; stock: number | null;
@@ -1055,6 +1180,24 @@ export async function importCatalogCsv(
       errors.push({ row, message: "price_rm must be a number." });
       return;
     }
+    /*
+      A file exported before sale prices existed has no such column at all.
+      Treating that as "clear the sale" would wipe a live promotion on the
+      first round-trip, so an absent column means "leave it as it is" — only a
+      present-but-blank cell clears.
+    */
+    let salePriceSen: number | null | undefined;
+    if (r.sale_price_rm !== undefined) {
+      salePriceSen = rmToSen(r.sale_price_rm);
+      if (Number.isNaN(salePriceSen)) {
+        errors.push({ row, message: "sale_price_rm must be a number or blank." });
+        return;
+      }
+      if (salePriceSen !== null && salePriceSen >= priceSen) {
+        errors.push({ row, message: "sale_price_rm must be below price_rm." });
+        return;
+      }
+    }
     const variantPriceSen = rmToSen(r.variant_price_rm ?? "");
     if (Number.isNaN(variantPriceSen)) {
       errors.push({ row, message: "variant_price_rm must be a number or blank." });
@@ -1082,7 +1225,7 @@ export async function importCatalogCsv(
 
     parsed.push({
       row, slug, name, description: r.description ?? "", fabric: r.fabric ?? "",
-      category, priceSen, bestSeller: parseBool(r.best_seller ?? "", false),
+      category, priceSen, salePriceSen, bestSeller: parseBool(r.best_seller ?? "", false),
       newArrival: parseBool(r.new_arrival ?? "", false),
       tone: (r.tone ?? "").trim() || "#383c61",
       published: parseBool(r.published ?? "", true),
@@ -1124,6 +1267,8 @@ export async function importCatalogCsv(
       new_arrival: head.newArrival,
       tone: head.tone,
       published: head.published,
+      // Omitted entirely when the file carries no sale_price_rm column.
+      ...(head.salePriceSen !== undefined ? { sale_price_sen: head.salePriceSen } : {}),
     };
 
     const { data: existing } = await db
@@ -1346,6 +1491,52 @@ export async function updateProductImage(input: {
   return { ok: true };
 }
 
+/*
+  Repoints an existing image row at a newly uploaded object — the second half
+  of re-cropping a photo that is already live.
+
+  It edits the row in place rather than deleting and re-adding, so the image
+  keeps its position, alt text and colour scope. Re-adding would send a
+  re-cropped hero shot to the back of the queue and quietly promote a different
+  photo to the PLP.
+*/
+export async function replaceProductImage(input: {
+  imageId: string; productSlug: string; path: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: row, error: readErr } = await db
+    .from("product_images").select("storage_path").eq("id", input.imageId).maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!row) return { error: "That image no longer exists." };
+
+  const { data: pub } = db.storage.from(IMAGE_BUCKET).getPublicUrl(input.path);
+  if (!pub?.publicUrl) return { error: "Could not resolve the uploaded image." };
+
+  const { error } = await db
+    .from("product_images")
+    .update({ url: pub.publicUrl, storage_path: input.path })
+    .eq("id", input.imageId);
+  if (error) return { error: error.message };
+
+  // Only now is the old file unreferenced. Best-effort — a stranded object is
+  // cheaper than a row pointing at a file that has been deleted.
+  const old = row.storage_path as string | null;
+  if (old && old !== input.path) {
+    await db.storage.from(IMAGE_BUCKET).remove([old]).catch(() => {});
+  }
+
+  await logAudit(db, {
+    action: "image.replaced", entityType: "product", entityId: input.productSlug,
+    summary: `Image re-cropped on ${input.productSlug}`,
+    meta: { imageId: input.imageId, path: input.path, replaced: old },
+  });
+
+  revalidateProduct(input.productSlug);
+  return { ok: true };
+}
+
 /* Removes the row and, when it came from Storage, the underlying file. */
 export async function deleteProductImage(
   imageId: string, productSlug: string,
@@ -1396,6 +1587,75 @@ export async function reorderProductImages(
   await logAudit(db, {
     action: "image.reordered", entityType: "product", entityId: productSlug,
     summary: `Image order changed on ${productSlug}`, meta: { count: orderedIds.length },
+  });
+
+  revalidateProduct(productSlug);
+  return { ok: true };
+}
+
+/* ---- Size chart --------------------------------------------------------- */
+
+/*
+  The product's size chart. One per product, no colour scope, and it lives on
+  the product row rather than in product_images — see the migration note. It
+  shares the product-images bucket and the same signed-upload path, so there is
+  one storage story rather than two.
+*/
+export async function setProductSizeChart(input: {
+  productId: string; productSlug: string; path: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: pub } = db.storage.from(IMAGE_BUCKET).getPublicUrl(input.path);
+  if (!pub?.publicUrl) return { error: "Could not resolve the uploaded image." };
+
+  // Read the outgoing chart first so its file can be cleaned up afterwards.
+  const { data: row } = await db
+    .from("products").select("size_chart_path").eq("id", input.productId).maybeSingle();
+
+  const { error } = await db
+    .from("products")
+    .update({ size_chart_url: pub.publicUrl, size_chart_path: input.path })
+    .eq("id", input.productId);
+  if (error) return { error: error.message };
+
+  const old = row?.size_chart_path as string | null | undefined;
+  if (old && old !== input.path) {
+    await db.storage.from(IMAGE_BUCKET).remove([old]).catch(() => {});
+  }
+
+  await logAudit(db, {
+    action: "size_chart.set", entityType: "product", entityId: input.productSlug,
+    summary: `Size chart ${old ? "replaced" : "added"} on ${input.productSlug}`,
+    meta: { path: input.path },
+  });
+
+  revalidateProduct(input.productSlug);
+  return { ok: true };
+}
+
+export async function clearProductSizeChart(
+  productId: string, productSlug: string,
+): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: row } = await db
+    .from("products").select("size_chart_path").eq("id", productId).maybeSingle();
+
+  const { error } = await db
+    .from("products")
+    .update({ size_chart_url: null, size_chart_path: null })
+    .eq("id", productId);
+  if (error) return { error: error.message };
+
+  const path = row?.size_chart_path as string | null | undefined;
+  if (path) await db.storage.from(IMAGE_BUCKET).remove([path]).catch(() => {});
+
+  await logAudit(db, {
+    action: "size_chart.cleared", entityType: "product", entityId: productSlug,
+    summary: `Size chart removed from ${productSlug}`, meta: { path },
   });
 
   revalidateProduct(productSlug);
@@ -1528,14 +1788,45 @@ export async function saveContentPage(input: {
 
 /* ---- Settings ----------------------------------------------------------- */
 
+/*
+  A social link is rendered as an outbound href on every page of the shop, so
+  it has to be an absolute http(s) URL. A bare handle or a "javascript:" string
+  would either 404 against our own domain or be a script sink.
+*/
+function cleanUrl(value: string): string | null | undefined {
+  const raw = value.trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
 export async function saveSettings(input: {
   storeName: string; storeEmail: string; storePhone: string; currency: string;
   freeShippingThresholdSen: number; flatShippingSen: number; taxRateBps: number;
+  socialInstagram: string; socialTiktok: string; socialFacebook: string; socialThreads: string;
 }): Promise<ActionResult> {
   let db;
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
 
   if (!input.storeName.trim()) return { error: "Store name is required." };
+
+  const socials = {
+    social_instagram: cleanUrl(input.socialInstagram),
+    social_tiktok: cleanUrl(input.socialTiktok),
+    social_facebook: cleanUrl(input.socialFacebook),
+    social_threads: cleanUrl(input.socialThreads),
+  };
+  for (const [key, value] of Object.entries(socials)) {
+    if (value === undefined) {
+      const label = key.replace("social_", "");
+      return { error: `The ${label} link must be a full URL starting with https://` };
+    }
+  }
   if (input.freeShippingThresholdSen < 0 || input.flatShippingSen < 0) {
     return { error: "Shipping amounts can't be negative." };
   }
@@ -1551,6 +1842,7 @@ export async function saveSettings(input: {
     free_shipping_threshold_sen: input.freeShippingThresholdSen,
     flat_shipping_sen: input.flatShippingSen,
     tax_rate_bps: input.taxRateBps,
+    ...(socials as Record<string, string | null>),
   }).eq("id", 1);
 
   if (error) return { error: error.message };

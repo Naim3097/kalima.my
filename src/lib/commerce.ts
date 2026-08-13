@@ -33,7 +33,7 @@ export async function resolveCartLines(
   for (const ref of refs) {
     const { data, error } = await supabase
       .from("product_variants")
-      .select("id, price_sen, products!inner(slug, published, price_sen)")
+      .select("id, price_sen, products!inner(slug, published, price_sen, sale_price_sen)")
       .eq("products.slug", ref.slug)
       .eq("products.published", true)
       .eq("color_name", ref.color)
@@ -45,9 +45,13 @@ export async function resolveCartLines(
       missing.push(ref);
       continue;
     }
-    // Variant override, else product base price — the same rule create_order uses.
-    const product = data.products as unknown as { price_sen: number };
-    const unit = data.price_sen ?? product.price_sen;
+    /*
+      Variant override, else the product's sale price, else its list price —
+      the same coalesce create_order uses. This subtotal is only ever a preview
+      (shipping estimate, discount validation); create_order re-derives it.
+    */
+    const product = data.products as unknown as { price_sen: number; sale_price_sen: number | null };
+    const unit = data.price_sen ?? product.sale_price_sen ?? product.price_sen;
     subtotalSen += unit * ref.qty;
     lines.push({ variant_id: data.id, qty: ref.qty });
   }

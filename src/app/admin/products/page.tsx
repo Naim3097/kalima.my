@@ -1,11 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CatalogTransfer } from "@/components/admin/CatalogTransfer";
-import { Card, CardHeader, Pill, Table, Td, Tr } from "@/components/admin/ui";
-import ProductImage from "@/components/brand/ProductImage";
+import { ProductsTable } from "@/components/admin/ProductsTable";
 import { Button } from "@/components/ui/button";
-import { fetchProducts } from "@/data/catalog.queries";
-import { formatRM } from "@/lib/format";
+import { listProductsForAdmin } from "@/lib/admin";
 
 export const metadata: Metadata = {
   title: "Products · Admin",
@@ -15,10 +13,15 @@ export const metadata: Metadata = {
 /*
   Server Component. Catalog and stock come from Supabase — stock is the sum of
   stock_on_hand across the product's variants, so the "low" flag reflects real
-  inventory. Each row links into the product editor.
+  inventory. Each row links into the product editor, and rows can be selected
+  for a bulk edit (see ProductsTable).
+
+  Reads listProductsForAdmin rather than the storefront's fetchProducts, so
+  unpublished drafts appear here — this is the only screen that can publish
+  them again.
 */
 export default async function AdminProductsPage() {
-  const products = await fetchProducts();
+  const products = await listProductsForAdmin();
 
   return (
     <div className="space-y-6">
@@ -36,59 +39,7 @@ export default async function AdminProductsPage() {
 
       <CatalogTransfer />
 
-      <Card>
-        <CardHeader title={`${products.length} products`} />
-        <Table head={["Product", "Price", "Variants", "Stock", "Status", ""]}>
-          {products.map((p) => {
-            const stock = p.stock ?? 0;
-            return (
-              <Tr key={p.id}>
-                <Td>
-                  <Link href={`/admin/products/${p.slug}`} className="flex items-center gap-3 group">
-                    {p.image ? (
-                      <ProductImage
-                        image={p.image}
-                        tone={p.tone}
-                        alt=""
-                        className="h-12 w-10 shrink-0"
-                        position="center top"
-                        sizes="40px"
-                      />
-                    ) : (
-                      <div className="h-12 w-10" style={{ background: p.tone }} />
-                    )}
-                    <div>
-                      <p className="font-medium group-hover:underline">{p.name}</p>
-                      <p className="text-[11px] uppercase tracking-wider text-navy-300">
-                        {p.category}
-                      </p>
-                    </div>
-                  </Link>
-                </Td>
-                <Td>{formatRM(p.price)}</Td>
-                <Td className="text-navy-400">
-                  {p.colors.length} colours × {p.sizes.length} sizes
-                </Td>
-                <Td className={stock <= 10 ? "font-medium text-red-700" : ""}>
-                  {stock}
-                  {stock <= 10 && <span className="ml-2 text-[10px] uppercase tracking-wider">low</span>}
-                </Td>
-                <Td>
-                  <Pill value="active" />
-                </Td>
-                <Td>
-                  <Link
-                    href={`/admin/products/${p.slug}`}
-                    className="label-caps text-[11px] text-navy-400 hover:text-navy"
-                  >
-                    Edit
-                  </Link>
-                </Td>
-              </Tr>
-            );
-          })}
-        </Table>
-      </Card>
+      <ProductsTable products={products} />
     </div>
   );
 }

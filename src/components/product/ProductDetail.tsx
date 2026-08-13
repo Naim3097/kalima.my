@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { toast } from "sonner";
-import { variantKey, type Product } from "@/data/catalog";
+import { discountPercent, effectivePrice, variantKey, type Product } from "@/data/catalog";
 import { formatRM } from "@/lib/format";
 import { useCart } from "@/stores/cart";
 import { useWishlist } from "@/stores/wishlist";
@@ -19,6 +20,14 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 /*
   Client island for the PDP — colour/size selection, add-to-bag, wishlist and
@@ -39,6 +48,10 @@ export default function ProductDetail({ product }: { product: Product }) {
   const color = product.colors[colorIndex];
   const wished = mounted && ids.includes(product.id);
   const mainImage = color.image ?? (colorIndex === 0 ? product.image : undefined);
+  // What is actually charged — the bag, the points estimate and the price line
+  // all read this, so a sale can't be shown here and dropped in the bag.
+  const payable = effectivePrice(product);
+  const off = discountPercent(product);
 
   /*
     Stock, resolved for the selected colour. Undefined stockByVariant (the seed
@@ -75,7 +88,7 @@ export default function ProductDetail({ product }: { product: Product }) {
       productId: product.id,
       slug: product.slug,
       name: product.name,
-      price: product.price,
+      price: payable,
       color: color.name,
       size,
       tone: color.hex,
@@ -142,9 +155,21 @@ export default function ProductDetail({ product }: { product: Product }) {
       {/* Details */}
       <div className="max-w-lg">
         <h1 className="font-display text-4xl text-navy">{product.name}</h1>
-        <p className="mt-3 text-xl text-navy">{formatRM(product.price)}</p>
+        <div className="mt-3 flex flex-wrap items-baseline gap-3">
+          {product.salePrice != null ? (
+            <>
+              <p className="text-xl text-navy">{formatRM(product.salePrice)}</p>
+              <p className="text-[15px] text-navy-300 line-through">{formatRM(product.price)}</p>
+              <span className="label-caps bg-navy px-2 py-1 text-[10px] text-white">
+                {off}% off
+              </span>
+            </>
+          ) : (
+            <p className="text-xl text-navy">{formatRM(product.price)}</p>
+          )}
+        </div>
         <p className="mt-2 text-[12px] tracking-wide text-navy-300">
-          Kalima Club members earn {Math.round(product.price)} points with this piece
+          Kalima Club members earn {Math.round(payable)} points with this piece
         </p>
 
         <div className="mt-8">
@@ -170,12 +195,42 @@ export default function ProductDetail({ product }: { product: Product }) {
         <div className="mt-8">
           <div className="mb-3 flex items-center justify-between">
             <p className="label-caps text-navy-400">Size</p>
-            <Link
-              href="/pages/size-guide"
-              className="text-[12px] tracking-wide text-navy-400 underline underline-offset-4 hover:text-navy"
-            >
-              Size guide
-            </Link>
+            {/* This product's own chart when it has one; the general guide page
+                otherwise, so the link is never a dead end. */}
+            {product.sizeChart ? (
+              <Dialog>
+                <DialogTrigger className="cursor-pointer text-[12px] tracking-wide text-navy-400 underline underline-offset-4 hover:text-navy">
+                  Size guide
+                </DialogTrigger>
+                <DialogContent className="max-w-3xl gap-0 border-navy/10 bg-white p-0 sm:max-w-3xl">
+                  <DialogHeader className="border-b border-navy/10 px-5 py-4">
+                    <DialogTitle className="label-caps !text-[12px] text-navy">
+                      {product.name} — size guide
+                    </DialogTitle>
+                    <DialogDescription className="text-[12px] tracking-wide text-navy-400">
+                      Measurements in centimetres. Between two sizes? Take the larger.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="max-h-[70vh] overflow-auto bg-cream-50 p-4">
+                    <Image
+                      src={product.sizeChart}
+                      alt={`Size guide for ${product.name}`}
+                      width={1400}
+                      height={1000}
+                      sizes="(max-width: 768px) 100vw, 720px"
+                      className="h-auto w-full object-contain"
+                    />
+                  </div>
+                </DialogContent>
+              </Dialog>
+            ) : (
+              <Link
+                href="/pages/size-guide"
+                className="text-[12px] tracking-wide text-navy-400 underline underline-offset-4 hover:text-navy"
+              >
+                Size guide
+              </Link>
+            )}
           </div>
           <div className="flex flex-wrap gap-2.5">
             {product.sizes.map((s) => {

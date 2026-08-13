@@ -91,6 +91,7 @@ const PILL_STYLES: Record<string, string> = {
   cancelled: "bg-red-100 text-red-900",
   // generic
   active: "bg-emerald-100 text-emerald-900",
+  "on sale": "bg-amber-100 text-amber-900",
   sent: "bg-emerald-100 text-emerald-900",
   scheduled: "bg-amber-100 text-amber-900",
   draft: "bg-navy-100 text-navy-400",
@@ -136,14 +137,17 @@ export function Chip({ children, className = "" }: { children: ReactNode; classN
   );
 }
 
-export function Table({ head, children }: { head: string[]; children: ReactNode }) {
+/* `head` takes nodes, not just strings, so a column can carry a control — the
+   products table puts its select-all checkbox in the header cell. Keyed by
+   index because blank spacer columns are common and would otherwise collide. */
+export function Table({ head, children }: { head: ReactNode[]; children: ReactNode }) {
   return (
     <ShadTable className="w-full text-left text-[13px]">
       <TableHeader>
         <TableRow className="border-navy/10 hover:bg-transparent">
-          {head.map((h) => (
+          {head.map((h, i) => (
             <TableHead
-              key={h}
+              key={i}
               className="label-caps h-auto whitespace-nowrap px-5 py-3 !text-[10px] font-medium text-navy-400"
             >
               {h}
