@@ -1490,6 +1490,75 @@ export async function reorderProductImages(
   return { ok: true };
 }
 
+/* ---- Size chart --------------------------------------------------------- */
+
+/*
+  The product's size chart. One per product, no colour scope, and it lives on
+  the product row rather than in product_images — see the migration note. It
+  shares the product-images bucket and the same signed-upload path, so there is
+  one storage story rather than two.
+*/
+export async function setProductSizeChart(input: {
+  productId: string; productSlug: string; path: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: pub } = db.storage.from(IMAGE_BUCKET).getPublicUrl(input.path);
+  if (!pub?.publicUrl) return { error: "Could not resolve the uploaded image." };
+
+  // Read the outgoing chart first so its file can be cleaned up afterwards.
+  const { data: row } = await db
+    .from("products").select("size_chart_path").eq("id", input.productId).maybeSingle();
+
+  const { error } = await db
+    .from("products")
+    .update({ size_chart_url: pub.publicUrl, size_chart_path: input.path })
+    .eq("id", input.productId);
+  if (error) return { error: error.message };
+
+  const old = row?.size_chart_path as string | null | undefined;
+  if (old && old !== input.path) {
+    await db.storage.from(IMAGE_BUCKET).remove([old]).catch(() => {});
+  }
+
+  await logAudit(db, {
+    action: "size_chart.set", entityType: "product", entityId: input.productSlug,
+    summary: `Size chart ${old ? "replaced" : "added"} on ${input.productSlug}`,
+    meta: { path: input.path },
+  });
+
+  revalidateProduct(input.productSlug);
+  return { ok: true };
+}
+
+export async function clearProductSizeChart(
+  productId: string, productSlug: string,
+): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: row } = await db
+    .from("products").select("size_chart_path").eq("id", productId).maybeSingle();
+
+  const { error } = await db
+    .from("products")
+    .update({ size_chart_url: null, size_chart_path: null })
+    .eq("id", productId);
+  if (error) return { error: error.message };
+
+  const path = row?.size_chart_path as string | null | undefined;
+  if (path) await db.storage.from(IMAGE_BUCKET).remove([path]).catch(() => {});
+
+  await logAudit(db, {
+    action: "size_chart.cleared", entityType: "product", entityId: productSlug,
+    summary: `Size chart removed from ${productSlug}`, meta: { path },
+  });
+
+  revalidateProduct(productSlug);
+  return { ok: true };
+}
+
 /* ---- CMS ---------------------------------------------------------------- */
 
 // Storefront surfaces the CMS drives — revalidated on every content edit.

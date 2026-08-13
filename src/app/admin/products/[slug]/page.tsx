@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ProductForm } from "@/components/admin/ProductForm";
 import { ProductImages } from "@/components/admin/ProductImages";
+import { SizeChart } from "@/components/admin/SizeChart";
 import { VariantEditor } from "@/components/admin/VariantEditor";
 import { getProductForEdit } from "@/lib/admin";
 
@@ -43,6 +44,11 @@ export default async function EditProductPage({ params }: Params) {
         images={product.images}
         // Colour scoping offers exactly the colourways the variants define.
         colors={[...new Set(product.variants.map((v) => v.colorName))]}
+      />
+      <SizeChart
+        productId={product.id}
+        productSlug={product.slug}
+        url={product.sizeChartUrl}
       />
       <VariantEditor productId={product.id} productSlug={product.slug} variants={product.variants} />
     </div>
