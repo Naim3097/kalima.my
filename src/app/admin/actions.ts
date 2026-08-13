@@ -904,6 +904,109 @@ export async function saveProduct(input: ProductInput): Promise<ActionResult & {
   return { ok: true, slug };
 }
 
+/*
+  Bulk edit across selected products.
+
+  One action rather than one per field, because the useful gesture is "these
+  nine pieces, 20% off, published" in a single pass. Anything left undefined is
+  left alone — the patch is sparse, so a bulk publish cannot silently reset a
+  category nobody touched.
+
+  Percentage pricing is computed per product from that product's OWN list
+  price, which is why it cannot be a single UPDATE: a flat "20% off" over rows
+  at different prices is a different number for each. The rows are read first
+  and written individually, and one bad row is reported without abandoning the
+  rest — a constraint violation on one product should not undo eight good
+  edits the staffer can see happening.
+*/
+export type BulkProductPatch = {
+  published?: boolean;
+  bestSeller?: boolean;
+  newArrival?: boolean;
+  category?: "women" | "men" | "accessories";
+  /* Sale: a percentage off each product's list price, one fixed price for all
+     of them, or clear it. */
+  sale?: { kind: "percent"; percent: number } | { kind: "fixed"; sen: number } | { kind: "clear" };
+};
+
+export async function bulkUpdateProducts(
+  ids: string[],
+  patch: BulkProductPatch,
+): Promise<(ActionResult & { updated?: number; failed?: string[] }) | { error: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!ids.length) return { error: "Select at least one product." };
+  if (!Object.keys(patch).length) return { error: "Choose something to change." };
+  if (patch.sale?.kind === "percent") {
+    const pct = patch.sale.percent;
+    if (!Number.isFinite(pct) || pct <= 0 || pct >= 100) {
+      return { error: "The discount must be between 1% and 99%." };
+    }
+  }
+  if (patch.sale?.kind === "fixed" && (!Number.isInteger(patch.sale.sen) || patch.sale.sen < 0)) {
+    return { error: "Enter a valid sale price." };
+  }
+
+  const { data: rows, error: readErr } = await db
+    .from("products").select("id, slug, name, price_sen").in("id", ids);
+  if (readErr) return { error: readErr.message };
+  if (!rows?.length) return { error: "Those products no longer exist." };
+
+  const base: Record<string, unknown> = {};
+  if (patch.published !== undefined) base.published = patch.published;
+  if (patch.bestSeller !== undefined) base.best_seller = patch.bestSeller;
+  if (patch.newArrival !== undefined) base.new_arrival = patch.newArrival;
+  if (patch.category !== undefined) base.category = patch.category;
+
+  let updated = 0;
+  const failed: string[] = [];
+
+  for (const row of rows) {
+    const values = { ...base };
+
+    if (patch.sale) {
+      if (patch.sale.kind === "clear") {
+        values.sale_price_sen = null;
+      } else {
+        const priceSen = row.price_sen as number;
+        const sen = patch.sale.kind === "percent"
+          ? Math.round((priceSen * (100 - patch.sale.percent)) / 100)
+          : patch.sale.sen;
+        const problem = checkSalePrice(sen, priceSen);
+        if (problem) {
+          // Naming the product matters: "one failed" is useless in a bulk edit.
+          failed.push(`${row.name}: ${problem.toLowerCase()}`);
+          continue;
+        }
+        values.sale_price_sen = sen;
+      }
+    }
+
+    const { error } = await db.from("products").update(values).eq("id", row.id);
+    if (error) failed.push(`${row.name}: ${error.message}`);
+    else {
+      updated += 1;
+      revalidatePath(`/products/${row.slug}`);
+      revalidatePath(`/admin/products/${row.slug}`);
+    }
+  }
+
+  if (updated) {
+    await logAudit(db, {
+      action: "product.bulk_updated",
+      entityType: "product",
+      entityId: null,
+      summary: `${updated} product(s) bulk updated (${Object.keys(patch).join(", ")})`,
+      meta: { ids, patch, failed },
+    });
+    revalidateProduct();
+  }
+
+  if (!updated) return { error: failed[0] ?? "Nothing was changed." };
+  return { ok: true, updated, failed };
+}
+
 export async function addVariant(input: {
   productId: string; productSlug: string;
   colorName: string; colorHex: string; size: string; sku: string;
