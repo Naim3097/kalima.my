@@ -1346,6 +1346,52 @@ export async function updateProductImage(input: {
   return { ok: true };
 }
 
+/*
+  Repoints an existing image row at a newly uploaded object — the second half
+  of re-cropping a photo that is already live.
+
+  It edits the row in place rather than deleting and re-adding, so the image
+  keeps its position, alt text and colour scope. Re-adding would send a
+  re-cropped hero shot to the back of the queue and quietly promote a different
+  photo to the PLP.
+*/
+export async function replaceProductImage(input: {
+  imageId: string; productSlug: string; path: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: row, error: readErr } = await db
+    .from("product_images").select("storage_path").eq("id", input.imageId).maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!row) return { error: "That image no longer exists." };
+
+  const { data: pub } = db.storage.from(IMAGE_BUCKET).getPublicUrl(input.path);
+  if (!pub?.publicUrl) return { error: "Could not resolve the uploaded image." };
+
+  const { error } = await db
+    .from("product_images")
+    .update({ url: pub.publicUrl, storage_path: input.path })
+    .eq("id", input.imageId);
+  if (error) return { error: error.message };
+
+  // Only now is the old file unreferenced. Best-effort — a stranded object is
+  // cheaper than a row pointing at a file that has been deleted.
+  const old = row.storage_path as string | null;
+  if (old && old !== input.path) {
+    await db.storage.from(IMAGE_BUCKET).remove([old]).catch(() => {});
+  }
+
+  await logAudit(db, {
+    action: "image.replaced", entityType: "product", entityId: input.productSlug,
+    summary: `Image re-cropped on ${input.productSlug}`,
+    meta: { imageId: input.imageId, path: input.path, replaced: old },
+  });
+
+  revalidateProduct(input.productSlug);
+  return { ok: true };
+}
+
 /* Removes the row and, when it came from Storage, the underlying file. */
 export async function deleteProductImage(
   imageId: string, productSlug: string,
