@@ -14,9 +14,14 @@ import { expireStalePendingOrders } from "@/lib/commerce";
   first (reconcileOrderPayment). LeanX pushes a callback on SUCCESS ONLY, so a
   lost success callback would otherwise leave a genuinely-paid order looking
   abandoned — and we must never cancel one the customer paid for. Only an order
-  the gateway does not confirm as paid is cancelled. The default 30-minute
-  cutoff comfortably exceeds LeanX's hosted-bill lifetime, so no live payment is
-  in flight when we act.
+  the gateway does not confirm as paid is cancelled.
+
+  Nor one it might still accept. An order whose gateway reports the payment as
+  still in progress is HELD, not cancelled, and appears as `held` in the report.
+  The 30-minute cutoff was sized against LeanX's hosted-bill lifetime; an Atome
+  payment stays payable for twelve hours, so the cutoff alone would have closed
+  orders a customer could still complete — charging them for something we would
+  then refuse to fulfil.
 
   Auth mirrors the sync route: Vercel cron's Bearer CRON_SECRET, or a signed-in
   staff member for a manual sweep. Fails closed when CRON_SECRET is unset.

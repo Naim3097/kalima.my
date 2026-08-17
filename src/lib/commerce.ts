@@ -387,7 +387,7 @@ export async function countPaymentAttempts(orderId: string, provider: string): P
 */
 export async function reconcileOrderPayment(
   reference: string,
-): Promise<"paid" | "failed" | "pending"> {
+): Promise<"paid" | "failed" | "pending" | "live"> {
   const { providerByName } = await import("@/lib/payments");
 
   const { data: order } = await admin()
@@ -418,9 +418,15 @@ export async function reconcileOrderPayment(
   const billNo = payment?.provider_ref as string | undefined;
   if (!billNo) return "pending";
 
+  /*
+    "live", not "pending": a payment EXISTS at a gateway we can no longer query
+    (its credentials were removed). We cannot know whether it is still payable,
+    and cancelling an order that turns out to be paid is far worse than leaving
+    one open, so hold it. The sweep reports these so they are visible rather
+    than quietly accumulating.
+  */
   const provider = providerByName(String(payment?.provider ?? ""));
-  // The gateway that took this payment is no longer configured — nothing to ask.
-  if (!provider) return "pending";
+  if (!provider) return "live";
 
   const verdict = await provider.checkStatus(billNo);
 
@@ -431,7 +437,16 @@ export async function reconcileOrderPayment(
       typeof payment?.amount_sen === "number" &&
       verdict.amountSen !== payment.amount_sen
     ) {
-      return "pending";
+      /*
+        The gateway says PAID and the figures disagree. This used to return
+        "pending", which the expiry sweep reads as "cancel it" — so the one case
+        where the customer has definitely been charged was also the case that
+        closed their order. "live" holds it for a human instead.
+      */
+      console.error(
+        `[payments] AMOUNT MISMATCH on ${reference} via ${provider.name}: gateway says ${verdict.amountSen}, we recorded ${payment.amount_sen}. Order held, needs manual review.`,
+      );
+      return "live";
     }
     await markOrderPaid({
       orderId,
@@ -444,6 +459,28 @@ export async function reconcileOrderPayment(
   }
 
   if (verdict.status === "failed" || verdict.status === "cancelled") return "failed";
+
+  /*
+    PROCESSING means the gateway is still willing to take this payment, so the
+    order must NOT be cancelled — this is the Atome case that made the
+    distinction necessary. An Atome payment stays payable for TWELVE HOURS while
+    the expiry sweep runs at thirty minutes, so folding "processing" in with
+    "nothing found" cancelled orders that a customer could still complete. They
+    would then be charged against a closed order: mark_order_paid raises, the
+    webhook logs "settlement held for review", and the money is real.
+
+    LeanX never exposed this because an FPX bill dies in minutes.
+  */
+  if (verdict.status === "processing") return "live";
+
+  /*
+    "unknown" stays cancellable, deliberately. LeanX's status endpoint answers
+    404 for bills that genuinely exist, so treating an unreadable lookup as
+    "hold" would mean abandoned FPX orders never expired at all. An FPX bill is
+    not payable hours later, so cancelling is the safe reading here — the
+    opposite of the processing case above, and for a concrete reason rather than
+    as a default.
+  */
   return "pending";
 }
 
@@ -453,17 +490,29 @@ export async function reconcileOrderPayment(
   genuinely paid must be settled, never cancelled. Only an order the gateway
   does NOT report as paid is cancelled.
 
-  The cutoff must comfortably exceed the gateway's own bill lifetime, so no
-  successful payment can still be in flight when we cancel. reconcileOrderPayment
-  does the gateway pull and the settle-if-paid; this only adds the cancel for
-  the ones that come back not-paid.
+  THE CUTOFF IS NO LONGER THE ONLY GUARD, and it was never sufficient. It used
+  to be sized to "comfortably exceed the gateway's bill lifetime", which was true
+  of LeanX at thirty minutes and false the moment Atome arrived: its payments
+  stay payable for twelve hours. So the gateway's own verdict now decides —
+  reconcileOrderPayment returns "live" while a payment can still be completed,
+  and those are held rather than cancelled, whatever the cutoff says.
+
+  reconcileOrderPayment does the gateway pull and the settle-if-paid; this adds
+  only the cancel for orders it reports as failed or unfindable.
 
   Returns a small report for the cron log. Never throws for a single bad order —
   one stuck row must not stop the sweep.
 */
 export async function expireStalePendingOrders(
   olderThanMinutes = 30,
-): Promise<{ scanned: number; settled: number; cancelled: number; skipped: number }> {
+): Promise<{
+  scanned: number;
+  settled: number;
+  cancelled: number;
+  /** Left pending because the gateway may still accept the payment. */
+  held: number;
+  skipped: number;
+}> {
   const cutoff = new Date(Date.now() - olderThanMinutes * 60_000).toISOString();
 
   const { data: stale, error } = await admin()
@@ -476,6 +525,7 @@ export async function expireStalePendingOrders(
 
   let settled = 0,
     cancelled = 0,
+    held = 0,
     skipped = 0;
 
   for (const o of stale ?? []) {
@@ -486,7 +536,24 @@ export async function expireStalePendingOrders(
         settled += 1;
         continue;
       }
-      // "failed" or still "pending" (no definite paid answer) → cancel it.
+      /*
+        NEVER CANCEL A PAYMENT THE GATEWAY WILL STILL ACCEPT.
+
+        "live" means the gateway reports the payment as still in progress — or
+        that we could not ask it at all. Cancelling then leaves the customer able
+        to complete a payment against a closed order, which charges them for
+        something we will refuse to fulfil.
+
+        Atome is why this exists: its payments stay payable for twelve hours
+        while this sweep runs at thirty minutes. Holding costs nothing — a
+        pending order reserves no stock — and the next sweep asks again, so a
+        genuinely abandoned payment is cancelled once the gateway says so.
+      */
+      if (verdict === "live") {
+        held += 1;
+        continue;
+      }
+      // "failed", or nothing findable at any gateway → cancel it.
       await admin().rpc("cancel_pending_order", {
         p_order_id: o.id,
         p_reason: `unpaid after ${olderThanMinutes} minutes`,
@@ -499,7 +566,10 @@ export async function expireStalePendingOrders(
     }
   }
 
-  return { scanned: stale?.length ?? 0, settled, cancelled, skipped };
+  /* `held` is reported, not swallowed: an order held every run means a gateway
+     payment nobody is completing, and that should be visible in the cron output
+     rather than looking like a sweep that found nothing to do. */
+  return { scanned: stale?.length ?? 0, settled, cancelled, held, skipped };
 }
 
 /*
