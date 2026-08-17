@@ -227,6 +227,18 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
             country: order.shipping_address.country ?? "MY",
           }
         : undefined,
+      /* Straight from the order rows — the prices that were actually charged,
+         not anything recomputed here. */
+      lines: order.items.map((i) => ({
+        sku: i.variant_sku,
+        name: i.product_name,
+        variation: `${i.color_name} · ${i.size}`,
+        qty: i.qty,
+        unitPriceSen: i.unit_price_sen,
+      })),
+      subtotalSen: order.subtotal_sen,
+      shippingSen: order.shipping_sen,
+      taxSen: order.tax_sen,
       returnUrl: `${origin}/checkout/success`,
       // Atome distinguishes abandonment from success; send them back to pick again.
       cancelUrl: `${origin}/checkout/pay`,

@@ -235,6 +235,26 @@ export const atome: PaymentProvider = {
       postCode: addr.postcode.trim(),
     };
 
+    /*
+      Same again for the lines: refuse here rather than after a round trip.
+      Atome's own words were "Your request is missing item information".
+    */
+    if (!req.lines?.length) throw new Error("Atome requires the order's line items");
+
+    /*
+      itemId is capped at 50 characters and name at 250 by Atome's schema. Our
+      SKUs run to about 45 (KLM-ITALIANCHIFFONSHAWL-GREENAPPLE-FREESIZE), which
+      is close enough to the limit that a longer product name would silently
+      breach it — so both are truncated rather than trusted to fit.
+    */
+    const items = req.lines.map((l) => ({
+      itemId: l.sku.slice(0, 50),
+      name: l.name.slice(0, 250),
+      quantity: l.qty,
+      price: l.unitPriceSen,
+      ...(l.variation ? { variationName: l.variation.slice(0, 100) } : {}),
+    }));
+
     const res = await fetch(`${BASE}/payments`, {
       method: "POST",
       headers: headers(),
@@ -254,6 +274,17 @@ export const atome: PaymentProvider = {
           fullName: req.fullName || "Customer",
           email: req.email.trim(),
         },
+        items,
+        /*
+          The parts of `amount`, so Atome can reconcile the itemised figures
+          against the total. On a discounted order the items alone sum higher
+          than what is charged; originalAmount is the pre-discount goods total,
+          which is what makes the difference explicable rather than a mismatch.
+          Omitted when unknown rather than sent as a guessed zero.
+        */
+        ...(req.shippingSen != null ? { shippingAmount: req.shippingSen } : {}),
+        ...(req.taxSen != null ? { taxAmount: req.taxSen } : {}),
+        ...(req.subtotalSen != null ? { originalAmount: req.subtotalSen } : {}),
         shippingAddress: atomeAddress,
         /*
           Billing is sent as the same address because checkout only ever

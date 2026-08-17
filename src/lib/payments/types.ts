@@ -72,6 +72,27 @@ export type CheckoutRequest = {
     /** ISO-3166 alpha-2. "MY" for every order we take today. */
     country?: string;
   };
+  /*
+    The order's lines and money breakdown, for gateways that itemise.
+
+    Atome requires per-item detail and rejects create-payment without it
+    ("Your request is missing item information"). The shipping and tax parts
+    come too, so the itemised figures reconcile against `amountSen` on an order
+    that carried a discount — items alone would not add up. LeanX takes a single
+    amount and ignores all of it.
+  */
+  lines?: {
+    sku: string;
+    name: string;
+    /** Colour · size, for the shopper to recognise on the gateway's page. */
+    variation?: string;
+    qty: number;
+    unitPriceSen: number;
+  }[];
+  /** Pre-discount goods total. */
+  subtotalSen?: number;
+  shippingSen?: number;
+  taxSen?: number;
 };
 
 export type CheckoutSession = {

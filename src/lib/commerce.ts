@@ -273,24 +273,48 @@ export async function refundOrderFromWebhook(params: {
   someone else's pending order). `eq` on lower()'d values takes the pattern
   metacharacters out of play entirely.
 */
-export async function getOrderForCheckout(
-  reference: string,
-  email: string,
-): Promise<{
+/*
+  What the payment step needs to know about an order.
+
+  Carries the money breakdown and the lines, not just the total, because Atome
+  itemises: it rejects create-payment without per-item detail, and items without
+  the shipping and tax parts cannot be reconciled against the total on an order
+  that carried a discount. LeanX uses only `total_sen` and ignores the rest.
+*/
+export type CheckoutOrder = {
   id: string;
   reference: string;
   email: string;
   phone: string | null;
   total_sen: number;
+  subtotal_sen: number;
+  shipping_sen: number;
+  tax_sen: number;
   status: string;
   shipping_address: OrderAddress | null;
-} | null> {
+  items: {
+    product_name: string;
+    variant_sku: string;
+    color_name: string;
+    size: string;
+    qty: number;
+    unit_price_sen: number;
+  }[];
+};
+
+export async function getOrderForCheckout(
+  reference: string,
+  email: string,
+): Promise<CheckoutOrder | null> {
   const wanted = email.trim().toLowerCase();
   if (!wanted) return null;
 
   const { data, error } = await admin()
     .from("orders")
-    .select("id, reference, email, phone, total_sen, status, shipping_address")
+    .select(
+      `id, reference, email, phone, total_sen, subtotal_sen, shipping_sen, tax_sen, status, shipping_address,
+       order_items ( product_name, variant_sku, color_name, size, qty, unit_price_sen )`,
+    )
     .eq("reference", reference)
     .maybeSingle();
   if (error) throw new Error(`getOrderForCheckout failed: ${error.message}`);
@@ -298,7 +322,13 @@ export async function getOrderForCheckout(
 
   // Compare in the app, so no attacker-supplied pattern ever reaches the query.
   if (data.email.trim().toLowerCase() !== wanted) return null;
-  return data;
+
+  /* The embed comes back as `order_items`; flatten it to `items` so callers see
+     the shape OrderView already uses rather than the query's. */
+  const { order_items, ...order } = data as Omit<CheckoutOrder, "items"> & {
+    order_items: CheckoutOrder["items"] | null;
+  };
+  return { ...order, items: order_items ?? [] };
 }
 
 /*
