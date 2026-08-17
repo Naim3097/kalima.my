@@ -1836,6 +1836,76 @@ export async function deleteAnnouncement(id: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+/*
+  A homepage Lookbook tile: a product plus one of its colourways.
+
+  Deliberately stores NO image URL. The photograph is resolved from the
+  product_images row at render time (getLookbookShots), so a shot cannot outlive
+  the colourway it names — which is exactly how the old hardcoded list ended up
+  advertising an Anna Top print that no longer existed.
+*/
+export async function saveLookbookShot(input: {
+  id?: string;
+  productId: string;
+  colorName: string;
+  alt: string;
+  sortOrder: number;
+  active: boolean;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  if (!input.productId) return { error: "Choose a product." };
+  if (!input.colorName.trim()) return { error: "Choose a colourway." };
+
+  const row = {
+    product_id: input.productId,
+    color_name: input.colorName.trim(),
+    alt: input.alt.trim() || null,
+    sort_order: input.sortOrder,
+    active: input.active,
+  };
+
+  const { error } = input.id
+    ? await db.from("lookbook_shots").update(row).eq("id", input.id)
+    : await db.from("lookbook_shots").insert(row);
+
+  /* The pair is uniquely indexed, so report the collision plainly rather than
+     surfacing a Postgres constraint name to whoever pressed Save. */
+  if (error) {
+    return {
+      error: error.code === "23505"
+        ? "That product and colourway is already in the Lookbook."
+        : error.message,
+    };
+  }
+
+  await logAudit(db, {
+    action: input.id ? "lookbook_shot.updated" : "lookbook_shot.created",
+    entityType: "cms",
+    entityId: input.id ?? input.productId,
+    summary: `Lookbook shot ${input.id ? "updated" : "added"}: ${input.colorName}`,
+    meta: { productId: input.productId, colorName: input.colorName },
+  });
+
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+export async function deleteLookbookShot(id: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const { error } = await db.from("lookbook_shots").delete().eq("id", id);
+  if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "lookbook_shot.deleted", entityType: "cms", entityId: id,
+    summary: "Lookbook shot removed",
+  });
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
 export async function saveHeroSlide(input: {
   id?: string; eyebrow: string; title: string; body: string; image: string; focal: string;
   primaryLabel: string; primaryHref: string; secondaryLabel: string; secondaryHref: string;

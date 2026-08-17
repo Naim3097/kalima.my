@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { fetchProducts } from "@/data/catalog.queries";
-import { getHeroSlides, getSocialLinks } from "@/lib/cms";
+import { getHeroSlides, getLookbookShots, getSocialLinks } from "@/lib/cms";
 import Hero from "@/components/home/Hero";
 import CategoryTiles from "@/components/home/CategoryTiles";
 import CollectionSpotlight from "@/components/home/CollectionSpotlight";
-import BestSellers from "@/components/home/BestSellers";
+import OnSale from "@/components/home/OnSale";
 import UspStrip from "@/components/home/UspStrip";
 import Lookbook from "@/components/home/Lookbook";
 import Follow from "@/components/home/Follow";
@@ -18,26 +18,31 @@ export const metadata: Metadata = {
 
 /*
   Home. Server Component — the catalogue is fetched here once and handed to
-  BestSellers, so no section below needs its own data boundary. Only Hero
+  OnSale, so no section below needs its own data boundary. Only Hero
   (carousel) and Newsletter (email form) ship client JS.
 */
 export const revalidate = 3600;
 
 export default async function HomePage() {
-  const [products, heroSlides, socialLinks] = await Promise.all([
+  const [products, heroSlides, socialLinks, lookbook] = await Promise.all([
     fetchProducts(),
     getHeroSlides(),
     getSocialLinks(),
+    getLookbookShots(),
   ]);
+
+  /* The Lookbook CTA says "View Instagram", so point it at Instagram when the
+     shop has one configured. Falls back to the contact page. */
+  const instagramHref = socialLinks.find((l) => l.platform === "instagram")?.href ?? null;
 
   return (
     <>
       <Hero slides={heroSlides} />
       <CategoryTiles />
       <CollectionSpotlight />
-      <BestSellers products={products} />
+      <OnSale products={products} />
       <UspStrip />
-      <Lookbook />
+      <Lookbook shots={lookbook} instagramHref={instagramHref} />
       <Follow links={socialLinks} />
       <Newsletter />
     </>

@@ -1,28 +1,47 @@
 import Image from "next/image";
 import Link from "next/link";
 import SectionHeader from "@/components/brand/SectionHeader";
-import { blurSeed, productPhoto } from "@/lib/images";
+import { blurSeed } from "@/lib/images";
+import type { LookbookShot } from "@/lib/cms";
 
-/* One shot per piece, chosen for contrast across the row. */
-const SHOTS = [
-  { tone: "#8d2d33", slug: "ruwa-caftan", colour: "burgundy", alt: "Ruwa Caftan in burgundy satin" },
-  { tone: "#be1a84", slug: "danisya-set", colour: "magenta", alt: "Danisya Set in magenta satin" },
-  { tone: "#126c82", slug: "serra-scallop", colour: "teal-green", alt: "Serra Scallop cardigan abaya in teal green" },
-  { tone: "#7a9c86", slug: "anna-top", colour: "peony-garden", alt: "Anna Top in the Peony Garden print" },
-  { tone: "#c8bcb0", slug: "luna-palazzo", colour: "sand", alt: "Luna Palazo in sand" },
-];
+/*
+  Server Component — a static grid of links; no wishlist or state here.
 
-/* Server Component — a static grid of links; no wishlist or state here. */
-export default function Lookbook() {
+  The shots arrive already resolved (see getLookbookShots in lib/cms.ts). This
+  used to hold a hardcoded SHOTS array and build each URL with
+  productPhoto(slug, colour), which is how it ended up advertising a colourway
+  Anna Top no longer sells: the path convention still resolved to an orphaned
+  storage object long after the catalogue had moved on.
+
+  `instagramHref` is optional so an unconfigured store still renders — the CTA
+  falls back to the contact page rather than linking nowhere.
+*/
+export default function Lookbook({
+  shots,
+  instagramHref,
+}: {
+  shots: LookbookShot[];
+  instagramHref?: string | null;
+}) {
+  /* Nothing to show → render nothing, rather than a heading over an empty grid. */
+  if (shots.length === 0) return null;
+
   return (
     <section className="mx-auto max-w-7xl px-4 py-14">
-      <SectionHeader title="Lookbook" cta={{ label: "View Instagram", href: "/pages/contact" }} />
+      <SectionHeader
+        title="Lookbook"
+        cta={{ label: "View Instagram", href: instagramHref || "/pages/contact" }}
+      />
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
-        {SHOTS.map((shot) => (
-          <Link key={shot.slug} href={`/products/${shot.slug}`} className="group block overflow-hidden">
+        {shots.map((shot) => (
+          <Link
+            key={`${shot.slug}-${shot.image}`}
+            href={`/products/${shot.slug}`}
+            className="group block overflow-hidden"
+          >
             <div className="relative aspect-[4/5] w-full overflow-hidden">
               <Image
-                src={productPhoto(shot.slug, shot.colour)}
+                src={shot.image}
                 alt={shot.alt}
                 placeholder="blur"
                 blurDataURL={blurSeed(shot.tone)}

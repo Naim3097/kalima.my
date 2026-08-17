@@ -332,6 +332,93 @@ export async function listHeroSlides(): Promise<AdminHeroSlide[]> {
   }));
 }
 
+export type AdminLookbookShot = {
+  id: string;
+  productId: string;
+  productName: string;
+  slug: string;
+  colorName: string;
+  alt: string | null;
+  sortOrder: number;
+  active: boolean;
+  /** False when the chosen colourway has lost its photograph. */
+  hasImage: boolean;
+};
+
+export async function listLookbookShots(): Promise<AdminLookbookShot[]> {
+  const { data, error } = await db()
+    .from("lookbook_shots")
+    .select(
+      `id, product_id, color_name, alt, sort_order, active,
+       products ( name, slug, product_images ( color_name ) )`,
+    )
+    .order("sort_order");
+  if (error) throw new Error(`listLookbookShots failed: ${error.message}`);
+
+  return (data ?? []).map((s: Record<string, unknown>) => {
+    const p = (s.products ?? {}) as {
+      name?: string;
+      slug?: string;
+      product_images?: { color_name: string | null }[];
+    };
+    return {
+      id: s.id as string,
+      productId: s.product_id as string,
+      productName: p.name ?? "(deleted product)",
+      slug: p.slug ?? "",
+      colorName: s.color_name as string,
+      alt: (s.alt as string | null) ?? null,
+      sortOrder: s.sort_order as number,
+      active: s.active as boolean,
+      /* Surfaced so the editor can flag a shot whose photo was removed after it
+         was created — the storefront silently drops those, which is right for a
+         shopper and useless for staff. */
+      hasImage: (p.product_images ?? []).some((i) => i.color_name === s.color_name),
+    };
+  });
+}
+
+export type LookbookCandidate = {
+  id: string;
+  name: string;
+  slug: string;
+  /** Only colourways that actually have a photograph. */
+  colors: string[];
+};
+
+/*
+  Products that can be used as a Lookbook shot, with the colourways that have a
+  photograph.
+
+  OFFERS ONLY WHAT CAN RENDER. Constraining the picker is what keeps the
+  storefront's "no image → drop the shot" branch nearly unreachable: a colourway
+  with no photo never becomes a choice in the first place, so the only way to
+  reach it is deleting a photo after the fact.
+*/
+export async function listLookbookCandidates(): Promise<LookbookCandidate[]> {
+  const { data, error } = await db()
+    .from("products")
+    .select("id, name, slug, published, product_images ( color_name, position )")
+    .eq("published", true)
+    .order("name");
+  if (error) throw new Error(`listLookbookCandidates failed: ${error.message}`);
+
+  return (data ?? [])
+    .map((p: Record<string, unknown>) => {
+      const images = (p.product_images ?? []) as { color_name: string | null; position: number }[];
+      const colors = [
+        ...new Set(
+          images
+            .filter((i) => i.color_name)
+            .sort((a, b) => a.position - b.position)
+            .map((i) => i.color_name as string),
+        ),
+      ];
+      return { id: p.id as string, name: p.name as string, slug: p.slug as string, colors };
+    })
+    .filter((p) => p.colors.length > 0);
+}
+
 export async function listContentPages(): Promise<AdminContentPage[]> {
   const { data, error } = await db()
     .from("content_pages").select("id, slug, title, body, published").order("slug");

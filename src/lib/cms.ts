@@ -124,6 +124,122 @@ export const getSocialLinks = cache(async (): Promise<SocialLink[]> => {
     .map((platform) => ({ platform, href: byPlatform[platform] as string }));
 });
 
+/*
+  One homepage Lookbook tile, already resolved to something renderable.
+
+  The component gets a URL and a hex, never a slug-and-colour it has to turn into
+  a path — that convention (`<slug>/<colour>.jpg`) is what let the old hardcoded
+  list drift away from the catalogue and keep pointing at a colourway Anna Top no
+  longer sells.
+*/
+export type LookbookShot = {
+  /** Product slug — every tile links to its product page. */
+  slug: string;
+  image: string;
+  /** Swatch hex for the blur placeholder (see blurSeed in lib/images.ts). */
+  tone: string;
+  alt: string;
+};
+
+/* The five shots that used to be hardcoded in the component, kept as the
+   unconfigured-Supabase fallback exactly like seedHero below. */
+const SEED_LOOKBOOK: LookbookShot[] = [
+  { slug: "ruwa-caftan", tone: "#8d2d33", image: "/lookbook/ruwa-caftan.jpg", alt: "Ruwa Caftan in burgundy satin" },
+  { slug: "danisya-set", tone: "#be1a84", image: "/lookbook/danisya-set.jpg", alt: "Danisya Set in magenta satin" },
+  { slug: "serra-scallop", tone: "#126c82", image: "/lookbook/serra-scallop.jpg", alt: "Serra Scallop cardigan abaya in teal green" },
+  { slug: "anna-top", tone: "#c08b93", image: "/lookbook/anna-top.jpg", alt: "Anna Top in the Dusty Lily print" },
+  { slug: "luna-palazzo", tone: "#c8bcb0", image: "/lookbook/luna-palazzo.jpg", alt: "Luna Palazo in sand" },
+];
+
+/*
+  Homepage Lookbook tiles, in order.
+
+  Each row names a product and one of ITS colourways; the photograph is resolved
+  here from the real product_images row rather than rebuilt from a path. So a
+  shot cannot reference a colour that does not exist, and replacing a colour's
+  photo updates the Lookbook with nothing else to do.
+
+  RLS already restricts rows to published products, so nothing here re-checks
+  that — see the "lookbook shots follow their product" policy.
+*/
+export const getLookbookShots = cache(async (): Promise<LookbookShot[]> => {
+  const supabase = createPublicClient();
+  if (!supabase) return SEED_LOOKBOOK;
+
+  const { data, error } = await supabase
+    .from("lookbook_shots")
+    .select(
+      `color_name, alt,
+       products!inner (
+         slug, name, tone,
+         product_images ( url, color_name, position ),
+         product_variants ( color_name, color_hex )
+       )`,
+    )
+    .eq("active", true)
+    .order("sort_order", { ascending: true });
+
+  if (error || !data?.length) return SEED_LOOKBOOK;
+
+  type Row = {
+    color_name: string;
+    alt: string | null;
+    products: {
+      slug: string;
+      name: string;
+      tone: string;
+      product_images: { url: string; color_name: string | null; position: number }[];
+      product_variants: { color_name: string; color_hex: string | null }[];
+    } | null;
+  };
+
+  const shots: LookbookShot[] = [];
+
+  for (const row of data as unknown as Row[]) {
+    const p = row.products;
+    if (!p) continue;
+
+    const forColour = p.product_images
+      .filter((i) => i.color_name === row.color_name)
+      .sort((a, b) => a.position - b.position)[0];
+
+    /*
+      Fall back to the product's colour-less hero shot, then give up. A tile with
+      no photograph is worse than a shorter row — it renders as a hole. The admin
+      only offers colourways that HAVE an image, so reaching the give-up branch
+      means a photo was deleted after the shot was created.
+    */
+    const image =
+      forColour ??
+      p.product_images.filter((i) => !i.color_name).sort((a, b) => a.position - b.position)[0];
+    if (!image) continue;
+
+    /* color_hex is genuinely nullable here: Serra Scallop has Burgundy and Mocha
+       images with no matching variant, so the product tone is the backstop. */
+    const tone =
+      p.product_variants.find((v) => v.color_name === row.color_name)?.color_hex || p.tone;
+
+    /*
+      DELIBERATELY DOES NOT FALL BACK TO product_images.alt.
+
+      That column is populated from the uploaded filename, so trusting it put
+      alt="WhatsApp Image 2026-08-12 at 7.58.47 PM" on a homepage tile — worse
+      for a screen reader than saying nothing useful, and invisible to anyone
+      looking at the page. "<Product> in <Colour>" is always available and always
+      describes the photograph, so it is the floor. Staff who want better can
+      write it on the shot itself.
+    */
+    shots.push({
+      slug: p.slug,
+      image: image.url,
+      tone,
+      alt: row.alt?.trim() || `${p.name} in ${row.color_name}`,
+    });
+  }
+
+  return shots.length ? shots : SEED_LOOKBOOK;
+});
+
 export type ContactChannels = {
   /** Profile URL, and the handle derived from it for display. */
   instagram: { href: string; handle: string } | null;

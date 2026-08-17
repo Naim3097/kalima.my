@@ -5,6 +5,7 @@ import { createPublicClient } from "@/lib/supabase/server";
 import {
   PRODUCTS,
   COLLECTIONS,
+  discountPercent,
   variantKey,
   type Product,
   type ProductAddon,
@@ -322,12 +323,23 @@ export const fetchCollection = cache(
     */
     if (collection.is_smart) {
       const all = await fetchProducts();
+      /*
+        `sale` is derived from the discount itself rather than a flag, so it
+        needs nobody to maintain it: a piece joins when it is given a sale price
+        and leaves when that price is cleared. It is also sorted here — deepest
+        discount first — because that is the order the page is selling in, and
+        the shared grid's default would otherwise fall back to catalogue order.
+      */
       const products =
         slug === "best-sellers"
           ? all.filter((p) => p.bestSeller)
           : slug === "new-arrivals"
             ? all.filter((p) => p.newArrival)
-            : [];
+            : slug === "sale"
+              ? all
+                  .filter((p) => p.salePrice != null)
+                  .sort((a, b) => discountPercent(b) - discountPercent(a))
+              : [];
       return { meta, products };
     }
 

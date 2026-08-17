@@ -3,21 +3,32 @@ import ProductImage from "@/components/brand/ProductImage";
 import { AnnouncementEditor } from "@/components/admin/cms/AnnouncementEditor";
 import { ContentPageEditor } from "@/components/admin/cms/ContentPageEditor";
 import { HeroSlideEditor } from "@/components/admin/cms/HeroSlideEditor";
+import { LookbookEditor } from "@/components/admin/cms/LookbookEditor";
 import { Card, CardHeader, Pill, Table, Td, Tr } from "@/components/admin/ui";
-import { listAnnouncements, listContentPages, listHeroSlides } from "@/lib/admin";
+import {
+  listAnnouncements,
+  listContentPages,
+  listHeroSlides,
+  listLookbookCandidates,
+  listLookbookShots,
+} from "@/lib/admin";
 
 export const metadata: Metadata = {
   title: "Content · Admin",
-  description: "Edit the storefront announcement bar, homepage hero slides and content pages.",
+  description:
+    "Edit the storefront announcement bar, homepage hero slides, the Lookbook and content pages.",
 };
 
 /* Server Component — live CMS content pulled straight from the storefront tables. */
 export default async function AdminCmsPage() {
-  const [announcements, heroSlides, contentPages] = await Promise.all([
-    listAnnouncements(),
-    listHeroSlides(),
-    listContentPages(),
-  ]);
+  const [announcements, heroSlides, contentPages, lookbookShots, lookbookCandidates] =
+    await Promise.all([
+      listAnnouncements(),
+      listHeroSlides(),
+      listContentPages(),
+      listLookbookShots(),
+      listLookbookCandidates(),
+    ]);
 
   return (
     <div className="space-y-8">
@@ -25,7 +36,8 @@ export default async function AdminCmsPage() {
         <h1 className="font-display text-3xl text-navy">Content</h1>
         <p className="mt-1 max-w-2xl text-[13px] tracking-wide text-navy-400">
           These sections edit the live storefront directly — the announcement bar, the homepage hero
-          carousel and the standalone content pages. Changes publish as soon as you save.
+          carousel, the Lookbook row and the standalone content pages. Changes publish as soon as
+          you save.
         </p>
       </div>
 
@@ -95,6 +107,48 @@ export default async function AdminCmsPage() {
                 </Td>
                 <Td className="text-right">
                   <HeroSlideEditor slide={s} />
+                </Td>
+              </Tr>
+            ))}
+          </Table>
+        )}
+      </Card>
+
+      {/* Lookbook */}
+      <Card>
+        <CardHeader
+          title="Lookbook"
+          action={<LookbookEditor candidates={lookbookCandidates} />}
+        />
+        {lookbookShots.length === 0 ? (
+          <p className="px-5 py-10 text-center text-[13px] text-navy-400">
+            No Lookbook shots yet. Add your first with “New shot”.
+          </p>
+        ) : (
+          <Table head={["Piece", "Colourway", "Order", "Status", ""]}>
+            {lookbookShots.map((s) => (
+              <Tr key={s.id}>
+                <Td className="whitespace-normal">
+                  <p className="font-medium text-navy">{s.productName}</p>
+                  <p className="font-mono text-[12px] text-navy-400">/{s.slug}</p>
+                </Td>
+                <Td className="text-navy">
+                  {s.colorName}
+                  {/* A shot whose photo was deleted after the fact is dropped on
+                      the storefront — silent for a shopper, and useless for
+                      staff unless it is said here. */}
+                  {!s.hasImage && (
+                    <span className="block text-[11px] text-red-700">
+                      no photo — this shot is hidden
+                    </span>
+                  )}
+                </Td>
+                <Td className="text-navy-400">{s.sortOrder}</Td>
+                <Td>
+                  <Pill value={s.active ? "active" : "draft"} />
+                </Td>
+                <Td className="text-right">
+                  <LookbookEditor shot={s} candidates={lookbookCandidates} />
                 </Td>
               </Tr>
             ))}
