@@ -395,10 +395,12 @@ export const whatsappAdapter: ChannelAdapter = {
   exchangeCode: notAnOauthChannel,
   refresh: (): Promise<TokenPair> => notAnOauthChannel(),
 
-  // WhatsApp carries no stock.
+  // WhatsApp carries no stock, and therefore no orders to poll for either.
   pushStock: () => {
     throw new ChannelNotConfigured("whatsapp");
   },
+  fetchOrders: () => Promise.reject(new ChannelNotConfigured("whatsapp")),
+  fetchStock: () => Promise.reject(new ChannelNotConfigured("whatsapp")),
   parseWebhook: () => [],
 
   verifyWebhook: verifyMetaSignature,
@@ -749,10 +751,12 @@ function messengerAdapter(
     exchangeCode: () => notAnOauthMessagingChannel(channel),
     refresh: (): Promise<TokenPair> => notAnOauthMessagingChannel(channel),
 
-    /* Neither carries stock. */
+    /* Neither carries stock, so neither has orders to poll or stock to read. */
     pushStock: () => {
       throw new ChannelNotConfigured(channel);
     },
+    fetchOrders: () => Promise.reject(new ChannelNotConfigured(channel)),
+    fetchStock: () => Promise.reject(new ChannelNotConfigured(channel)),
     parseWebhook: () => [],
 
     /* Shared with WhatsApp — one app, one signing secret, one verify token. */

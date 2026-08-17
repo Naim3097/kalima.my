@@ -124,6 +124,68 @@ export const getSocialLinks = cache(async (): Promise<SocialLink[]> => {
     .map((platform) => ({ platform, href: byPlatform[platform] as string }));
 });
 
+export type ContactChannels = {
+  /** Profile URL, and the handle derived from it for display. */
+  instagram: { href: string; handle: string } | null;
+  /** wa.me link built from the configured number. */
+  whatsapp: { href: string; display: string } | null;
+};
+
+/*
+  The two channels the custom-sizing page invites people to use.
+
+  Read from store_settings rather than written into the page copy, so the
+  handle and the number live in one editable place. The copy says "DM us on
+  Instagram"; these render as the actual buttons underneath it.
+
+  Returns null per channel when unset, and the page simply omits that button —
+  a "WhatsApp us" link to wa.me/ with no number is worse than no button.
+*/
+export const getContactChannels = cache(async (): Promise<ContactChannels> => {
+  const supabase = createPublicClient();
+  if (!supabase) return { instagram: null, whatsapp: null };
+
+  const { data, error } = await supabase
+    .from("store_settings")
+    .select("social_instagram, social_whatsapp")
+    .eq("id", 1)
+    .maybeSingle();
+  if (error || !data) return { instagram: null, whatsapp: null };
+
+  const igUrl = (data.social_instagram as string | null)?.trim() || null;
+  const waRaw = (data.social_whatsapp as string | null)?.trim() || null;
+
+  /*
+    The handle is the last non-empty path segment of the profile URL. Parsing
+    can fail on a value that is not a URL at all, so fall back to showing
+    "Instagram" rather than throwing on the whole page for a cosmetic label.
+  */
+  let instagram: ContactChannels["instagram"] = null;
+  if (igUrl) {
+    let handle = "Instagram";
+    try {
+      const seg = new URL(igUrl).pathname.split("/").filter(Boolean).pop();
+      if (seg) handle = `@${seg}`;
+    } catch {
+      /* not a parseable URL — keep the generic label */
+    }
+    instagram = { href: igUrl, handle };
+  }
+
+  /*
+    wa.me accepts digits only — no +, spaces or dashes — so a number typed as
+    "+60 12-345 6789" must be stripped before it becomes a link, while the
+    human-readable form is what we show.
+  */
+  let whatsapp: ContactChannels["whatsapp"] = null;
+  if (waRaw) {
+    const digits = waRaw.replace(/\D/g, "");
+    if (digits) whatsapp = { href: `https://wa.me/${digits}`, display: waRaw };
+  }
+
+  return { instagram, whatsapp };
+});
+
 /** Maps the seed HERO_SLIDES (client shape) to HeroSlide. */
 function seedHero(): HeroSlide[] {
   return HERO_SLIDES.map((s) => ({

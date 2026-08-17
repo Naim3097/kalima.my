@@ -7,6 +7,7 @@ import {
   COLLECTIONS,
   variantKey,
   type Product,
+  type ProductAddon,
   type ColorOption,
   type CollectionMeta,
 } from "./catalog";
@@ -36,6 +37,7 @@ type ProductRow = {
   size_chart_url: string | null;
   best_seller: boolean;
   new_arrival: boolean;
+  offers_custom_sizing: boolean;
   tone: string;
   product_variants: {
     color_name: string;
@@ -55,7 +57,7 @@ type ProductRow = {
 
 const PRODUCT_SELECT = `
   id, slug, name, description, fabric, category, price_sen, sale_price_sen, size_chart_url,
-  best_seller, new_arrival, tone,
+  best_seller, new_arrival, offers_custom_sizing, tone,
   product_variants ( color_name, color_hex, size, color_position, position, stock_on_hand ),
   product_images ( url, color_name, position ),
   collection_products ( collections ( slug ) )
@@ -121,6 +123,7 @@ function mapProduct(row: ProductRow): Product {
     description: row.description ?? "",
     bestSeller: row.best_seller,
     newArrival: row.new_arrival,
+    offersCustomSizing: row.offers_custom_sizing,
     tone: row.tone,
     image: primaryImage,
     stock: row.product_variants.reduce((total, v) => total + v.stock_on_hand, 0),
@@ -148,6 +151,106 @@ export const fetchProducts = cache(async (): Promise<Product[]> => {
   return (data as unknown as ProductRow[]).map(mapProduct);
 });
 
+/*
+  Matching add-ons for one product.
+
+  A SEPARATE QUERY, not part of PRODUCT_SELECT, because only the PDP renders
+  these — folding them into the shared select would make every collection grid
+  and the search overlay pay for a two-level join they never read.
+
+  RLS already restricts the rows to pairs where both products are published
+  (see the product_addons migration), so nothing here re-checks that.
+*/
+type AddonRow = {
+  id: string;
+  addon_color_name: string | null;
+  label: string | null;
+  products: {
+    id: string;
+    slug: string;
+    name: string;
+    price_sen: number;
+    sale_price_sen: number | null;
+    product_variants: {
+      color_name: string;
+      color_hex: string;
+      color_position: number;
+      size: string;
+      price_sen: number | null;
+      stock_on_hand: number;
+    }[];
+    product_images: { url: string; color_name: string | null; position: number }[];
+  } | null;
+};
+
+async function fetchAddons(
+  supabase: NonNullable<ReturnType<typeof createPublicClient>>,
+  parentProductId: string,
+): Promise<ProductAddon[]> {
+  const { data, error } = await supabase
+    .from("product_addons")
+    .select(
+      `id, addon_color_name, label,
+       products:addon_product_id (
+         id, slug, name, price_sen, sale_price_sen,
+         product_variants ( color_name, color_hex, color_position, size, price_sen, stock_on_hand ),
+         product_images ( url, color_name, position )
+       )`,
+    )
+    .eq("parent_product_id", parentProductId)
+    .eq("active", true)
+    .order("sort_order", { ascending: true });
+
+  if (error) throw new Error(`fetchAddons failed: ${error.message}`);
+
+  const addons: ProductAddon[] = [];
+
+  for (const row of (data ?? []) as unknown as AddonRow[]) {
+    const p = row.products;
+    /* Defensive: a null embed means the row survived RLS but the product did
+       not — treat it as absent rather than rendering a nameless tickbox. */
+    if (!p || p.product_variants.length === 0) continue;
+
+    /*
+      The pinned colourway, or the first by position when staff left it unset —
+      which is the single-colour case, where there is nothing to pin.
+    */
+    const byPosition = [...p.product_variants].sort((a, b) => a.color_position - b.color_position);
+    const colorName = row.addon_color_name ?? byPosition[0].color_name;
+    const variants = p.product_variants.filter((v) => v.color_name === colorName);
+
+    /* A pinned colour that no longer exists (renamed, or its variants deleted)
+       leaves nothing to sell. Drop the row rather than offer an empty size map
+       that would disable itself for every size with no explanation. */
+    if (variants.length === 0) continue;
+
+    /*
+      The same coalesce resolveCartLines applies (src/lib/commerce.ts) —
+      variant override, else the product's sale price, else its list price. Any
+      other order here would show one figure on the PDP and charge another.
+    */
+    const unitSen = variants[0].price_sen ?? p.sale_price_sen ?? p.price_sen;
+
+    addons.push({
+      id: row.id,
+      productId: p.id,
+      slug: p.slug,
+      name: row.label ?? p.name,
+      colorName,
+      colorHex: variants[0].color_hex,
+      image:
+        p.product_images.find((i) => i.color_name === colorName)?.url ??
+        p.product_images
+          .filter((i) => !i.color_name)
+          .sort((a, b) => a.position - b.position)[0]?.url,
+      price: unitSen / 100,
+      stockBySize: Object.fromEntries(variants.map((v) => [v.size, v.stock_on_hand])),
+    });
+  }
+
+  return addons;
+}
+
 export const fetchProductBySlug = cache(
   async (slug: string): Promise<Product | undefined> => {
     const supabase = createPublicClient();
@@ -161,7 +264,10 @@ export const fetchProductBySlug = cache(
       .maybeSingle();
 
     if (error) throw new Error(`fetchProductBySlug(${slug}) failed: ${error.message}`);
-    return data ? mapProduct(data as unknown as ProductRow) : undefined;
+    if (!data) return undefined;
+
+    const product = mapProduct(data as unknown as ProductRow);
+    return { ...product, addons: await fetchAddons(supabase, product.id) };
   },
 );
 

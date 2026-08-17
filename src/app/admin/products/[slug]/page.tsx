@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AddonEditor } from "@/components/admin/AddonEditor";
 import { ProductForm } from "@/components/admin/ProductForm";
 import { ProductImages } from "@/components/admin/ProductImages";
 import { SizeChart } from "@/components/admin/SizeChart";
 import { VariantEditor } from "@/components/admin/VariantEditor";
-import { getProductForEdit } from "@/lib/admin";
+import { getProductForEdit, listAddonCandidates } from "@/lib/admin";
 
 type Params = { params: Promise<{ slug: string }> };
 
@@ -19,6 +20,8 @@ export default async function EditProductPage({ params }: Params) {
   const { slug } = await params;
   const product = await getProductForEdit(slug);
   if (!product) notFound();
+
+  const candidates = await listAddonCandidates(product.id);
 
   return (
     <div className="space-y-6">
@@ -49,6 +52,12 @@ export default async function EditProductPage({ params }: Params) {
         productId={product.id}
         productSlug={product.slug}
         url={product.sizeChartUrl}
+      />
+      <AddonEditor
+        productId={product.id}
+        productSlug={product.slug}
+        addons={product.addons}
+        candidates={candidates}
       />
       <VariantEditor productId={product.id} productSlug={product.slug} variants={product.variants} />
     </div>

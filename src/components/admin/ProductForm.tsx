@@ -50,6 +50,9 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
   const [newArrival, setNewArrival] = useState(product?.newArrival ?? false);
   const [tone, setTone] = useState(product?.tone ?? "#383c61");
   const [published, setPublished] = useState(product?.published ?? true);
+  const [offersCustomSizing, setOffersCustomSizing] = useState(
+    product?.offersCustomSizing ?? false,
+  );
 
   function onNameChange(value: string) {
     setName(value);
@@ -97,6 +100,7 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
         newArrival,
         tone,
         published,
+        offersCustomSizing,
       });
       if ("error" in res) {
         toast.error(res.error);
@@ -271,6 +275,18 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
               className="size-4 accent-navy"
             />
             Published
+          </label>
+          <label
+            className="flex cursor-pointer items-center gap-2 text-[13px] text-navy"
+            title="Shows a Custom sizing link beside the size guide on this product's page."
+          >
+            <input
+              type="checkbox"
+              checked={offersCustomSizing}
+              onChange={(e) => setOffersCustomSizing(e.target.checked)}
+              className="size-4 accent-navy"
+            />
+            Offer custom sizing
           </label>
         </div>
 
