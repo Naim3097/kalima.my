@@ -169,6 +169,59 @@ WhatsApp, Instagram, Facebook, Shopee and TikTok.
 | `EASYPARCEL_WEBHOOK_SECRET` | Tracking webhook returns 503 — fails closed |
 | Supabase unconfigured entirely | Catalog falls back to `seed.sql` and `/admin` is ungated (local demo mode) |
 
+## Environments
+
+**Two Supabase projects.** Local and Vercel Preview run `Kalima staging`; Vercel
+Production runs `Kalima`. Nothing in the code differs — every connection detail
+comes from `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` /
+`SUPABASE_SERVICE_ROLE_KEY`, scoped per environment in Vercel.
+
+| | Domain | Branch | Supabase |
+|---|---|---|---|
+| Production | `www.kalima.my` | `main` | `Kalima` |
+| Staging | `staging.kalima.my` | `staging` | `Kalima staging` |
+| Local | `localhost:3000` | — | `Kalima staging` |
+
+**Why they were split.** They shared one database until 2026-08-17, and it caused
+three separate incidents in a day: a payment-test product published for a test
+became reachable on the live site; real test orders (including a real RM11
+charge) landed in the live back office; and stock edited in the *localhost* admin
+did not appear on production for over two hours.
+
+That last one is the instructive case. `adjustStock` does call
+`revalidateProduct`, but **`revalidatePath` only purges the cache of the
+deployment that runs it.** Writes are instantly global; cache purges are not. So
+localhost purged localhost while production served a stale page until its own ISR
+window lapsed. **Edit the catalogue in the production admin** — the same edit made
+locally or on staging will not purge production.
+
+**`supabase db push` targets whatever is linked, and the link is invisible.** The
+CLI records it in `supabase/.temp/`, which is gitignored — there is no
+`config.toml` to read. This machine is linked to **staging**. Check with
+`supabase projects list` (the linked one is marked) before pushing, and re-run
+`supabase link --project-ref <ref>` to change target. Production migrations have
+been applied through the Supabase MCP rather than the CLI, so `db push` has never
+pointed at production.
+
+**Refreshing staging** — `node scripts/copy-catalogue.mjs` copies catalogue and
+CMS data from production. It works from an explicit allowlist and never copies
+orders, addresses, profiles, conversations, affiliates, the loyalty ledger, or
+`channel_connections` (marketplace access tokens). It refuses to run if the target
+is production, because it deletes before inserting. Needs
+`STAGING_SUPABASE_URL` / `STAGING_SUPABASE_SERVICE_ROLE_KEY` in `.env.local`.
+
+Staging's `product_images.url` still points at production's public bucket, so
+`NEXT_PUBLIC_LEGACY_IMAGE_HOST` allows that second host for `next/image`. Unset in
+production. New uploads made on staging land in staging's own bucket.
+
+Two knock-on facts worth knowing: staging's variants carry `stock_on_hand`
+without the `stock_movements` that explain it, so its ledger will not reconcile —
+expected, not a bug. And **migrations are now replayable from scratch**: building
+the second project revealed that `supabase db push` applies them with a narrower
+`search_path` than the dashboard, so unqualified `uuid_generate_v4()` and
+`gen_random_bytes()` failed on a fresh database. Both are fixed at source; see the
+note at the top of `20260720094446_catalog.sql`.
+
 ## Money & data integrity
 
 The rules every phase follows — worth knowing before changing anything downstream of an order:
