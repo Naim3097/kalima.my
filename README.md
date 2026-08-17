@@ -62,7 +62,8 @@ src/
   lib/supabase/          # Browser, public (session-less), server + admin clients
   lib/commerce.ts        # Typed access to the order RPCs (server-only, admin client)
   lib/admin.ts           # Back-office read models + staff-gated mutations
-  lib/payments/          # PaymentProvider seam + LeanX (bills, services, webhook verify)
+  lib/payments/          # PaymentProvider seam + LeanX & Atome adapters; settle.ts is
+                         #   the single place an order becomes paid, shared by both
   lib/shipping/          # EasyParcel client, OAuth tokens, rates, MY state → ISO codes
   lib/messaging/         # Audience segmentation (PDPA-gated) + campaign send pipeline
   lib/channels/          # Marketplace/messaging seam: adapters, tokens, sync worker, inbox
@@ -134,6 +135,7 @@ colour × size **variant matrix**, which `mapProduct()` collapses back into the 
 | Supabase auth + roles | `src/lib/auth.ts`, `src/proxy.ts` | 0 | ✅ live |
 | Orders + stock ledger | `src/lib/commerce.ts`, `create_order` / `mark_order_paid` | 2 | ✅ live |
 | **LeanX** payments (FPX + e-wallets) | `src/lib/payments/leanx.ts` → `/api/payments/webhook` | 2 | ✅ live |
+| **Atome** payments (BNPL, 3 instalments) | `src/lib/payments/atome.ts` → `/api/payments/atome/webhook` | 10 | ✅ built — needs merchant credentials |
 | Transactional email (Resend) | `src/lib/email/` | 2 | ✅ live |
 | Admin back office | `src/app/admin/`, `src/lib/admin.ts` | 3 | ✅ live |
 | **EasyParcel** (rates, booking, AWB, tracking) | `src/lib/shipping/` → `/api/shipping/*` | 4 | ✅ built — needs API credentials |
@@ -159,6 +161,9 @@ WhatsApp, Instagram, Facebook, Shopee and TikTok.
 | `SUPABASE_SERVICE_ROLE_KEY` | Order operations throw — required from Phase 2 on |
 | `LEANX_AUTH_TOKEN` / `LEANX_COLLECTION_UUID` | Checkout completes as "order received, payment pending" |
 | `LEANX_WEBHOOK_SECRET` | Payment webhook returns 401 — an order can never be marked paid |
+| `ATOME_USERNAME` / `ATOME_PASSWORD` | Atome is absent from the payment picker; LeanX unaffected |
+| `ATOME_CALLBACK_SECRET` | Atome callbacks are accepted unsigned — safe, because settlement reads the payment back from Atome over authenticated HTTPS rather than trusting the callback body. `/api/payments/health` warns while it is unset |
+| `ATOME_ENV` ≠ `production` | Atome stays on the `api.apaylater.net` sandbox — real money needs an explicit opt-in |
 | `RESEND_API_KEY` | Emails no-op silently |
 | `EASYPARCEL_*` | Shipping settings show disconnected; booking unavailable |
 | `EASYPARCEL_WEBHOOK_SECRET` | Tracking webhook returns 503 — fails closed |

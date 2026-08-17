@@ -308,17 +308,38 @@ export async function getOrderForCheckout(
 */
 export async function recordPendingPayment(
   orderId: string,
+  provider: string,
   providerRef: string,
   amountSen: number,
 ): Promise<void> {
   const { error } = await admin().from("payments").insert({
     order_id: orderId,
-    provider: "leanx",
+    /* Passed in, not hardcoded: this used to be the literal "leanx", which
+       would have filed every Atome attempt under the wrong gateway and made
+       the (provider, provider_ref) index meaningless across providers. */
+    provider,
     provider_ref: providerRef,
     status: "pending",
     amount_sen: amountSen,
   });
   if (error) throw new Error(`recordPendingPayment failed: ${error.message}`);
+}
+
+/*
+  How many payment attempts a provider already has on an order.
+
+  Atome needs this: its create-payment is idempotent on referenceId and it
+  cancels unpaid payments after 12 hours, so attempt N must carry a distinct
+  reference or it resurrects a cancelled record. See buildAtomeReference.
+*/
+export async function countPaymentAttempts(orderId: string, provider: string): Promise<number> {
+  const { count, error } = await admin()
+    .from("payments")
+    .select("id", { count: "exact", head: true })
+    .eq("order_id", orderId)
+    .eq("provider", provider);
+  if (error) throw new Error(`countPaymentAttempts failed: ${error.message}`);
+  return count ?? 0;
 }
 
 /*
@@ -337,9 +358,7 @@ export async function recordPendingPayment(
 export async function reconcileOrderPayment(
   reference: string,
 ): Promise<"paid" | "failed" | "pending"> {
-  const { getPaymentProvider } = await import("@/lib/payments");
-  const provider = getPaymentProvider();
-  if (!provider) return "pending";
+  const { providerByName } = await import("@/lib/payments");
 
   const { data: order } = await admin()
     .from("orders")
@@ -349,17 +368,29 @@ export async function reconcileOrderPayment(
   const orderId = order?.id as string | undefined;
   if (!orderId) return "pending";
 
+  /*
+    THE PAYMENT ROW DECIDES WHICH GATEWAY TO ASK, not the configured default.
+
+    This used to select the default provider first and then filter payments by
+    its name, which was correct only while LeanX was the sole gateway. With Atome
+    added, an Atome order would have matched no payment row and reported
+    "pending" forever — and had the default ever been Atome, a LeanX bill number
+    would have been sent to Atome's status endpoint.
+  */
   const { data: payment } = await admin()
     .from("payments")
-    .select("provider_ref, amount_sen")
+    .select("provider, provider_ref, amount_sen")
     .eq("order_id", orderId)
-    .eq("provider", provider.name)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   const billNo = payment?.provider_ref as string | undefined;
   if (!billNo) return "pending";
+
+  const provider = providerByName(String(payment?.provider ?? ""));
+  // The gateway that took this payment is no longer configured — nothing to ask.
+  if (!provider) return "pending";
 
   const verdict = await provider.checkStatus(billNo);
 

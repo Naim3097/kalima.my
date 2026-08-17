@@ -14,12 +14,21 @@
   - the amount is decided server-side from the order, never from the client
 */
 
-export type PaymentServiceKind = "fpx" | "ewallet";
+export type PaymentServiceKind = "fpx" | "ewallet" | "bnpl";
 
 export type PaymentService = {
-  id: string; // LeanX payment_service_id
+  id: string; // LeanX payment_service_id, or the provider's own option id
   name: string;
   kind: PaymentServiceKind;
+  /*
+    Which provider owns this option.
+
+    Load-bearing now that more than one gateway is configured: the shopper picks
+    a single id out of one merged list, and startPayment has to know whose API to
+    call with it. Without this the id alone is ambiguous — "atome" and a LeanX
+    payment_service_id are both just strings.
+  */
+  provider: string;
 };
 
 export type CheckoutRequest = {
@@ -31,8 +40,15 @@ export type CheckoutRequest = {
   phone: string;
   /** The bank/e-wallet the shopper chose (payment_service_id). */
   paymentServiceId: string;
-  /** Where LeanX returns the shopper (display only — never trusted). */
+  /** Where the gateway returns the shopper (display only — never trusted). */
   returnUrl: string;
+  /*
+    Where to send a shopper who abandoned the payment, when the gateway
+    distinguishes that from success. Atome does (paymentCancelUrl); LeanX has a
+    single redirect and ignores this. Optional so the LeanX adapter needs no
+    change to keep compiling.
+  */
+  cancelUrl?: string;
   /** Our webhook endpoint (server-built, never from a request header). */
   callbackUrl: string;
 };

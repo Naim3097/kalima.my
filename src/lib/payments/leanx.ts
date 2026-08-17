@@ -180,7 +180,7 @@ async function fetchServices(paymentType: "WEB_PAYMENT" | "DIGITAL_PAYMENT"): Pr
     const k = key(s.name) || s.id;
     if (seen.has(k)) continue;
     seen.add(k);
-    merged.push({ ...s, kind });
+    merged.push({ ...s, kind, provider: "leanx" });
   }
   return merged;
 }
