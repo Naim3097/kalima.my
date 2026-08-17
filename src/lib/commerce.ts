@@ -273,24 +273,48 @@ export async function refundOrderFromWebhook(params: {
   someone else's pending order). `eq` on lower()'d values takes the pattern
   metacharacters out of play entirely.
 */
-export async function getOrderForCheckout(
-  reference: string,
-  email: string,
-): Promise<{
+/*
+  What the payment step needs to know about an order.
+
+  Carries the money breakdown and the lines, not just the total, because Atome
+  itemises: it rejects create-payment without per-item detail, and items without
+  the shipping and tax parts cannot be reconciled against the total on an order
+  that carried a discount. LeanX uses only `total_sen` and ignores the rest.
+*/
+export type CheckoutOrder = {
   id: string;
   reference: string;
   email: string;
   phone: string | null;
   total_sen: number;
+  subtotal_sen: number;
+  shipping_sen: number;
+  tax_sen: number;
   status: string;
   shipping_address: OrderAddress | null;
-} | null> {
+  items: {
+    product_name: string;
+    variant_sku: string;
+    color_name: string;
+    size: string;
+    qty: number;
+    unit_price_sen: number;
+  }[];
+};
+
+export async function getOrderForCheckout(
+  reference: string,
+  email: string,
+): Promise<CheckoutOrder | null> {
   const wanted = email.trim().toLowerCase();
   if (!wanted) return null;
 
   const { data, error } = await admin()
     .from("orders")
-    .select("id, reference, email, phone, total_sen, status, shipping_address")
+    .select(
+      `id, reference, email, phone, total_sen, subtotal_sen, shipping_sen, tax_sen, status, shipping_address,
+       order_items ( product_name, variant_sku, color_name, size, qty, unit_price_sen )`,
+    )
     .eq("reference", reference)
     .maybeSingle();
   if (error) throw new Error(`getOrderForCheckout failed: ${error.message}`);
@@ -298,7 +322,13 @@ export async function getOrderForCheckout(
 
   // Compare in the app, so no attacker-supplied pattern ever reaches the query.
   if (data.email.trim().toLowerCase() !== wanted) return null;
-  return data;
+
+  /* The embed comes back as `order_items`; flatten it to `items` so callers see
+     the shape OrderView already uses rather than the query's. */
+  const { order_items, ...order } = data as Omit<CheckoutOrder, "items"> & {
+    order_items: CheckoutOrder["items"] | null;
+  };
+  return { ...order, items: order_items ?? [] };
 }
 
 /*
@@ -308,17 +338,38 @@ export async function getOrderForCheckout(
 */
 export async function recordPendingPayment(
   orderId: string,
+  provider: string,
   providerRef: string,
   amountSen: number,
 ): Promise<void> {
   const { error } = await admin().from("payments").insert({
     order_id: orderId,
-    provider: "leanx",
+    /* Passed in, not hardcoded: this used to be the literal "leanx", which
+       would have filed every Atome attempt under the wrong gateway and made
+       the (provider, provider_ref) index meaningless across providers. */
+    provider,
     provider_ref: providerRef,
     status: "pending",
     amount_sen: amountSen,
   });
   if (error) throw new Error(`recordPendingPayment failed: ${error.message}`);
+}
+
+/*
+  How many payment attempts a provider already has on an order.
+
+  Atome needs this: its create-payment is idempotent on referenceId and it
+  cancels unpaid payments after 12 hours, so attempt N must carry a distinct
+  reference or it resurrects a cancelled record. See buildAtomeReference.
+*/
+export async function countPaymentAttempts(orderId: string, provider: string): Promise<number> {
+  const { count, error } = await admin()
+    .from("payments")
+    .select("id", { count: "exact", head: true })
+    .eq("order_id", orderId)
+    .eq("provider", provider);
+  if (error) throw new Error(`countPaymentAttempts failed: ${error.message}`);
+  return count ?? 0;
 }
 
 /*
@@ -337,9 +388,7 @@ export async function recordPendingPayment(
 export async function reconcileOrderPayment(
   reference: string,
 ): Promise<"paid" | "failed" | "pending"> {
-  const { getPaymentProvider } = await import("@/lib/payments");
-  const provider = getPaymentProvider();
-  if (!provider) return "pending";
+  const { providerByName } = await import("@/lib/payments");
 
   const { data: order } = await admin()
     .from("orders")
@@ -349,17 +398,29 @@ export async function reconcileOrderPayment(
   const orderId = order?.id as string | undefined;
   if (!orderId) return "pending";
 
+  /*
+    THE PAYMENT ROW DECIDES WHICH GATEWAY TO ASK, not the configured default.
+
+    This used to select the default provider first and then filter payments by
+    its name, which was correct only while LeanX was the sole gateway. With Atome
+    added, an Atome order would have matched no payment row and reported
+    "pending" forever — and had the default ever been Atome, a LeanX bill number
+    would have been sent to Atome's status endpoint.
+  */
   const { data: payment } = await admin()
     .from("payments")
-    .select("provider_ref, amount_sen")
+    .select("provider, provider_ref, amount_sen")
     .eq("order_id", orderId)
-    .eq("provider", provider.name)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
   const billNo = payment?.provider_ref as string | undefined;
   if (!billNo) return "pending";
+
+  const provider = providerByName(String(payment?.provider ?? ""));
+  // The gateway that took this payment is no longer configured — nothing to ask.
+  if (!provider) return "pending";
 
   const verdict = await provider.checkStatus(billNo);
 

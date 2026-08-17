@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
+  countPaymentAttempts,
   createOrder,
   resolveCartLines,
   validateDiscount,
@@ -11,7 +12,7 @@ import {
   type CartRef,
   type DiscountResult,
 } from "@/lib/commerce";
-import { getPaymentProvider } from "@/lib/payments";
+import { buildAtomeReference, configuredProviders, providerForService } from "@/lib/payments";
 import { sendOrderReceivedEmail } from "@/lib/email";
 
 /*
@@ -143,9 +144,9 @@ export async function placeOrder(
     maxAge: 60 * 60,
   });
 
-  // With a gateway configured, go pick a bank/e-wallet; otherwise the order
-  // sits pending and we show the confirmation directly.
-  redirect(getPaymentProvider() ? "/checkout/pay" : "/checkout/success");
+  // With ANY gateway configured, go pick a method; otherwise the order sits
+  // pending and we show the confirmation directly.
+  redirect(configuredProviders().length ? "/checkout/pay" : "/checkout/success");
 }
 
 /*
@@ -154,9 +155,16 @@ export async function placeOrder(
   record the pending payment, and hand off to the hosted page.
 */
 export async function startPayment(paymentServiceId: string): Promise<PlaceOrderState> {
-  const provider = getPaymentProvider();
-  if (!provider) return { error: "Payment is not available right now." };
   if (!paymentServiceId) return { error: "Please choose how you'd like to pay." };
+
+  /*
+    The chosen option decides the gateway. Resolved from the id rather than
+    taking a provider name from the client: a caller who could name the provider
+    could pair an Atome option with LeanX's adapter, and the mismatch would only
+    surface as a failed bill after the shopper committed.
+  */
+  const provider = providerForService(paymentServiceId);
+  if (!provider) return { error: "Payment is not available right now." };
 
   const jar = await cookies();
   const raw = jar.get("kalima_order")?.value;
@@ -184,18 +192,77 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
     return { error: "Payment is temporarily unavailable. Please try again shortly." };
   }
 
-  const session = await provider.createCheckout({
-    reference: order.reference,
-    amountSen: order.total_sen, // server-side total, never the client's
-    fullName: order.shipping_address?.recipient ?? "Customer",
-    email: order.email,
-    phone: order.phone ?? "",
-    paymentServiceId,
-    returnUrl: `${origin}/checkout/success`,
-    callbackUrl: `${origin}/api/payments/webhook`,
-  });
+  const isAtome = provider.name === "atome";
 
-  await recordPendingPayment(order.id, session.providerRef, order.total_sen);
+  /*
+    Atome takes OUR reference as its payment id (its create call is idempotent on
+    it), so the per-attempt reference is computed here and passed through the
+    paymentServiceId slot — which for Atome is the reference, not a bank id.
+    LeanX generates its own bill_no and takes the shopper's chosen bank instead.
+  */
+  const serviceOrReference = isAtome
+    ? buildAtomeReference(order.reference, await countPaymentAttempts(order.id, "atome"))
+    : paymentServiceId;
+
+  let session;
+  try {
+    session = await provider.createCheckout({
+      reference: order.reference,
+      amountSen: order.total_sen, // server-side total, never the client's
+      fullName: order.shipping_address?.recipient ?? "Customer",
+      email: order.email,
+      phone: order.phone ?? "",
+      paymentServiceId: serviceOrReference,
+      /*
+        From the ORDER, not the form — the order's address is what was priced
+        and what will be shipped, and by this step the form is long gone.
+      */
+      shippingAddress: order.shipping_address
+        ? {
+            line1: order.shipping_address.line1,
+            line2: order.shipping_address.line2,
+            city: order.shipping_address.city,
+            postcode: order.shipping_address.postcode,
+            state: order.shipping_address.state,
+            country: order.shipping_address.country ?? "MY",
+          }
+        : undefined,
+      /* Straight from the order rows — the prices that were actually charged,
+         not anything recomputed here. */
+      lines: order.items.map((i) => ({
+        sku: i.variant_sku,
+        name: i.product_name,
+        variation: `${i.color_name} · ${i.size}`,
+        qty: i.qty,
+        unitPriceSen: i.unit_price_sen,
+      })),
+      subtotalSen: order.subtotal_sen,
+      shippingSen: order.shipping_sen,
+      taxSen: order.tax_sen,
+      returnUrl: `${origin}/checkout/success`,
+      // Atome distinguishes abandonment from success; send them back to pick again.
+      cancelUrl: `${origin}/checkout/pay`,
+      callbackUrl: isAtome
+        ? `${origin}/api/payments/atome/webhook`
+        : `${origin}/api/payments/webhook`,
+    });
+  } catch (e) {
+    /*
+      Show the gateway's own reason rather than a generic failure. Atome's
+      documented rejections — an amount outside this merchant's limits, an
+      unreachable callback — are configuration problems, and a shopper staring at
+      "something went wrong" gives the operator nothing to go on.
+    */
+    console.error(`[payments] ${provider.name} createCheckout failed for ${order.reference}:`, e);
+    const detail = e instanceof Error ? e.message : "";
+    return {
+      error: detail.startsWith("Atome requires")
+        ? detail
+        : "That payment method could not be started. Please try another.",
+    };
+  }
+
+  await recordPendingPayment(order.id, provider.name, session.providerRef, order.total_sen);
   redirect(session.redirectUrl);
 }
 

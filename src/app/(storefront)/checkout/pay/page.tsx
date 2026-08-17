@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { formatRM } from "@/lib/format";
 import { getOrderForCheckout } from "@/lib/commerce";
-import { getPaymentProvider } from "@/lib/payments";
+import { getPaymentProvider, listAllPaymentServices } from "@/lib/payments";
 import PaymentMethodPicker from "@/components/checkout/PaymentMethodPicker";
 
 export const metadata: Metadata = {
@@ -34,7 +34,12 @@ export default async function ChoosePaymentPage() {
   if (!order) redirect("/checkout");
   if (order.status !== "pending") redirect("/checkout/success");
 
-  const services = await provider.listPaymentServices();
+  /*
+    Every configured gateway's options in one list, gated by the order total —
+    Atome is dropped below its RM10 floor rather than offered and then rejected
+    at create-payment time. See listAllPaymentServices.
+  */
+  const services = await listAllPaymentServices(order.total_sen);
 
   return (
     <div className="mx-auto max-w-lg px-4 py-16">
@@ -45,7 +50,12 @@ export default async function ChoosePaymentPage() {
       </p>
 
       <div className="mt-8">
-        <PaymentMethodPicker fpx={services.fpx} ewallet={services.ewallet} />
+        <PaymentMethodPicker
+          fpx={services.fpx}
+          ewallet={services.ewallet}
+          bnpl={services.bnpl}
+          totalSen={order.total_sen}
+        />
       </div>
     </div>
   );

@@ -2,20 +2,28 @@
 
 import { useState, useTransition } from "react";
 import { startPayment } from "@/app/checkout/actions";
-import type { PaymentService } from "@/lib/payments";
+import type { PaymentService } from "@/lib/payments/types";
+import { formatRM } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 
 /*
-  FPX bank / e-wallet chooser. The selected payment_service_id goes to the
-  startPayment action, which creates the LeanX bill and redirects to the hosted
-  payment page.
+  Every way to pay, in one list: FPX banks, e-wallets, and instalments.
+
+  The selected id goes to the startPayment action, which resolves which gateway
+  owns it — this component deliberately does not know or care. That is why the
+  three groups render identically and only the heading differs: a shopper is
+  choosing how to pay, not which of our vendors to route through.
 */
 export default function PaymentMethodPicker({
   fpx,
   ewallet,
+  bnpl,
+  totalSen,
 }: {
   fpx: PaymentService[];
   ewallet: PaymentService[];
+  bnpl: PaymentService[];
+  totalSen: number;
 }) {
   const [selected, setSelected] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +66,18 @@ export default function PaymentMethodPicker({
       </div>
     ) : null;
 
-  const empty = fpx.length === 0 && ewallet.length === 0;
+  const empty = fpx.length === 0 && ewallet.length === 0 && bnpl.length === 0;
+
+  /*
+    The instalment split, shown so the shopper sees the per-payment figure before
+    committing rather than discovering it on Atome's page.
+
+    Rounded UP to the sen: three payments of a rounded-down third can total less
+    than the order, and a split that does not add up to what is owed is worse
+    than one where the first payment is a sen larger. Atome computes the real
+    schedule — this is an honest preview of it, which is why it says "about".
+  */
+  const perInstalment = Math.ceil(totalSen / 3) / 100;
 
   return (
     <div className="space-y-6">
@@ -70,6 +89,13 @@ export default function PaymentMethodPicker({
         <>
           <Group title="Online Banking (FPX)" services={fpx} />
           <Group title="E-Wallet" services={ewallet} />
+          <Group title="Buy Now, Pay Later" services={bnpl} />
+          {bnpl.length > 0 && (
+            <p className="text-[12px] tracking-wide text-navy-400">
+              About {formatRM(perInstalment)} × 3, interest free. Atome will confirm your exact
+              schedule.
+            </p>
+          )}
         </>
       )}
 
