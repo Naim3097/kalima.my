@@ -239,6 +239,37 @@ export interface ChannelAdapter {
   pushStock(push: StockPush): Promise<void>;
 
   /*
+    Orders the platform recorded at or after `since` — the missed-webhook net.
+
+    The adapter owns pagination and returns the whole window; the worker will
+    not ask twice. Marketplaces cap how far back a single query may reach
+    (Shopee's order list is 15 days), so the worker clamps the window before
+    calling and an adapter may assume `since` is within its platform's limit.
+
+    Returning an order that was already imported is EXPECTED, not a fault: the
+    worker deliberately re-polls an overlapping window, and
+    record_channel_sale rejects the duplicate on (channel, external_order_id).
+    An adapter must therefore never try to filter out what it thinks we have
+    already seen — it has no way to know, and guessing would drop real orders.
+  */
+  fetchOrders(since: string): Promise<ChannelOrderInput[]>;
+
+  /*
+    The platform's OWN current sellable quantity for a listing — the drift check.
+
+    This is the one call that reads back rather than writes, and it is the only
+    thing that can catch the failure the whole queue is blind to: a push we
+    believe succeeded, that the marketplace did not apply. last_pushed_qty
+    records what we SENT; this records what they HAVE.
+
+    Returns null when the platform cannot answer for a reason that is not our
+    bug — listing deleted on their side, temporarily unavailable, rate-limited.
+    Null means "no comparison possible this round", and the worker logs it and
+    moves on. Throwing is reserved for a genuine failure, which retries.
+  */
+  fetchStock(listing: { externalItemId: string; externalModelId: string | null }): Promise<number | null>;
+
+  /*
     Authenticate an inbound webhook against the RAW body.
 
     Raw, because every platform signs the exact bytes it sent — re-serializing
@@ -323,6 +354,8 @@ export function unwiredAdapter(channel: Channel): ChannelAdapter {
     exchangeCode: notConfigured,
     refresh: notConfigured,
     pushStock: notConfigured,
+    fetchOrders: notConfigured,
+    fetchStock: notConfigured,
     /*
       FAILS CLOSED. An unwired adapter cannot authenticate anything, so it
       authenticates nothing — returning true here would leave the inbound routes

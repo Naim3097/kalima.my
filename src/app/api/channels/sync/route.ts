@@ -7,16 +7,29 @@ import { drain } from "@/lib/channels/sync";
   Drains the marketplace sync queue. Invoked by the Vercel cron in vercel.json,
   and by staff from the admin screen.
 
-  THE CRON IS DAILY (03:00), not every minute, because the project is on
-  Vercel's Hobby plan, which permits at most one cron run per day. A
-  sub-daily expression is rejected and fails the BUILD, not just the cron.
+  TWO LANES, because the work has two very different costs.
 
-  Daily is fine while no marketplace is connected — the drain is a no-op with
-  no ready channels. It is NOT fine once Shopee or TikTok go live: stock would
-  lag by up to 24 hours, which is how you oversell. Before connecting a
-  marketplace, either move to a plan allowing `* * * * *`, or drive this
-  endpoint from an external scheduler with the CRON_SECRET. The admin's
-  "Re-sync all" button works regardless and is the manual escape hatch.
+    FAST (default, no query string) — drain the push queue and poll each
+    connected channel for new orders. Cheap: a handful of API calls. Runs every
+    5 minutes from .github/workflows/channel-sync.yml.
+
+    DEEP (?reconcile=1) — everything the fast lane does, plus a reconcile sweep
+    that reads back each listing's quantity from the marketplace and queues a
+    correction where it disagrees with ours. One API read PER LISTING, so it is
+    nightly, not per-minute. This is the Vercel cron in vercel.json.
+
+  WHY THE FAST LANE IS NOT A VERCEL CRON. The project is on Vercel's Hobby
+  plan, which permits at most one cron run per day; a sub-daily expression is
+  rejected and fails the BUILD, not just the cron (verified against the team's
+  billing plan, August 2026). So the 5-minute lane is driven externally through
+  the CRON_SECRET below. If this ever moves to Pro, delete the workflow and add
+  a five-minute cron entry pointing at this path with no query string — nothing
+  in this file needs to change.
+
+  Daily alone would be fine while no marketplace is connected — the drain is a
+  no-op with no ready channels. It is NOT fine once Shopee or TikTok go live:
+  stock would lag by up to 24 hours, which is how you oversell. The admin's
+  "Sync now" and "Re-sync all" work regardless and are the manual escape hatch.
 
   AUTHENTICATION, and why it fails closed. This endpoint pushes inventory
   figures to external marketplaces. An unauthenticated version would let anyone
@@ -58,9 +71,17 @@ async function handle(request: Request) {
     return NextResponse.json({ error: "Not authorized" }, { status: 401 });
   }
 
+  /*
+    Opt-in, and only ever from the caller — never inferred from the clock. A
+    route that decided "it's 3am, sweep everything" would run the expensive
+    lane on whichever invocation happened to land in that hour, including a
+    staff member pressing "Sync now".
+  */
+  const reconcile = new URL(request.url).searchParams.get("reconcile") === "1";
+
   try {
-    const report = await drain();
-    return NextResponse.json({ ok: true, ...report });
+    const report = await drain({ reconcile });
+    return NextResponse.json({ ok: true, reconcile, ...report });
   } catch (err) {
     /*
       A 500 here is correct, unlike the inbound webhook's deliberate 200: the

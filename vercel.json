@@ -3,7 +3,7 @@
   "framework": "nextjs",
   "crons": [
     {
-      "path": "/api/channels/sync",
+      "path": "/api/channels/sync?reconcile=1",
       "schedule": "0 3 * * *"
     },
     {
