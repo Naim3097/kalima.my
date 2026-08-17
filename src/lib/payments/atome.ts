@@ -274,20 +274,41 @@ export const atome: PaymentProvider = {
       authenticated GET, so the worst a forged POST achieves is making us ask
       Atome about a reference we already own.
     */
+    /*
+      WATCH THIS WHEN YOU SET THE SECRET. The signature check runs before the
+      ping tolerance below, so if Atome's POST /auth reachability probe is sent
+      UNSIGNED, enabling the secret will make that probe 401 and /auth will go
+      back to reporting CALLBACK_FAILED — with real callbacks still working
+      fine. Ask the account manager whether the connectivity probe is signed;
+      if it is not, the check has to move after the referenceId test.
+    */
     if (CALLBACK_SECRET) {
       const sig = request.headers.get("x-signature") ?? "";
       if (!verifySignature(raw, sig)) throw new Error("Atome webhook signature invalid");
     }
 
-    let body: { referenceId?: string };
+    /*
+      A BODY WITH NO referenceId IS A PING, NOT A FAULT.
+
+      Atome's POST /auth connectivity check posts to this endpoint and treats
+      any non-20x as CALLBACK_FAILED — which is exactly what happened when this
+      threw: the credentials authenticated perfectly and Atome still reported
+      the integration unusable, because the reachability probe carries no
+      referenceId and got a 401 back.
+
+      Same reasoning the channel webhook already applies to heartbeats and
+      status pings. Acknowledging costs nothing: there is no reference, so no
+      order is looked up and nothing can be settled. 401 stays reserved for a
+      failed signature, which is a genuine authentication failure.
+    */
+    let referenceId = "";
     try {
-      body = JSON.parse(raw) as { referenceId?: string };
+      referenceId = String((JSON.parse(raw) as { referenceId?: string }).referenceId ?? "");
     } catch {
-      throw new Error("Atome webhook body is not JSON");
+      /* Not JSON — an empty probe body reads the same way as one without an id. */
     }
 
-    const referenceId = String(body.referenceId ?? "");
-    if (!referenceId) throw new Error("Atome webhook carried no referenceId");
+    if (!referenceId) return { paid: false, status: "unknown" };
 
     const payment = await getPayment(referenceId);
     if (!payment) {
