@@ -256,6 +256,8 @@ export type StoreSettings = {
   freeShippingThresholdSen: number; flatShippingSen: number; taxRateBps: number;
   /** Storefront profile URLs. Empty string = not set, so the icon is hidden. */
   socialInstagram: string; socialTiktok: string; socialFacebook: string; socialThreads: string;
+  /** WhatsApp contact number, as typed. A number, not a URL. */
+  socialWhatsapp: string;
 };
 
 export async function getStoreSettings(): Promise<StoreSettings> {
@@ -267,6 +269,7 @@ export async function getStoreSettings(): Promise<StoreSettings> {
     flatShippingSen: data.flat_shipping_sen, taxRateBps: data.tax_rate_bps,
     socialInstagram: data.social_instagram ?? "", socialTiktok: data.social_tiktok ?? "",
     socialFacebook: data.social_facebook ?? "", socialThreads: data.social_threads ?? "",
+    socialWhatsapp: data.social_whatsapp ?? "",
   };
 }
 
@@ -357,17 +360,77 @@ export type EditImage = {
   colorName: string | null; position: number;
 };
 
+/** A matching piece linked to this product, as the editor shows it. */
+export type EditAddon = {
+  /** The product_addons row id — what remove/reorder act on. */
+  id: string;
+  addonProductId: string;
+  slug: string;
+  /** The add-on product's own name, shown when no label overrides it. */
+  productName: string;
+  label: string | null;
+  /** Pinned colourway. Null = the add-on's first colour by position. */
+  colorName: string | null;
+  sortOrder: number;
+  active: boolean;
+  /** Colourways the add-on product actually has, for the picker. */
+  colors: string[];
+};
+
 export type ProductForEdit = {
   id: string; slug: string; name: string; description: string | null; fabric: string | null;
   category: "women" | "men" | "accessories"; priceSen: number;
   /** The "now" price. Null = not on sale; the storefront then shows priceSen plain. */
   salePriceSen: number | null;
   bestSeller: boolean; newArrival: boolean; tone: string; published: boolean;
+  /** Whether the PDP offers the made-to-measure route. */
+  offersCustomSizing: boolean;
   /** Product-level size chart image — one per product, no colour scope. */
   sizeChartUrl: string | null;
   variants: EditVariant[];
   images: EditImage[];
+  addons: EditAddon[];
 };
+
+/** Distinct colourways of a product, ordered as the storefront orders them. */
+function colorsOf(variants: { color_name: string; color_position: number }[]): string[] {
+  return [...new Map(
+    [...variants]
+      .sort((a, b) => a.color_position - b.color_position)
+      .map((v) => [v.color_name, true]),
+  ).keys()];
+}
+
+export type AddonCandidate = { id: string; slug: string; name: string; colors: string[] };
+
+/*
+  Products that may be attached to this one as a matching piece.
+
+  Excludes the product itself — the database rejects a self-link outright
+  (product_addons_not_self), and offering it in the picker only to fail on save
+  would be a worse way to learn that.
+
+  Unpublished products are included: staff commonly stage a matching piece and
+  publish both together, and the storefront's RLS already hides a link whose
+  add-on is unpublished, so nothing leaks by allowing it here.
+*/
+export async function listAddonCandidates(excludeProductId: string): Promise<AddonCandidate[]> {
+  const { data, error } = await db()
+    .from("products")
+    .select("id, slug, name, product_variants(color_name, color_position)")
+    .neq("id", excludeProductId)
+    .order("name", { ascending: true });
+  if (error) throw new Error(`listAddonCandidates failed: ${error.message}`);
+
+  return (data ?? []).map((p: Record<string, unknown>) => ({
+    id: p.id as string,
+    slug: p.slug as string,
+    name: p.name as string,
+    colors: colorsOf(
+      (p.product_variants ?? []) as { color_name: string; color_position: number }[],
+    ),
+  }));
+}
 
 export async function getProductForEdit(slug: string): Promise<ProductForEdit | null> {
   const { data, error } = await db()
@@ -399,14 +462,49 @@ export async function getProductForEdit(slug: string): Promise<ProductForEdit | 
     }))
     .sort((a: EditVariant, b: EditVariant) => a.colorPosition - b.colorPosition || a.position - b.position);
 
+  /*
+    Add-ons come in a second query rather than an embed: product_addons has TWO
+    foreign keys to products, so an embedded select would have to name which one
+    it means, and the nested colour list is a second hop beyond that.
+  */
+  const { data: addonRows, error: addonErr } = await db()
+    .from("product_addons")
+    .select(`id, label, addon_color_name, sort_order, active,
+             products:addon_product_id ( id, slug, name, product_variants(color_name, color_position) )`)
+    .eq("parent_product_id", data.id as string)
+    .order("sort_order", { ascending: true });
+  if (addonErr) throw new Error(`getProductForEdit addons failed: ${addonErr.message}`);
+
+  const addons: EditAddon[] = ((addonRows ?? []) as unknown as {
+    id: string; label: string | null; addon_color_name: string | null;
+    sort_order: number; active: boolean;
+    products: {
+      id: string; slug: string; name: string;
+      product_variants: { color_name: string; color_position: number }[];
+    } | null;
+  }[])
+    .filter((r) => r.products)
+    .map((r) => ({
+      id: r.id,
+      addonProductId: r.products!.id,
+      slug: r.products!.slug,
+      productName: r.products!.name,
+      label: r.label,
+      colorName: r.addon_color_name,
+      sortOrder: r.sort_order,
+      active: r.active,
+      colors: colorsOf(r.products!.product_variants ?? []),
+    }));
+
   return {
     id: data.id, slug: data.slug, name: data.name, description: data.description, fabric: data.fabric,
     category: data.category, priceSen: data.price_sen,
     salePriceSen: (data.sale_price_sen as number | null) ?? null,
     bestSeller: data.best_seller,
     newArrival: data.new_arrival, tone: data.tone, published: data.published,
+    offersCustomSizing: Boolean(data.offers_custom_sizing),
     sizeChartUrl: (data.size_chart_url as string | null) ?? null,
-    variants, images,
+    variants, images, addons,
   };
 }
 

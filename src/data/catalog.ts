@@ -10,6 +10,32 @@ export type ColorOption = {
   image?: string;
 };
 
+/*
+  A matching piece offered alongside this one — "Matching Palazzo Pants".
+
+  It is a whole product of its own, already sold separately, so this carries
+  only what the PDP needs to render the row and build a cart line from it. The
+  colourway is pinned by staff (see the product_addons migration); the SIZE is
+  mirrored from whatever the shopper picks on the parent, which is why stock
+  arrives as a per-size map rather than a single number.
+*/
+export type ProductAddon = {
+  /** The link row's id — React key and the unit of selection. */
+  id: string;
+  /** The add-on PRODUCT's id, for the cart line (not the link's). */
+  productId: string;
+  slug: string;
+  /** The staff label if set, else the add-on product's own name. */
+  name: string;
+  colorName: string;
+  colorHex: string;
+  image?: string;
+  /** Effective price in ringgit — sale price already applied. */
+  price: number;
+  /** Units on hand per size, for the pinned colourway only. */
+  stockBySize: Record<string, number>;
+};
+
 export type Product = {
   id: string;
   slug: string;
@@ -47,6 +73,18 @@ export type Product = {
    * treated as available so the offline demo still works.
    */
   stockByVariant?: Record<string, number>;
+  /**
+   * Matching pieces offered on this product's page. Loaded only by
+   * fetchProductBySlug — the collection grids never render them, so they do
+   * not pay for the join. Undefined on the seed fallback.
+   */
+  addons?: ProductAddon[];
+  /**
+   * Whether this piece can be tailored to measure. Drives the "Custom sizing"
+   * link beside the size guide; off by default, because the link invites a DM
+   * the team then has to honour.
+   */
+  offersCustomSizing?: boolean;
 };
 
 /** The key `stockByVariant` is indexed by. One place, so the PDP and the query

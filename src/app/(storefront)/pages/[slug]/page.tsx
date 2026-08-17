@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getContentPage, listContentPageSlugs } from "@/lib/cms";
+import { getContactChannels, getContentPage, listContentPageSlugs } from "@/lib/cms";
 
 const PAGES: Record<string, { title: string; body: string[] }> = {
   "about-kalima": {
@@ -36,6 +36,22 @@ const PAGES: Record<string, { title: string; body: string[] }> = {
     body: [
       "We offer a 14-day easy return policy from the day your order arrives. Items must be unworn with tags intact.",
       "The full self-service returns portal is on its way.",
+    ],
+  },
+  /*
+    Kept in step with the seeded content_pages row in the product_addons
+    migration. The DB row wins when present; this is what renders on a fresh
+    clone or an unconfigured Supabase.
+
+    The Instagram handle and WhatsApp number are deliberately absent from the
+    prose — they render below as buttons from store_settings, so there is one
+    place to change them.
+  */
+  "custom-sizing": {
+    title: "Custom Sizing",
+    body: [
+      "Looking for a tailored fit? We offer custom sizing on request — just DM us on Instagram or WhatsApp us with your measurements and preferred style, and we'll confirm fabric and style availability.",
+      "Please note: custom orders take up to 2–3 weeks and are not eligible for exchange.",
     ],
   },
   "size-guide": {
@@ -154,6 +170,45 @@ export default async function ContentPage({ params }: Props) {
           </p>
         ))}
       </div>
+      {slug === "custom-sizing" && <CustomSizingContacts />}
+    </div>
+  );
+}
+
+/*
+  The "DM us" buttons under the custom-sizing copy.
+
+  Scoped to this one page rather than every content page: it is the only one
+  whose entire purpose is to start a conversation. Each button is omitted when
+  its channel is unconfigured, so an empty store_settings shows prose alone
+  rather than links that go nowhere.
+*/
+async function CustomSizingContacts() {
+  const { instagram, whatsapp } = await getContactChannels();
+  if (!instagram && !whatsapp) return null;
+
+  return (
+    <div className="mt-10 flex flex-wrap gap-3">
+      {instagram && (
+        <a
+          href={instagram.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="label-caps border border-navy px-6 py-3 text-[11px] text-navy transition-colors hover:bg-navy hover:text-white"
+        >
+          DM us on Instagram {instagram.handle}
+        </a>
+      )}
+      {whatsapp && (
+        <a
+          href={whatsapp.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="label-caps border border-navy bg-navy px-6 py-3 text-[11px] text-white transition-colors hover:bg-navy-700"
+        >
+          WhatsApp {whatsapp.display}
+        </a>
+      )}
     </div>
   );
 }

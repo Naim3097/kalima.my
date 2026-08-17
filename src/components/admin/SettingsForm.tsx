@@ -30,6 +30,7 @@ export function SettingsForm({ settings }: { settings: StoreSettings }) {
   const [tiktok, setTiktok] = useState(settings.socialTiktok);
   const [facebook, setFacebook] = useState(settings.socialFacebook);
   const [threads, setThreads] = useState(settings.socialThreads);
+  const [whatsapp, setWhatsapp] = useState(settings.socialWhatsapp);
 
   function submit() {
     if (!storeName.trim()) {
@@ -54,6 +55,7 @@ export function SettingsForm({ settings }: { settings: StoreSettings }) {
         socialTiktok: tiktok,
         socialFacebook: facebook,
         socialThreads: threads,
+        socialWhatsapp: whatsapp,
       });
       if ("error" in res) {
         toast.error(res.error);
@@ -178,6 +180,9 @@ export function SettingsForm({ settings }: { settings: StoreSettings }) {
               ["set-tiktok", "TikTok", tiktok, setTiktok, "https://www.tiktok.com/@yourhandle"],
               ["set-facebook", "Facebook", facebook, setFacebook, "https://www.facebook.com/yourpage"],
               ["set-threads", "Threads", threads, setThreads, "https://www.threads.com/@yourhandle"],
+              /* A number, not a URL — it becomes the wa.me link on the custom
+                 sizing page, and is shown as typed. */
+              ["set-whatsapp", "WhatsApp number", whatsapp, setWhatsapp, "+60 12-345 6789"],
             ] as const
           ).map(([id, label, value, set, placeholder]) => (
             <div key={id} className="space-y-2">

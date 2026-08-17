@@ -4,7 +4,13 @@ import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { toast } from "sonner";
-import { discountPercent, effectivePrice, variantKey, type Product } from "@/data/catalog";
+import {
+  discountPercent,
+  effectivePrice,
+  variantKey,
+  type Product,
+  type ProductAddon,
+} from "@/data/catalog";
 import { formatRM } from "@/lib/format";
 import { useCart } from "@/stores/cart";
 import { useWishlist } from "@/stores/wishlist";
@@ -44,6 +50,9 @@ export default function ProductDetail({ product }: { product: Product }) {
   const [size, setSize] = useState<string | null>(
     product.sizes.length === 1 ? product.sizes[0] : null,
   );
+  /* Ticked add-ons, by product_addons row id. Cleared after a successful add
+     so the next configuration starts clean. */
+  const [chosen, setChosen] = useState<Set<string>>(new Set());
 
   const color = product.colors[colorIndex];
   const wished = mounted && ids.includes(product.id);
@@ -82,6 +91,39 @@ export default function ProductDetail({ product }: { product: Product }) {
     }
   };
 
+  /*
+    An add-on is offered in the SIZE the shopper picked on this product — that
+    is the whole promise of "matching". So availability is a question about the
+    add-on's own stock at that size, and cannot be answered before a size is
+    chosen.
+  */
+  const addons = product.addons ?? [];
+  const addonAvailable = (a: ProductAddon) => Boolean(size) && (a.stockBySize[size!] ?? 0) > 0;
+
+  /*
+    Choosing a size can strand an add-on the same way choosing a colour can
+    strand a size (see pickColor): the pants may exist in M and be gone in L.
+    Prune on every size change, so a tick made at M cannot survive into an L
+    that has nothing to sell and reach the bag as a line checkout will reject.
+  */
+  const pickSize = (s: string) => {
+    setSize(s);
+    setChosen((prev) => {
+      const next = new Set([...prev].filter((id) => {
+        const a = addons.find((x) => x.id === id);
+        return a ? (a.stockBySize[s] ?? 0) > 0 : false;
+      }));
+      return next.size === prev.size ? prev : next;
+    });
+  };
+
+  const toggleAddon = (id: string) =>
+    setChosen((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+
   const addToBag = () => {
     if (!size || !selectedInStock) return;
     add({
@@ -94,9 +136,34 @@ export default function ProductDetail({ product }: { product: Product }) {
       tone: color.hex,
       image: mainImage,
     });
+
+    /*
+      Each add-on goes in as its OWN cart line, carrying the add-on product's
+      slug and pinned colour with the parent's size. resolveCartLines maps
+      slug+colour+size straight to a variant id, so the line is priced, stocked
+      and marketplace-synced by exactly the same paths as any other — no
+      special case anywhere downstream.
+    */
+    const picked = addons.filter((a) => chosen.has(a.id) && addonAvailable(a));
+    for (const a of picked) {
+      add({
+        productId: a.productId,
+        slug: a.slug,
+        name: a.name,
+        price: a.price,
+        color: a.colorName,
+        size,
+        tone: a.colorHex,
+        image: a.image,
+      });
+    }
+
     toast.success(`${product.name} added to your bag`, {
-      description: `${color.name} · ${size}`,
+      description:
+        `${color.name} · ${size}` +
+        (picked.length ? ` — with ${picked.map((a) => a.name).join(", ")}` : ""),
     });
+    setChosen(new Set());
     setCartOpen(true);
   };
 
@@ -193,8 +260,9 @@ export default function ProductDetail({ product }: { product: Product }) {
         </div>
 
         <div className="mt-8">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex items-center justify-between gap-4">
             <p className="label-caps text-navy-400">Size</p>
+            <div className="flex items-center gap-4">
             {/* This product's own chart when it has one; the general guide page
                 otherwise, so the link is never a dead end. */}
             {product.sizeChart ? (
@@ -231,6 +299,17 @@ export default function ProductDetail({ product }: { product: Product }) {
                 Size guide
               </Link>
             )}
+            {/* Only where the piece can actually be tailored — the link invites
+                a DM the team then has to honour. */}
+            {product.offersCustomSizing && (
+              <Link
+                href="/pages/custom-sizing"
+                className="text-[12px] tracking-wide text-navy-400 underline underline-offset-4 hover:text-navy"
+              >
+                Custom sizing
+              </Link>
+            )}
+            </div>
           </div>
           <div className="flex flex-wrap gap-2.5">
             {product.sizes.map((s) => {
@@ -238,7 +317,7 @@ export default function ProductDetail({ product }: { product: Product }) {
               return (
                 <button
                   key={s}
-                  onClick={() => available && setSize(s)}
+                  onClick={() => available && pickSize(s)}
                   disabled={!available}
                   aria-disabled={!available}
                   title={available ? undefined : "Sold out in this colour"}
@@ -256,6 +335,53 @@ export default function ProductDetail({ product }: { product: Product }) {
             })}
           </div>
         </div>
+
+        {/*
+          Matching pieces. Each is a separate product with its own stock, so a
+          row can be sold out in the chosen size while the parent is fine — and
+          nothing can be judged at all until a size is picked, because the size
+          is what the add-on inherits.
+        */}
+        {addons.length > 0 && (
+          <div className="mt-8">
+            <p className="label-caps mb-3 text-navy-400">Add ons</p>
+            <div className="space-y-1">
+              {addons.map((a) => {
+                const available = addonAvailable(a);
+                const ticked = chosen.has(a.id);
+                return (
+                  <label
+                    key={a.id}
+                    className={`flex items-center gap-3 py-1.5 text-[13px] tracking-wide ${
+                      available ? "cursor-pointer text-navy" : "cursor-not-allowed text-navy-300"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={ticked && available}
+                      disabled={!available}
+                      onChange={() => toggleAddon(a.id)}
+                      className="h-4 w-4 shrink-0 cursor-pointer accent-navy disabled:cursor-not-allowed"
+                    />
+                    <span className="flex-1">
+                      {a.name}
+                      <span className="text-navy-400"> · {a.colorName}</span>
+                    </span>
+                    {/* Say WHY it cannot be ticked. "Sold out" with no size
+                        named reads as the whole product being gone. */}
+                    <span className={available ? "" : "text-[12px]"}>
+                      {available
+                        ? formatRM(a.price)
+                        : size
+                          ? `Sold out in ${size}`
+                          : "Select a size"}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="mt-9 flex gap-3">
           <Button

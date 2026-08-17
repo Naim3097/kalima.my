@@ -857,6 +857,8 @@ export type ProductInput = {
   newArrival: boolean;
   tone: string;
   published: boolean;
+  /** Shows the "Custom sizing" link on this product's page. */
+  offersCustomSizing: boolean;
 };
 
 export async function saveProduct(input: ProductInput): Promise<ActionResult & { slug?: string }> {
@@ -882,6 +884,7 @@ export async function saveProduct(input: ProductInput): Promise<ActionResult & {
     new_arrival: input.newArrival,
     tone: input.tone.trim() || "#383c61",
     published: input.published,
+    offers_custom_sizing: input.offersCustomSizing,
   };
 
   const { error } = input.id
@@ -1662,6 +1665,133 @@ export async function clearProductSizeChart(
   return { ok: true };
 }
 
+/* ---- Matching add-ons --------------------------------------------------- */
+
+/*
+  Links another product as a matching piece on this one's PDP.
+
+  The colourway is PINNED here rather than mirrored from the parent at render
+  time — "matching" is a merchandising judgement (a Cherry abaya may pair with
+  Black pants), and even a shared colour only mirrors correctly while both
+  products spell it identically. Null means "the add-on's first colourway",
+  which is the single-colour case.
+
+  The size is not stored at all: it is whatever the shopper picks on the parent.
+*/
+export async function addProductAddon(input: {
+  parentProductId: string;
+  parentSlug: string;
+  addonProductId: string;
+  colorName?: string | null;
+  label?: string | null;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (input.parentProductId === input.addonProductId) {
+    return { error: "A product cannot be its own add-on." };
+  }
+
+  /* Append: the highest existing sort_order plus one, so a new link lands at
+     the bottom of the list rather than silently tying with an existing row. */
+  const { data: last } = await db
+    .from("product_addons")
+    .select("sort_order")
+    .eq("parent_product_id", input.parentProductId)
+    .order("sort_order", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { error } = await db.from("product_addons").insert({
+    parent_product_id: input.parentProductId,
+    addon_product_id: input.addonProductId,
+    addon_color_name: input.colorName?.trim() || null,
+    label: input.label?.trim() || null,
+    sort_order: ((last?.sort_order as number | undefined) ?? -1) + 1,
+  });
+  /* The pair is uniquely indexed, so a double-click reports plainly rather
+     than surfacing a Postgres constraint name. */
+  if (error) {
+    return {
+      error: error.code === "23505"
+        ? "That product is already linked as an add-on."
+        : error.message,
+    };
+  }
+
+  await logAudit(db, {
+    action: "product_addon.added", entityType: "product", entityId: input.parentSlug,
+    summary: `Add-on linked to ${input.parentSlug}`,
+    meta: { addon_product_id: input.addonProductId, color: input.colorName ?? null },
+  });
+
+  revalidateProduct(input.parentSlug);
+  return { ok: true };
+}
+
+/** Edits an existing link — colourway, label, or whether it shows at all. */
+export async function updateProductAddon(input: {
+  id: string;
+  parentSlug: string;
+  colorName?: string | null;
+  label?: string | null;
+  active?: boolean;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const patch: Record<string, unknown> = {};
+  if (input.colorName !== undefined) patch.addon_color_name = input.colorName?.trim() || null;
+  if (input.label !== undefined) patch.label = input.label?.trim() || null;
+  if (input.active !== undefined) patch.active = input.active;
+  if (Object.keys(patch).length === 0) return { ok: true };
+
+  const { error } = await db.from("product_addons").update(patch).eq("id", input.id);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "product_addon.updated", entityType: "product", entityId: input.parentSlug,
+    summary: `Add-on updated on ${input.parentSlug}`, meta: { id: input.id, ...patch },
+  });
+
+  revalidateProduct(input.parentSlug);
+  return { ok: true };
+}
+
+export async function removeProductAddon(
+  id: string, parentSlug: string,
+): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { error } = await db.from("product_addons").delete().eq("id", id);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "product_addon.removed", entityType: "product", entityId: parentSlug,
+    summary: `Add-on removed from ${parentSlug}`, meta: { id },
+  });
+
+  revalidateProduct(parentSlug);
+  return { ok: true };
+}
+
+/** Persists a reordered list — ids in the order they should appear. */
+export async function reorderProductAddons(
+  ids: string[], parentSlug: string,
+): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  for (const [index, id] of ids.entries()) {
+    const { error } = await db.from("product_addons").update({ sort_order: index }).eq("id", id);
+    if (error) return { error: error.message };
+  }
+
+  revalidateProduct(parentSlug);
+  return { ok: true };
+}
+
 /* ---- CMS ---------------------------------------------------------------- */
 
 // Storefront surfaces the CMS drives — revalidated on every content edit.
@@ -1809,11 +1939,29 @@ export async function saveSettings(input: {
   storeName: string; storeEmail: string; storePhone: string; currency: string;
   freeShippingThresholdSen: number; flatShippingSen: number; taxRateBps: number;
   socialInstagram: string; socialTiktok: string; socialFacebook: string; socialThreads: string;
+  /** WhatsApp contact number — a phone number, not a URL. See below. */
+  socialWhatsapp: string;
 }): Promise<ActionResult> {
   let db;
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
 
   if (!input.storeName.trim()) return { error: "Store name is required." };
+
+  /*
+    WhatsApp is deliberately NOT run through cleanUrl with the others: it is a
+    phone number. It is stored as typed, so the site can display "+60 12-345
+    6789", and stripped to digits only when a wa.me link is built (see
+    getContactChannels in lib/cms.ts) because wa.me rejects punctuation.
+
+    Validated as "contains at least one digit" rather than by shape — Malaysian
+    and international formats vary too much to pattern-match without rejecting
+    something legitimate, and the failure mode of a bad number is a dead link,
+    not a security problem.
+  */
+  const whatsapp = input.socialWhatsapp.trim();
+  if (whatsapp && !/\d/.test(whatsapp)) {
+    return { error: "The WhatsApp number must contain digits." };
+  }
 
   const socials = {
     social_instagram: cleanUrl(input.socialInstagram),
@@ -1842,6 +1990,7 @@ export async function saveSettings(input: {
     free_shipping_threshold_sen: input.freeShippingThresholdSen,
     flat_shipping_sen: input.flatShippingSen,
     tax_rate_bps: input.taxRateBps,
+    social_whatsapp: whatsapp || null,
     ...(socials as Record<string, string | null>),
   }).eq("id", 1);
 
