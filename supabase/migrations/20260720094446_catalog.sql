@@ -1,12 +1,32 @@
 -- Kalima — catalog domain
 -- PROJECT_PLAN.md §5 "Catalog". Phase 2 swaps src/data/catalog.ts onto these tables.
 
+/*
+  IDs use gen_random_uuid(), NOT uuid_generate_v4(). Do not "restore" the latter.
+
+  uuid-ossp lives in the `extensions` schema, and `supabase db push` applies
+  migrations with a narrower search_path than the database default — so an
+  unqualified uuid_generate_v4() resolves in the dashboard and dies on a fresh
+  `db push` with "function uuid_generate_v4() does not exist". That made this
+  whole migration set unreplayable: it only ever worked because production was
+  built up statement by statement rather than pushed from scratch, and it failed
+  on the first file the moment a second project was created.
+
+  gen_random_uuid() is in pg_catalog, always in scope, and needs no extension.
+  20260722060902 already reached this conclusion for the commerce tables and
+  explains the same reasoning for SECURITY DEFINER functions with search_path='';
+  this brings the earlier files in line so a fresh database can be built from the
+  migrations alone.
+
+  The extension itself is left installed below: harmless, and other Supabase
+  machinery may expect it.
+*/
 create extension if not exists "uuid-ossp";
 
 create type product_category as enum ('women', 'men', 'accessories');
 
 create table collections (
-  id          uuid primary key default uuid_generate_v4(),
+  id          uuid primary key default gen_random_uuid(),
   slug        text not null unique,
   title       text not null,
   description text,
@@ -22,7 +42,7 @@ create table collections (
 create index collections_slug_idx on collections (slug) where published;
 
 create table products (
-  id           uuid primary key default uuid_generate_v4(),
+  id           uuid primary key default gen_random_uuid(),
   slug         text not null unique,
   name         text not null,
   description  text,
@@ -63,7 +83,7 @@ create table collection_products (
 
 -- Variants — the SKU grain. Stock lives here and only here (§4.2).
 create table product_variants (
-  id            uuid primary key default uuid_generate_v4(),
+  id            uuid primary key default gen_random_uuid(),
   product_id    uuid not null references products (id) on delete cascade,
   sku           text not null unique,
   color_name    text not null,
@@ -86,7 +106,7 @@ create index product_variants_product_idx on product_variants (product_id);
 -- Images — product-level, optionally scoped to one colourway.
 -- A per-colour row drives the swatch-click photo swap (Ruwa Kaftan, Phase 1).
 create table product_images (
-  id         uuid primary key default uuid_generate_v4(),
+  id         uuid primary key default gen_random_uuid(),
   product_id uuid not null references products (id) on delete cascade,
   -- Supabase Storage object path, or a /public path during the seed phase.
   url        text not null,

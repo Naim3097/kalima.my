@@ -102,7 +102,7 @@ begin
     raise exception 'cart is empty';
   end if;
 
-  new_order_id := uuid_generate_v4();
+  new_order_id := gen_random_uuid();
 
   -- First pass: price every line from the DB, sum the subtotal.
   for item in select * from jsonb_array_elements(p_items) loop

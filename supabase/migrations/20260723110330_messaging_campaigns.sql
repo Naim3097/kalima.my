@@ -21,9 +21,19 @@ create table newsletter_subscribers (
   source            text not null default 'footer',
   consent_at        timestamptz not null default now(),
   unsubscribed_at   timestamptz,
-  -- Random, per subscriber: an unsubscribe link must not be guessable from an
-  -- email address, or anyone could opt out someone else.
-  unsubscribe_token text not null default encode(gen_random_bytes(24), 'hex'),
+  /*
+    Random, per subscriber: an unsubscribe link must not be guessable from an
+    email address, or anyone could opt out someone else.
+
+    SCHEMA-QUALIFIED. gen_random_bytes comes from pgcrypto, which Supabase
+    installs into `extensions`, and `supabase db push` applies migrations with a
+    narrower search_path than the database default — so the unqualified call
+    works in the dashboard and fails a fresh push with "function
+    gen_random_bytes(integer) does not exist". Unlike gen_random_uuid() there is
+    no pg_catalog equivalent, so qualifying is the fix rather than substituting.
+    See the note at the top of 20260720094446_catalog.sql.
+  */
+  unsubscribe_token text not null default encode(extensions.gen_random_bytes(24), 'hex'),
   created_at        timestamptz not null default now()
 );
 

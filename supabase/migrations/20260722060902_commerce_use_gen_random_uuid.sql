@@ -3,6 +3,15 @@
   a SECURITY DEFINER function with search_path='' — both the explicit call and
   the table-default evaluation fail there. gen_random_uuid() is in pg_catalog,
   always in scope. Repoint the Phase 2 table defaults and recreate create_order.
+
+  NOTE (2026-08-17): the `alter column ... set default` statements below are now
+  no-ops on a FRESH database. Creating a second Supabase project showed that the
+  same problem breaks `supabase db push` outright — it applies migrations with a
+  narrower search_path, so 20260720094446 failed on its first table — so the
+  earlier files were repointed at source and now create these columns with
+  gen_random_uuid() already. They are kept because production applied this
+  migration when the defaults really did need changing, and re-running them
+  changes nothing. The create_order replacement below is still load-bearing.
 */
 alter table addresses            alter column id set default gen_random_uuid();
 alter table orders               alter column id set default gen_random_uuid();

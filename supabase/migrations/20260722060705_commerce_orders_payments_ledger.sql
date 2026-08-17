@@ -30,7 +30,7 @@ create sequence order_reference_seq start 10250;
 -- order instead). West/East MY matters for shipping (Phase 4).
 -- ---------------------------------------------------------------------------
 create table addresses (
-  id         uuid primary key default uuid_generate_v4(),
+  id         uuid primary key default gen_random_uuid(),
   user_id    uuid not null references auth.users (id) on delete cascade,
   recipient  text not null,
   phone      text,
@@ -53,7 +53,7 @@ create trigger addresses_updated_at before update on addresses
 -- Orders
 -- ---------------------------------------------------------------------------
 create table orders (
-  id               uuid primary key default uuid_generate_v4(),
+  id               uuid primary key default gen_random_uuid(),
   reference        text not null unique default ('KLM-' || nextval('order_reference_seq')),
   -- Null for guest checkout; set when a signed-in customer orders.
   user_id          uuid references auth.users (id) on delete set null,
@@ -85,7 +85,7 @@ create trigger orders_updated_at before update on orders
 -- Order items — every price/label snapshotted so history survives catalog edits
 -- ---------------------------------------------------------------------------
 create table order_items (
-  id                 uuid primary key default uuid_generate_v4(),
+  id                 uuid primary key default gen_random_uuid(),
   order_id           uuid not null references orders (id) on delete cascade,
   -- Kept for stock decrement + reorder; restricted so a variant in an order
   -- can't be hard-deleted out from under it.
@@ -105,7 +105,7 @@ alter table order_items enable row level security;
 -- Payments — one row per gateway attempt; idempotent on (provider, provider_ref)
 -- ---------------------------------------------------------------------------
 create table payments (
-  id           uuid primary key default uuid_generate_v4(),
+  id           uuid primary key default gen_random_uuid(),
   order_id     uuid not null references orders (id) on delete cascade,
   provider     text not null,
   provider_ref text,
@@ -126,7 +126,7 @@ create trigger payments_updated_at before update on payments
 -- Stock ledger — the audit trail; every stock change is a row here (§4.2)
 -- ---------------------------------------------------------------------------
 create table stock_movements (
-  id                 uuid primary key default uuid_generate_v4(),
+  id                 uuid primary key default gen_random_uuid(),
   product_variant_id uuid not null references product_variants (id) on delete cascade,
   type               stock_movement_type not null,
   qty_delta          integer not null,   -- negative = out (sale), positive = in
@@ -142,7 +142,7 @@ alter table stock_movements enable row level security;
 -- Discounts (foundation reused by affiliate + loyalty)
 -- ---------------------------------------------------------------------------
 create table discount_codes (
-  id              uuid primary key default uuid_generate_v4(),
+  id              uuid primary key default gen_random_uuid(),
   code            text not null unique,
   kind            text not null check (kind in ('percent', 'fixed', 'free_shipping')),
   -- percent: 0..100; fixed: sen off; free_shipping: ignored
@@ -158,7 +158,7 @@ create table discount_codes (
 alter table discount_codes enable row level security;
 
 create table discount_redemptions (
-  id               uuid primary key default uuid_generate_v4(),
+  id               uuid primary key default gen_random_uuid(),
   discount_code_id uuid not null references discount_codes (id) on delete cascade,
   order_id         uuid not null references orders (id) on delete cascade,
   user_id          uuid references auth.users (id) on delete set null,
