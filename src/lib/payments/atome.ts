@@ -212,6 +212,29 @@ export const atome: PaymentProvider = {
       );
     }
 
+    /*
+      Refuse before calling out rather than letting Atome refuse for us. Their
+      message ("Your request is missing customer shipping address") is accurate
+      but arrives as a failed payment attempt; this arrives as a bug report with
+      the order reference attached.
+    */
+    const addr = req.shippingAddress;
+    if (!addr) throw new Error("Atome requires a shipping address on the order");
+
+    /*
+      Atome models an address as free-form `lines` plus a postcode and country —
+      there are no separate city or state fields, so both go into `lines`. Blank
+      parts are dropped: an empty string in the array is worse than a shorter
+      address, because it reads as a missing line rather than an absent one.
+    */
+    const atomeAddress = {
+      countryCode: (addr.country || COUNTRY || "MY").toUpperCase(),
+      lines: [addr.line1, addr.line2, addr.city, addr.state]
+        .map((l) => (l ?? "").trim())
+        .filter(Boolean),
+      postCode: addr.postcode.trim(),
+    };
+
     const res = await fetch(`${BASE}/payments`, {
       method: "POST",
       headers: headers(),
@@ -231,6 +254,15 @@ export const atome: PaymentProvider = {
           fullName: req.fullName || "Customer",
           email: req.email.trim(),
         },
+        shippingAddress: atomeAddress,
+        /*
+          Billing is sent as the same address because checkout only ever
+          collects one. Sent proactively rather than waiting to be asked: the
+          schema is identical to shipping, so it cannot introduce a new
+          rejection, and a merchant that also requires billing would otherwise
+          fail the same way shipping just did.
+        */
+        billingAddress: atomeAddress,
       }),
       cache: "no-store",
     });

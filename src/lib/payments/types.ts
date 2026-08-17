@@ -51,6 +51,27 @@ export type CheckoutRequest = {
   cancelUrl?: string;
   /** Our webhook endpoint (server-built, never from a request header). */
   callbackUrl: string;
+  /*
+    The delivery address, for gateways that need it.
+
+    Atome's MY merchant configuration REQUIRES a shipping address and rejects
+    create-payment without one ("Your request is missing customer shipping
+    address") — the OpenAPI spec marks the field optional, so this is a
+    per-merchant rule that only shows up against a real account. LeanX asks for
+    no address at all and ignores this.
+
+    Optional on the type so LeanX's adapter needs no change, but the Atome
+    adapter refuses without it rather than letting Atome do the refusing.
+  */
+  shippingAddress?: {
+    line1: string;
+    line2?: string;
+    city: string;
+    postcode: string;
+    state: string;
+    /** ISO-3166 alpha-2. "MY" for every order we take today. */
+    country?: string;
+  };
 };
 
 export type CheckoutSession = {

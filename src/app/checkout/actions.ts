@@ -213,6 +213,20 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
       email: order.email,
       phone: order.phone ?? "",
       paymentServiceId: serviceOrReference,
+      /*
+        From the ORDER, not the form — the order's address is what was priced
+        and what will be shipped, and by this step the form is long gone.
+      */
+      shippingAddress: order.shipping_address
+        ? {
+            line1: order.shipping_address.line1,
+            line2: order.shipping_address.line2,
+            city: order.shipping_address.city,
+            postcode: order.shipping_address.postcode,
+            state: order.shipping_address.state,
+            country: order.shipping_address.country ?? "MY",
+          }
+        : undefined,
       returnUrl: `${origin}/checkout/success`,
       // Atome distinguishes abandonment from success; send them back to pick again.
       cancelUrl: `${origin}/checkout/pay`,
