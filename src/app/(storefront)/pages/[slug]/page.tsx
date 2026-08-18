@@ -24,12 +24,12 @@ const PAGES: Record<string, { title: string; body: string[] }> = {
       "Our store locator is coming soon. Meanwhile, shop online with free shipping for orders above RM300 nationwide.",
     ],
   },
+  /* Body deliberately empty — the previous copy was removed and nothing has
+     replaced it yet. The DB row wins when present, so this is only what a
+     fresh clone or an unconfigured Supabase renders. */
   shipping: {
     title: "Shipping",
-    body: [
-      "We ship nationwide (Semenanjung, Sabah & Sarawak) via trusted courier partners. Free shipping for orders above RM300.",
-      "Live courier rates and tracking arrive with our EasyParcel integration.",
-    ],
+    body: [],
   },
   returns: {
     title: "Returns & Exchanges",
