@@ -341,6 +341,9 @@ export async function recordPendingPayment(
   provider: string,
   providerRef: string,
   amountSen: number,
+  /* Where this attempt sent the shopper, so it can be RESUMED rather than
+     duplicated. See findLivePaymentAttempt. */
+  redirectUrl?: string,
 ): Promise<void> {
   const { error } = await admin().from("payments").insert({
     order_id: orderId,
@@ -351,8 +354,84 @@ export async function recordPendingPayment(
     provider_ref: providerRef,
     status: "pending",
     amount_sen: amountSen,
+    ...(redirectUrl ? { redirect_url: redirectUrl } : {}),
   });
   if (error) throw new Error(`recordPendingPayment failed: ${error.message}`);
+}
+
+/*
+  Is there already a payment attempt on this order that the shopper could still
+  complete?
+
+  THE POINT IS TO NOT MINT A SECOND BILL. Nothing stops a shopper reaching the
+  picker twice — "Try payment again" on the success page is a link straight to
+  it, and the back button works just as well. Each pass used to create a fresh
+  hosted bill, and both stayed payable: the first to be paid settles the order,
+  the second arrives at a settled order, gets `already_paid` and leaves the
+  customer charged twice for one thing.
+
+  Verdicts, and why each is what it is:
+
+    "paid"  the gateway says this attempt succeeded. The caller must send the
+            shopper to the confirmation, never to another payment page — this
+            is the case where a second bill costs real money.
+    "live"  still completable. Resume it: `redirectUrl` is the page they were
+            already on. Also returned when the lookup fails INSIDE the
+            provider's payable window, for the same reason the expiry sweep
+            holds there — an unreadable answer is not permission to charge
+            again.
+    "dead"  failed, cancelled, or past the window with nothing to show for it.
+            A new attempt is correct.
+
+  Deliberately reads the LATEST attempt only. An older one is either dead or
+  already resumed into this one, and asking the gateway about every historical
+  bill would add a round trip per retry to the slowest path in checkout.
+*/
+export async function findLivePaymentAttempt(
+  orderId: string,
+): Promise<{ verdict: "paid" | "live" | "dead"; redirectUrl: string | null; provider: string | null }> {
+  const { providerByName } = await import("@/lib/payments");
+
+  const { data: attempt } = await admin()
+    .from("payments")
+    .select("provider, provider_ref, status, redirect_url, created_at")
+    .eq("order_id", orderId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!attempt?.provider_ref) return { verdict: "dead", redirectUrl: null, provider: null };
+
+  const redirectUrl = (attempt.redirect_url as string | null) ?? null;
+  const providerName = attempt.provider as string;
+  const provider = providerByName(providerName);
+  /*
+    A gateway we can no longer ask — its credentials were removed. Treat the
+    attempt as live rather than dead: we cannot prove it is unpayable, and the
+    cost of being wrong is a double charge.
+  */
+  if (!provider) return { verdict: "live", redirectUrl, provider: providerName };
+
+  const verdict = await provider.checkStatus(attempt.provider_ref as string);
+
+  if (verdict.status === "completed") {
+    return { verdict: "paid", redirectUrl, provider: providerName };
+  }
+  if (verdict.status === "failed" || verdict.status === "cancelled") {
+    return { verdict: "dead", redirectUrl, provider: providerName };
+  }
+  if (verdict.status === "processing") {
+    return { verdict: "live", redirectUrl, provider: providerName };
+  }
+
+  // "unknown" — same clock rule reconcileOrderPayment applies.
+  const startedAt = Date.parse(String(attempt.created_at ?? ""));
+  const ageMinutes = Number.isFinite(startedAt) ? (Date.now() - startedAt) / 60_000 : Infinity;
+  return {
+    verdict: ageMinutes < provider.payableWindowMinutes ? "live" : "dead",
+    redirectUrl,
+    provider: providerName,
+  };
 }
 
 /*

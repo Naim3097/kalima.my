@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import {
   countPaymentAttempts,
   createOrder,
+  findLivePaymentAttempt,
+  reconcileOrderPayment,
   resolveCartLines,
   validateDiscount,
   getOrderForCheckout,
@@ -214,6 +216,58 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
   if (order.status !== "pending") return { error: "This order is no longer awaiting payment." };
 
   /*
+    ONE LIVE BILL PER ORDER.
+
+    Reaching this function twice is ordinary — "Try payment again" on the
+    success page links straight to the picker, and so does the back button.
+    Each pass used to create another hosted bill while the previous one was
+    still payable, so a shopper could complete both and be charged twice for
+    one order. The settlement side cannot undo that: the second payment lands
+    on an order that is already `paid`, and the money has to be returned by
+    hand.
+
+    So the gateway is asked about the existing attempt BEFORE another is
+    created. A live attempt is resumed at the page it already has rather than
+    replaced, which is also what "try again" means to the person clicking it.
+  */
+  const existing = await findLivePaymentAttempt(order.id);
+
+  if (existing.verdict === "paid") {
+    /*
+      They already paid, and the callback simply has not landed yet. Settling
+      here rather than only announcing it keeps this on the one settlement path
+      — reconcileOrderPayment shares the webhook's amount check and idempotency.
+    */
+    await reconcileOrderPayment(order.reference).catch(() => {});
+    redirect("/checkout/success");
+  }
+
+  if (existing.verdict === "live") {
+    /*
+      Resume silently only when they picked the same gateway — that IS "try
+      again", and the page they land on is the one they expect. Sending someone
+      who just chose Atome to a half-finished FPX page would be baffling, so
+      that case is explained rather than redirected.
+    */
+    if (existing.provider === provider.name && existing.redirectUrl) {
+      redirect(existing.redirectUrl);
+    }
+
+    /*
+      Different gateway, or an attempt from before redirect_url was stored.
+      Minting a second bill is the one thing not to do here, so say so. The wait
+      is bounded by the gateway's own window — and for Atome those twelve hours
+      are exactly the twelve hours their existing payment page still works, so
+      nobody is left without a way to pay.
+    */
+    return {
+      error: existing.redirectUrl
+        ? "You already have a payment in progress for this order. Please finish it, or wait for it to lapse before switching to another method."
+        : "You already have a payment in progress for this order. Please finish it in the tab where you started it.",
+    };
+  }
+
+  /*
     No localhost fallback here. In production headersOrigin() returns null when
     NEXT_PUBLIC_SITE_URL is unset, and minting a bill with a localhost — or a
     forged-Host — callback is worse than refusing: the customer would pay and
@@ -295,7 +349,14 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
     };
   }
 
-  await recordPendingPayment(order.id, provider.name, session.providerRef, order.total_sen);
+  await recordPendingPayment(
+    order.id,
+    provider.name,
+    session.providerRef,
+    order.total_sen,
+    // Kept so the next pass can resume THIS attempt instead of minting another.
+    session.redirectUrl,
+  );
   redirect(session.redirectUrl);
 }
 
