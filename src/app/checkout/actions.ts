@@ -62,7 +62,16 @@ const MAX_CART_LINES = 50;
 */
 export async function quoteCart(
   cart: CartRef[],
-  options?: { discountCode?: string; redeemPoints?: number },
+  options?: {
+    discountCode?: string;
+    redeemPoints?: number;
+    /* Shipping is a zone rate now, so the destination is part of the price.
+       The state arrives as the shopper types it; an incomplete address simply
+       quotes the default zone until they finish. */
+    country?: string;
+    state?: string | null;
+    chosenShippingSen?: number | null;
+  },
 ): Promise<(OrderQuote & { missing: CartRef[] }) | { error: string }> {
   if (!allow(await callerKey("quote"), 60, 60_000)) {
     return { error: "Too many attempts. Please wait a moment." };
@@ -81,6 +90,9 @@ export async function quoteCart(
       items: lines,
       discountCode: options?.discountCode,
       redeemPoints: options?.redeemPoints,
+      country: options?.country,
+      state: options?.state,
+      chosenShippingSen: options?.chosenShippingSen,
     });
     /* Reported, not thrown: the summary should still show what the rest of the
        bag costs while the shopper deals with the line that fell out. */

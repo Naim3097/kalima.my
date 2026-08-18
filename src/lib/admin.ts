@@ -1058,7 +1058,13 @@ export type SenderSettings = {
   easyparcelEnabled: boolean;
   /* What the CUSTOMER is charged. Distinct from everything else here, which is
      about booking the parcel: EasyParcel prices what the shop pays a courier,
-     these two decide what appears on the order. */
+     these decide what appears on the order.
+
+     Two Malaysian zones, because Sabah and Sarawak cost more to reach than
+     Semenanjung. Overseas is not here — it is whatever courier the customer
+     picks at checkout. */
+  shippingWestSen: number;
+  shippingEastSen: number;
   flatShippingSen: number;
   /* Spend at which shipping becomes free. 0 = no free shipping — see the
      free_shipping_threshold_off_at_zero migration. */
@@ -1077,7 +1083,7 @@ export type SenderSettings = {
 export async function getSenderSettings(): Promise<SenderSettings> {
   const { data, error } = await db()
     .from("store_settings")
-    .select("easyparcel_enabled, easyparcel_access_token, shipping_fallback_enabled, flat_shipping_sen, free_shipping_threshold_sen, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state")
+    .select("easyparcel_enabled, easyparcel_access_token, shipping_fallback_enabled, flat_shipping_sen, shipping_west_sen, shipping_east_sen, free_shipping_threshold_sen, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state")
     .eq("id", 1)
     .single();
   if (error) throw new Error(`getSenderSettings failed: ${error.message}`);
@@ -1085,6 +1091,8 @@ export async function getSenderSettings(): Promise<SenderSettings> {
     easyparcelEnabled: Boolean(data.easyparcel_enabled),
     connected: Boolean(data.easyparcel_access_token),
     fallbackEnabled: Boolean(data.shipping_fallback_enabled),
+    shippingWestSen: data.shipping_west_sen ?? 1000,
+    shippingEastSen: data.shipping_east_sen ?? 1500,
     flatShippingSen: data.flat_shipping_sen ?? 0,
     freeShippingThresholdSen: data.free_shipping_threshold_sen ?? 0,
     senderName: data.sender_name, senderPhone: data.sender_phone,

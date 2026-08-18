@@ -56,7 +56,8 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
 
   /* Held in RINGGIT for typing; the store keeps sen, so both convert on save.
      An empty threshold reads as 0, which is how the promotion is turned off. */
-  const [flatRm, setFlatRm] = useState((settings.flatShippingSen / 100).toFixed(2));
+  const [westRm, setWestRm] = useState((settings.shippingWestSen / 100).toFixed(2));
+  const [eastRm, setEastRm] = useState((settings.shippingEastSen / 100).toFixed(2));
   const [freeRm, setFreeRm] = useState(
     settings.freeShippingThresholdSen > 0 ? (settings.freeShippingThresholdSen / 100).toFixed(2) : "",
   );
@@ -79,7 +80,8 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
   function savePricing() {
     startTransition(async () => {
       const res = await saveShippingPricing({
-        flatShippingSen: Math.round(Number(flatRm || 0) * 100),
+        shippingWestSen: Math.round(Number(westRm || 0) * 100),
+        shippingEastSen: Math.round(Number(eastRm || 0) * 100),
         freeShippingThresholdSen: Math.round(Number(freeRm || 0) * 100),
       });
       if ("error" in res) toast.error(res.error);
@@ -107,46 +109,73 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
         <CardHeader title="What customers pay" />
         <CardBody>
         <p className="mb-4 text-[13px] tracking-wide text-navy-400">
-          Every order is charged the flat rate. To run a free-shipping promotion, set the
-          spend that earns it — leave it empty to charge everyone.
+          Malaysian orders pay by zone. Overseas orders pay the courier the customer picks at
+          checkout, so there is nothing to set for them here.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="ship-flat" className="label-caps text-navy-400">
-              Flat shipping rate (RM)
+            <Label htmlFor="ship-west" className="label-caps text-navy-400">
+              Semenanjung (RM)
             </Label>
             <Input
-              id="ship-flat"
+              id="ship-west"
               type="number"
               min={0}
               step="0.01"
-              value={flatRm}
-              onChange={(e) => setFlatRm(e.target.value)}
+              value={westRm}
+              onChange={(e) => setWestRm(e.target.value)}
               placeholder="10.00"
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="ship-free" className="label-caps text-navy-400">
-              Free shipping above (RM)
+            <Label htmlFor="ship-east" className="label-caps text-navy-400">
+              Sabah &amp; Sarawak (RM)
             </Label>
             <Input
-              id="ship-free"
+              id="ship-east"
               type="number"
               min={0}
               step="0.01"
-              value={freeRm}
-              onChange={(e) => setFreeRm(e.target.value)}
-              placeholder="No free shipping"
+              value={eastRm}
+              onChange={(e) => setEastRm(e.target.value)}
+              placeholder="15.00"
             />
+            {/* The one people file with Kuala Lumpur and Putrajaya because it is
+                a federal territory — but couriers price it as East. */}
+            <p className="text-[12px] tracking-wide text-navy-400">
+              Labuan is charged at this rate.
+            </p>
           </div>
+        </div>
+
+        <div className="mt-4 space-y-2 sm:w-1/2 sm:pr-2">
+          <Label htmlFor="ship-free" className="label-caps text-navy-400">
+            Free shipping above (RM)
+          </Label>
+          <Input
+            id="ship-free"
+            type="number"
+            min={0}
+            step="0.01"
+            value={freeRm}
+            onChange={(e) => setFreeRm(e.target.value)}
+            placeholder="No free shipping"
+          />
+          {/* Empty is the normal state: the shop charges for delivery. The field
+              stays so a promotion can be run without a deploy, and applies to
+              Malaysian orders only — an overseas parcel can cost more than the
+              goods. */}
+          <p className="text-[12px] tracking-wide text-navy-400">
+            Leave empty to charge everyone. Applies to Malaysian orders only.
+          </p>
         </div>
 
         {/* Says the rule back in plain words, because "0" and "empty" are the
             same instruction here and neither looks like one. */}
         <p className="mt-4 text-[13px] tracking-wide text-navy">
           {Number(freeRm) > 0
-            ? `Orders of RM${Number(freeRm).toFixed(2)} or more ship free. Everything else pays RM${Number(flatRm || 0).toFixed(2)}.`
-            : `No free shipping — every order pays RM${Number(flatRm || 0).toFixed(2)}.`}
+            ? `Malaysian orders of RM${Number(freeRm).toFixed(2)} or more ship free. Below that, RM${Number(westRm || 0).toFixed(2)} to Semenanjung and RM${Number(eastRm || 0).toFixed(2)} to Sabah & Sarawak.`
+            : `RM${Number(westRm || 0).toFixed(2)} to Semenanjung, RM${Number(eastRm || 0).toFixed(2)} to Sabah & Sarawak. Overseas pays the chosen courier.`}
         </p>
         <p className="mt-1 text-[12px] tracking-wide text-navy-400">
           A free-shipping discount code still applies whatever this says.

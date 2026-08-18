@@ -223,7 +223,11 @@ export const getFirstOrderDiscountSen = cache(async (): Promise<number> => {
 });
 
 /*
-  What the shop charges for delivery, in RINGGIT for display.
+  What the shop charges Malaysian customers for delivery, in RINGGIT, by zone.
+
+  Display only — the summary's figures come from the quote, which prices the
+  actual destination. This is the policy line under the address field, and it
+  has to quote the same numbers or the two contradict each other on one screen.
 
   The same two columns create_order reads, so the checkout summary and the
   written order cannot disagree — they used to be constants in the form, which
@@ -235,8 +239,8 @@ export const getFirstOrderDiscountSen = cache(async (): Promise<number> => {
   standard rate.
 */
 export const getShippingPricing = cache(
-  async (): Promise<{ flatRm: number; freeShippingAbove: number }> => {
-    const fallback = { flatRm: 10, freeShippingAbove: 0 };
+  async (): Promise<{ westRm: number; eastRm: number; freeShippingAbove: number }> => {
+    const fallback = { westRm: 10, eastRm: 15, freeShippingAbove: 0 };
 
     const supabase = createPublicClient();
     if (!supabase) return fallback;
@@ -247,9 +251,14 @@ export const getShippingPricing = cache(
     const { data, error } = await supabase.rpc("shop_public_settings");
     if (error || !data) return fallback;
 
-    const s = data as { flat_shipping_sen?: number; free_shipping_threshold_sen?: number };
+    const s = data as {
+      shipping_west_sen?: number;
+      shipping_east_sen?: number;
+      free_shipping_threshold_sen?: number;
+    };
     return {
-      flatRm: (s.flat_shipping_sen ?? 1000) / 100,
+      westRm: (s.shipping_west_sen ?? 1000) / 100,
+      eastRm: (s.shipping_east_sen ?? 1500) / 100,
       freeShippingAbove: (s.free_shipping_threshold_sen ?? 0) / 100,
     };
   },

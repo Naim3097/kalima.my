@@ -26,7 +26,8 @@ const MY_STATES = ["Selangor", "Kuala Lumpur", "Johor", "Penang", "Perak", "Keda
   the column defaults, so a store that has never opened the Shipping screen
   quotes the same numbers create_order will charge.
 */
-const FALLBACK_FLAT_SHIPPING = 10; // RM
+const FALLBACK_WEST_SHIPPING = 10; // RM — Semenanjung
+const FALLBACK_EAST_SHIPPING = 15; // RM — Sabah & Sarawak
 
 const fieldClass =
   "h-auto rounded-none border-navy/20 bg-white px-4 py-3 text-[14px] md:text-[14px] text-navy shadow-none placeholder:text-navy-300 focus-visible:border-navy focus-visible:ring-0";
@@ -55,7 +56,8 @@ export type LoyaltyContext = {
   not honour. `freeShippingAbove` of 0 means there is no free shipping.
 */
 export type ShippingPricing = {
-  flatRm: number;
+  westRm: number;
+  eastRm: number;
   freeShippingAbove: number;
 };
 
@@ -72,7 +74,7 @@ export default function CheckoutForm({
   defaultName = "",
   defaultPhone = "",
   loyalty = null,
-  shipping: pricing = { flatRm: FALLBACK_FLAT_SHIPPING, freeShippingAbove: 0 },
+  shipping: pricing = { westRm: FALLBACK_WEST_SHIPPING, eastRm: FALLBACK_EAST_SHIPPING, freeShippingAbove: 0 },
 }: Props) {
   const mounted = useMounted();
   const { items } = useCart();
@@ -160,10 +162,16 @@ export default function CheckoutForm({
   const [quote, setQuote] = useState<OrderQuote | null>(null);
   const [quoting, setQuoting] = useState(false);
 
+  /*
+    The destination is part of the price now — Semenanjung and East Malaysia
+    differ — so the state belongs in the key that triggers a re-quote. Editing
+    an address changes the total, which was not true when shipping was flat.
+  */
   const quoteKey = JSON.stringify({
     cart: cartRefs,
     code: discount?.code ?? null,
     points: usePoints,
+    state: form.state,
   });
 
   useEffect(() => {
@@ -178,6 +186,8 @@ export default function CheckoutForm({
     setQuoting(true);
     const timer = setTimeout(async () => {
       const res = await quoteCart(cartRefs, {
+        country: "MY",
+        state: form.state,
         discountCode: discount?.code,
         /* A request, not a price. price_order clamps it against the real
            balance exactly as create_order does. */
@@ -358,9 +368,13 @@ export default function CheckoutForm({
               </div>
             </div>
             <p className="mt-3 text-[12px] tracking-wide text-navy-300">
+              {/* The policy, not this cart: the summary above already prices the
+                  address they typed. Both zones are named because "delivery
+                  RM10" beside a RM15 line is the contradiction this replaced. */}
+              {`${formatRM(pricing.westRm)} to Semenanjung, ${formatRM(pricing.eastRm)} to Sabah & Sarawak.`}
               {pricing.freeShippingAbove > 0
-                ? `Standard delivery ${formatRM(pricing.flatRm)} — free over ${formatRM(pricing.freeShippingAbove)}.`
-                : `Standard delivery ${formatRM(pricing.flatRm)}.`}
+                ? ` Free over ${formatRM(pricing.freeShippingAbove)}.`
+                : ""}
             </p>
           </section>
 

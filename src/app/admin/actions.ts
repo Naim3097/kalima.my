@@ -267,32 +267,40 @@ export async function setVariantWeight(
   handing a parcel to a courier.
 */
 export async function saveShippingPricing(input: {
-  flatShippingSen: number;
+  shippingWestSen: number;
+  shippingEastSen: number;
   freeShippingThresholdSen: number;
 }): Promise<ActionResult> {
   let db;
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
 
-  const flat = Math.round(Number(input.flatShippingSen));
+  const west = Math.round(Number(input.shippingWestSen));
+  const east = Math.round(Number(input.shippingEastSen));
   const threshold = Math.round(Number(input.freeShippingThresholdSen));
 
-  if (!Number.isFinite(flat) || flat < 0) return { error: "Enter a flat rate of RM0 or more." };
+  if (!Number.isFinite(west) || west < 0) return { error: "Enter a Semenanjung rate of RM0 or more." };
+  if (!Number.isFinite(east) || east < 0) return { error: "Enter a Sabah & Sarawak rate of RM0 or more." };
   if (!Number.isFinite(threshold) || threshold < 0) {
     return { error: "Enter a free-shipping threshold of RM0 or more, or 0 to turn it off." };
   }
 
   const { error } = await db.from("store_settings").update({
-    flat_shipping_sen: flat,
+    shipping_west_sen: west,
+    shipping_east_sen: east,
+    /* Kept in step with the West rate. Nothing prices from it any more, but a
+       stale column is a trap for whoever reads this table next. */
+    flat_shipping_sen: west,
     free_shipping_threshold_sen: threshold,
   }).eq("id", 1);
   if (error) return { error: error.message };
 
   await logAudit(db, {
     action: "shipping.pricing_updated", entityType: "settings", entityId: "shipping",
-    summary: threshold > 0
-      ? `Shipping RM${(flat / 100).toFixed(2)}, free above RM${(threshold / 100).toFixed(2)}`
-      : `Shipping RM${(flat / 100).toFixed(2)}, no free shipping`,
-    meta: { flatShippingSen: flat, freeShippingThresholdSen: threshold },
+    summary:
+      `Shipping — Semenanjung RM${(west / 100).toFixed(2)}, ` +
+      `Sabah & Sarawak RM${(east / 100).toFixed(2)}` +
+      (threshold > 0 ? `, free above RM${(threshold / 100).toFixed(2)}` : ""),
+    meta: { shippingWestSen: west, shippingEastSen: east, freeShippingThresholdSen: threshold },
   });
 
   revalidatePath("/admin/shipping");

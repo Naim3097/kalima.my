@@ -147,6 +147,8 @@ export async function validateDiscount(
   Service role, like every order function, and the user id comes from the
   session at the call site — never from the browser.
 */
+export type ShippingZone = "west" | "east" | "overseas";
+
 export type OrderQuote = {
   subtotalSen: number;
   discountSen: number;
@@ -156,6 +158,11 @@ export type OrderQuote = {
   loyaltyDiscountSen: number;
   shippingSen: number;
   freeShipping: boolean;
+  zone: ShippingZone;
+  /* True when the destination is overseas and no courier has been chosen yet.
+     `shippingSen` is 0 in that state — it means "not known", never "free", and
+     an order must not be placed until it is resolved. */
+  requiresShippingSelection: boolean;
   taxSen: number;
   totalSen: number;
 };
@@ -165,12 +172,23 @@ export async function quoteOrder(params: {
   items: CartLine[];
   discountCode?: string;
   redeemPoints?: number;
+  /* Where it is going. Shipping is a zone rate for Malaysia and the chosen
+     courier's price for anywhere else, so a quote without a destination is a
+     quote for the wrong thing. Defaults to Malaysia, matching the form. */
+  country?: string;
+  state?: string | null;
+  /* The overseas service the shopper picked, in sen. Passed through rather
+     than re-quoted, so the price they were shown is the price they pay. */
+  chosenShippingSen?: number | null;
 }): Promise<OrderQuote> {
   const { data, error } = await admin().rpc("price_order", {
     p_user_id: params.userId,
     p_items: params.items,
     p_discount_code: params.discountCode ?? null,
     p_redeem_points: params.redeemPoints ?? 0,
+    p_country: params.country ?? "MY",
+    p_state: params.state ?? null,
+    p_chosen_shipping_sen: params.chosenShippingSen ?? null,
   });
   if (error) throw new Error(`quoteOrder failed: ${error.message}`);
 
@@ -184,6 +202,8 @@ export async function quoteOrder(params: {
     loyaltyDiscountSen: Number(q.loyalty_discount_sen ?? 0),
     shippingSen: Number(q.shipping_sen ?? 0),
     freeShipping: Boolean(q.free_shipping),
+    zone: (q.shipping_zone as ShippingZone) ?? "west",
+    requiresShippingSelection: Boolean(q.requires_shipping_selection),
     taxSen: Number(q.tax_sen ?? 0),
     totalSen: Number(q.total_sen ?? 0),
   };
@@ -238,6 +258,15 @@ export async function createOrder(params: {
     worth. Nothing here decides a price.
   */
   redeemPoints?: number;
+  /*
+    The overseas courier the shopper chose, in sen, as they were quoted it.
+
+    Malaysia never sets this — its price is a zone rate the database already
+    knows. Overseas REQUIRES it: create_order refuses the order otherwise
+    rather than shipping a parcel for nothing, because "no service chosen" and
+    "free" must never be the same value.
+  */
+  chosenShippingSen?: number | null;
 }): Promise<CreateOrderResult> {
   const auth = await createClient();
   const userId = auth ? (await auth.auth.getUser()).data.user?.id ?? null : null;
@@ -247,10 +276,13 @@ export async function createOrder(params: {
     p_items: params.items,
     p_email: params.email,
     p_phone: params.phone ?? null,
+    /* The destination is read from this snapshot inside create_order, so the
+       address that prices the order is the address stored on it. */
     p_address: params.address,
     p_shipping_method: params.shippingMethod,
     p_discount_code: params.discountCode ?? null,
     p_redeem_points: Math.max(0, Math.trunc(params.redeemPoints ?? 0)),
+    p_chosen_shipping_sen: params.chosenShippingSen ?? null,
   });
   if (error) throw new Error(`createOrder failed: ${error.message}`);
   const result = data as CreateOrderResult;
