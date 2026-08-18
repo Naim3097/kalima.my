@@ -361,7 +361,6 @@ export default function CheckoutForm({
               {pricing.freeShippingAbove > 0
                 ? `Standard delivery ${formatRM(pricing.flatRm)} — free over ${formatRM(pricing.freeShippingAbove)}.`
                 : `Standard delivery ${formatRM(pricing.flatRm)}.`}
-              Live courier rates arrive with EasyParcel.
             </p>
           </section>
 

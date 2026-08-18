@@ -241,16 +241,16 @@ export const getShippingPricing = cache(
     const supabase = createPublicClient();
     if (!supabase) return fallback;
 
-    const { data, error } = await supabase
-      .from("store_settings")
-      .select("flat_shipping_sen, free_shipping_threshold_sen")
-      .eq("id", 1)
-      .maybeSingle();
+    /* Through shop_public_settings(), not the table: store_settings is closed
+       to the public client because it holds the EasyParcel tokens, so a select
+       here read nothing and quietly returned the fallback below. */
+    const { data, error } = await supabase.rpc("shop_public_settings");
     if (error || !data) return fallback;
 
+    const s = data as { flat_shipping_sen?: number; free_shipping_threshold_sen?: number };
     return {
-      flatRm: (data.flat_shipping_sen ?? 1000) / 100,
-      freeShippingAbove: (data.free_shipping_threshold_sen ?? 0) / 100,
+      flatRm: (s.flat_shipping_sen ?? 1000) / 100,
+      freeShippingAbove: (s.free_shipping_threshold_sen ?? 0) / 100,
     };
   },
 );

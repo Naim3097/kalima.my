@@ -102,11 +102,14 @@ export const getFooterContent = cache(async (): Promise<FooterContent> => {
   if (!supabase) return FOOTER_DEFAULTS;
 
   const [settings, trust, columns] = await Promise.all([
-    supabase
-      .from("store_settings")
-      .select("company_name, company_reg_no, footer_tagline, footer_payment_note")
-      .eq("id", 1)
-      .maybeSingle(),
+    /*
+      Through a function, not the table. store_settings grants the public
+      nothing — it holds the EasyParcel tokens — so selecting from it here
+      returned no row and silently fell back to the defaults below, which are
+      character-identical and hid the fault completely. See the
+      shop_public_settings migration.
+    */
+    supabase.rpc("shop_public_settings"),
     supabase
       .from("footer_trust")
       .select("icon, title, body")
@@ -118,7 +121,12 @@ export const getFooterContent = cache(async (): Promise<FooterContent> => {
       .order("sort_order"),
   ]);
 
-  const s = settings.data;
+  const s = settings.data as {
+    company_name: string | null;
+    company_reg_no: string | null;
+    footer_tagline: string | null;
+    footer_payment_note: string | null;
+  } | null;
 
   type RawColumn = {
     heading: string;
