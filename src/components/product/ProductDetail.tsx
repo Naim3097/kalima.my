@@ -435,8 +435,8 @@ export default function ProductDetail({ product }: { product: Product }) {
                 Shipping &amp; Returns
               </AccordionTrigger>
               <AccordionContent className="pb-5 text-[14px] leading-relaxed tracking-wide text-navy-400">
-                Free shipping for orders above RM300. Delivered nationwide via trusted couriers. 14-day easy
-                returns — see our returns policy.
+                We ship worldwide. Delivery is calculated at checkout from your address and
+                the courier you choose. 14-day easy returns — see our returns policy.
               </AccordionContent>
             </AccordionItem>
           </Accordion>

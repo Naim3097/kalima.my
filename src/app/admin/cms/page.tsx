@@ -3,8 +3,10 @@ import ProductImage from "@/components/brand/ProductImage";
 import { AnnouncementEditor } from "@/components/admin/cms/AnnouncementEditor";
 import { ContentPageEditor } from "@/components/admin/cms/ContentPageEditor";
 import { EditorialImageEditor } from "@/components/admin/cms/EditorialImageEditor";
+import { FooterEditor } from "@/components/admin/cms/FooterEditor";
 import { HeroSlideEditor } from "@/components/admin/cms/HeroSlideEditor";
 import { InstagramPosts } from "@/components/admin/cms/InstagramPosts";
+import { SignupPromoEditor } from "@/components/admin/cms/SignupPromoEditor";
 import { LookbookEditor } from "@/components/admin/cms/LookbookEditor";
 import { Card, CardHeader, Pill, Table, Td, Tr } from "@/components/admin/ui";
 import {
@@ -12,8 +14,12 @@ import {
   listContentPages,
   listEditorialImages,
   listHeroSlides,
+  getFooterText,
+  getSignupPromoAdmin,
+  listFooterColumns,
   listInstagramPosts,
   listTaggableProducts,
+  listTrustItems,
   listLookbookCandidates,
   listLookbookShots,
 } from "@/lib/admin";
@@ -35,6 +41,10 @@ export default async function AdminCmsPage() {
     lookbookCandidates,
     instagramPosts,
     taggableProducts,
+    footerText,
+    trustItems,
+    footerColumns,
+    signupPromo,
   ] = await Promise.all([
     listAnnouncements(),
     listHeroSlides(),
@@ -44,6 +54,10 @@ export default async function AdminCmsPage() {
     listLookbookCandidates(),
     listInstagramPosts(),
     listTaggableProducts(),
+    getFooterText(),
+    listTrustItems(),
+    listFooterColumns(),
+    getSignupPromoAdmin(),
   ]);
 
   return (
@@ -219,6 +233,23 @@ export default async function AdminCmsPage() {
             ))}
           </Table>
         )}
+      </Card>
+
+      {/* Sign-up popup */}
+      <Card>
+        <CardHeader
+          title="Sign-up popup"
+          action={
+            <Pill value={signupPromo.enabled ? "live" : "off"} />
+          }
+        />
+        <SignupPromoEditor promo={signupPromo} />
+      </Card>
+
+      {/* Footer */}
+      <Card>
+        <CardHeader title="Footer" />
+        <FooterEditor text={footerText} trust={trustItems} columns={footerColumns} />
       </Card>
 
       {/* Content pages */}

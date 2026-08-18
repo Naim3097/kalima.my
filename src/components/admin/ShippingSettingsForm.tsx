@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { disconnectEasyparcel, saveSenderSettings } from "@/app/admin/actions";
+import { disconnectEasyparcel, saveSenderSettings, saveShippingPricing } from "@/app/admin/actions";
 import { Card, CardBody, CardHeader, Chip } from "@/components/admin/ui";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -31,9 +31,14 @@ const STATES = [...new Map(
   EasyParcel connection + pickup address.
 
   EasyParcel here is an ADMIN convenience: it books the parcel and returns the
-  AWB so nobody has to re-type an address on easyparcel.com. It does NOT price
-  the customer's checkout — that stays the store's flat rate / free-shipping
-  threshold, set in Settings.
+  AWB so nobody has to re-type an address on easyparcel.com. What the CUSTOMER
+  pays is the separate card at the top: a flat rate, and an optional spend that
+  earns free shipping.
+
+  Those two live here rather than in Settings because this is the page someone
+  opens when they are thinking about delivery — and a promotion that has to be
+  hunted for in a general settings screen is a promotion left switched on after
+  it ends.
 */
 export function ShippingSettingsForm({ settings }: { settings: SenderSettings }) {
   const router = useRouter();
@@ -49,6 +54,13 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
   const [postcode, setPostcode] = useState(settings.senderPostcode ?? "");
   const [state, setState] = useState(settings.senderState ?? "Selangor");
 
+  /* Held in RINGGIT for typing; the store keeps sen, so both convert on save.
+     An empty threshold reads as 0, which is how the promotion is turned off. */
+  const [flatRm, setFlatRm] = useState((settings.flatShippingSen / 100).toFixed(2));
+  const [freeRm, setFreeRm] = useState(
+    settings.freeShippingThresholdSen > 0 ? (settings.freeShippingThresholdSen / 100).toFixed(2) : "",
+  );
+
   function save() {
     startTransition(async () => {
       const res = await saveSenderSettings({
@@ -59,6 +71,20 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
       if ("error" in res) toast.error(res.error);
       else {
         toast.success("Shipping settings saved.");
+        router.refresh();
+      }
+    });
+  }
+
+  function savePricing() {
+    startTransition(async () => {
+      const res = await saveShippingPricing({
+        flatShippingSen: Math.round(Number(flatRm || 0) * 100),
+        freeShippingThresholdSen: Math.round(Number(freeRm || 0) * 100),
+      });
+      if ("error" in res) toast.error(res.error);
+      else {
+        toast.success("Shipping charges saved.");
         router.refresh();
       }
     });
@@ -77,6 +103,63 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
 
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader title="What customers pay" />
+        <CardBody>
+        <p className="mb-4 text-[13px] tracking-wide text-navy-400">
+          Every order is charged the flat rate. To run a free-shipping promotion, set the
+          spend that earns it — leave it empty to charge everyone.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="ship-flat" className="label-caps text-navy-400">
+              Flat shipping rate (RM)
+            </Label>
+            <Input
+              id="ship-flat"
+              type="number"
+              min={0}
+              step="0.01"
+              value={flatRm}
+              onChange={(e) => setFlatRm(e.target.value)}
+              placeholder="10.00"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="ship-free" className="label-caps text-navy-400">
+              Free shipping above (RM)
+            </Label>
+            <Input
+              id="ship-free"
+              type="number"
+              min={0}
+              step="0.01"
+              value={freeRm}
+              onChange={(e) => setFreeRm(e.target.value)}
+              placeholder="No free shipping"
+            />
+          </div>
+        </div>
+
+        {/* Says the rule back in plain words, because "0" and "empty" are the
+            same instruction here and neither looks like one. */}
+        <p className="mt-4 text-[13px] tracking-wide text-navy">
+          {Number(freeRm) > 0
+            ? `Orders of RM${Number(freeRm).toFixed(2)} or more ship free. Everything else pays RM${Number(flatRm || 0).toFixed(2)}.`
+            : `No free shipping — every order pays RM${Number(flatRm || 0).toFixed(2)}.`}
+        </p>
+        <p className="mt-1 text-[12px] tracking-wide text-navy-400">
+          A free-shipping discount code still applies whatever this says.
+        </p>
+
+        <div className="mt-5">
+          <Button type="button" variant="kalima" size="editorial" disabled={pending} onClick={savePricing}>
+            {pending ? "Saving…" : "Save charges"}
+          </Button>
+        </div>
+        </CardBody>
+      </Card>
+
       <Card>
         <CardHeader
           title="EasyParcel account"
@@ -102,9 +185,8 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
           </p>
         </div>
         <p className="mt-3 text-[12px] tracking-wide text-navy-400">
-          This does not change what customers pay. Checkout still charges the flat rate
-          (or free above the threshold) set in Settings — booking a courier is Kalima&apos;s
-          own cost, paid from the EasyParcel wallet.
+          This does not change what customers pay — that is the card above. Booking a
+          courier is Kalima&apos;s own cost, paid from the EasyParcel wallet.
         </p>
         </CardBody>
       </Card>

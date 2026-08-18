@@ -13,8 +13,6 @@ export type CartItem = {
   qty: number;
 };
 
-export const FREE_SHIPPING_THRESHOLD = 300; // RM — pending client confirmation (300 vs 500)
-
 type CartState = {
   items: CartItem[];
   add: (item: Omit<CartItem, "qty">, qty?: number) => void;

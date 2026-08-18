@@ -5,6 +5,7 @@ import { getCurrentUser, isStaff, type Role } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 import { EDITORIAL_SLOTS, type EditorialSlot } from "@/lib/editorial";
 import { syncInstagram, type InstagramSyncSummary } from "@/lib/instagram/sync";
+import { TRUST_ICON_KEYS } from "@/lib/trust-icons";
 import { parseCsvRecords } from "@/lib/csv";
 import { getOrder } from "@/lib/admin";
 import { awardLoyaltyPoints } from "@/lib/commerce";
@@ -252,6 +253,55 @@ export async function setVariantWeight(
   Pickup address and EasyParcel toggles. The address is what the courier
   collects from, so a wrong postcode here misprices every quote.
 */
+/*
+  What the customer pays for delivery.
+
+  Two numbers, and the second is the promotion switch the shop asked for: set a
+  spend and shipping is free at or above it, set zero and there is no free
+  shipping at all. create_order enforces exactly this — see the
+  free_shipping_threshold_off_at_zero migration — so the checkout preview and
+  the order that gets written cannot disagree.
+
+  Separate from saveSenderSettings because these are the only two settings on
+  this screen that touch a customer's total; everything else there is about
+  handing a parcel to a courier.
+*/
+export async function saveShippingPricing(input: {
+  flatShippingSen: number;
+  freeShippingThresholdSen: number;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const flat = Math.round(Number(input.flatShippingSen));
+  const threshold = Math.round(Number(input.freeShippingThresholdSen));
+
+  if (!Number.isFinite(flat) || flat < 0) return { error: "Enter a flat rate of RM0 or more." };
+  if (!Number.isFinite(threshold) || threshold < 0) {
+    return { error: "Enter a free-shipping threshold of RM0 or more, or 0 to turn it off." };
+  }
+
+  const { error } = await db.from("store_settings").update({
+    flat_shipping_sen: flat,
+    free_shipping_threshold_sen: threshold,
+  }).eq("id", 1);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "shipping.pricing_updated", entityType: "settings", entityId: "shipping",
+    summary: threshold > 0
+      ? `Shipping RM${(flat / 100).toFixed(2)}, free above RM${(threshold / 100).toFixed(2)}`
+      : `Shipping RM${(flat / 100).toFixed(2)}, no free shipping`,
+    meta: { flatShippingSen: flat, freeShippingThresholdSen: threshold },
+  });
+
+  revalidatePath("/admin/shipping");
+  revalidatePath("/admin/settings");
+  // The checkout quotes these figures, so the storefront has to see them change.
+  revalidateStorefront();
+  return { ok: true };
+}
+
 export async function saveSenderSettings(input: {
   easyparcelEnabled: boolean;
   fallbackEnabled: boolean;
@@ -2081,6 +2131,260 @@ export async function deleteHeroSlide(id: string): Promise<ActionResult> {
   await logAudit(db, {
     action: "hero_slide.deleted", entityType: "cms", entityId: id,
     summary: "Hero slide deleted",
+  });
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+/* ---- Sign-up popup ------------------------------------------------------- */
+
+/*
+  The offer shown to signed-out visitors.
+
+  Perks arrive as lines of text and are stored as an array of strings — never
+  markup, because this copy is rendered into a modal on every storefront page.
+
+  The delay and the dismissal window are clamped to the same range as the
+  column CHECKs, so a slip of a keyboard reframes the popup rather than
+  bouncing the editor off a constraint they cannot read.
+
+  `enabled` controls the POPUP only. The discount is governed by its amount:
+  set it to zero to stop giving money, which is a different decision from
+  taking the advertisement down, and both are made on this one screen.
+*/
+export async function saveSignupPromo(input: {
+  enabled: boolean;
+  eyebrow: string;
+  heading: string;
+  body: string;
+  perks: string[];
+  firstOrderDiscountSen: number;
+  ctaLabel: string;
+  ctaHref: string;
+  delaySeconds: number;
+  dismissDays: number;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!input.heading.trim()) return { error: "A heading is required." };
+
+  const ctaHref = input.ctaHref.trim() || "/signup";
+  if (!ctaHref.startsWith("/") || ctaHref.startsWith("//")) {
+    return { error: "The button must link to a path on this site, starting with /." };
+  }
+
+  const { error } = await db.from("signup_promo").update({
+    enabled: input.enabled,
+    eyebrow: input.eyebrow.trim() || null,
+    heading: input.heading.trim(),
+    body: input.body.trim() || null,
+    perks: input.perks.map((p) => p.trim()).filter(Boolean),
+    /* Clamped at zero, which is also the off switch. There is no upper bound to
+       impose that is not arbitrary — a shop may legitimately run RM50 off. */
+    first_order_discount_sen: Math.max(0, Math.round(Number(input.firstOrderDiscountSen) || 0)),
+    cta_label: input.ctaLabel.trim() || "Create my account",
+    cta_href: ctaHref,
+    delay_seconds: Math.min(120, Math.max(0, Math.round(Number(input.delaySeconds) || 0))),
+    dismiss_days: Math.min(365, Math.max(1, Math.round(Number(input.dismissDays) || 1))),
+  }).eq("id", 1);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: input.enabled ? "signup_promo.enabled" : "signup_promo.disabled",
+    entityType: "cms", entityId: "signup_promo",
+    summary: `Sign-up popup ${input.enabled ? "switched on" : "switched off"}`,
+    meta: {
+      firstOrderDiscountSen: input.firstOrderDiscountSen,
+      delaySeconds: input.delaySeconds,
+    },
+  });
+
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+/* ---- Footer ------------------------------------------------------------- */
+
+/*
+  The footer's fixed text. Company name and registration number are a legal
+  identification line, not marketing — blank them and the shopfront stops
+  identifying the company behind it — so they are stored trimmed and rendered
+  verbatim.
+*/
+export async function saveFooterText(input: {
+  companyName: string; companyRegNo: string; tagline: string; paymentNote: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { error } = await db.from("store_settings").update({
+    company_name: input.companyName.trim() || null,
+    company_reg_no: input.companyRegNo.trim() || null,
+    footer_tagline: input.tagline.trim() || null,
+    footer_payment_note: input.paymentNote.trim() || null,
+  }).eq("id", 1);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "footer.text_updated", entityType: "settings", entityId: "footer",
+    summary: "Footer text updated",
+  });
+
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+/* One item of the four-across trust strip. */
+export async function saveTrustItem(input: {
+  id?: string; icon: string; title: string; body: string;
+  sortOrder: number; active: boolean;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  if (!input.title.trim()) return { error: "A title is required." };
+
+  /* The icon is a KEY into a fixed set, never markup — an unknown one would
+     render the fallback, so it is refused here rather than silently changed. */
+  if (!TRUST_ICON_KEYS.includes(input.icon as (typeof TRUST_ICON_KEYS)[number])) {
+    return { error: "Choose one of the available icons." };
+  }
+
+  const row = {
+    icon: input.icon,
+    title: input.title.trim(),
+    body: input.body.trim() || null,
+    sort_order: input.sortOrder,
+    active: input.active,
+  };
+
+  const { error } = input.id
+    ? await db.from("footer_trust").update(row).eq("id", input.id)
+    : await db.from("footer_trust").insert(row);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: input.id ? "footer.trust_updated" : "footer.trust_created",
+    entityType: "settings", entityId: input.id ?? null,
+    summary: `Footer trust item ${input.id ? "updated" : "added"}: ${row.title}`,
+  });
+
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+export async function deleteTrustItem(id: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const { error } = await db.from("footer_trust").delete().eq("id", id);
+  if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "footer.trust_deleted", entityType: "settings", entityId: id,
+    summary: "Footer trust item removed",
+  });
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+export async function saveFooterColumn(input: {
+  id?: string; heading: string; sortOrder: number;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  if (!input.heading.trim()) return { error: "A column heading is required." };
+
+  const row = { heading: input.heading.trim(), sort_order: input.sortOrder };
+  const { error } = input.id
+    ? await db.from("footer_link_columns").update(row).eq("id", input.id)
+    : await db.from("footer_link_columns").insert(row);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: input.id ? "footer.column_updated" : "footer.column_created",
+    entityType: "settings", entityId: input.id ?? null,
+    summary: `Footer column ${input.id ? "renamed" : "added"}: ${row.heading}`,
+  });
+
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+/* Deleting a column takes its links with it — footer_links cascades. */
+export async function deleteFooterColumn(id: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const { error } = await db.from("footer_link_columns").delete().eq("id", id);
+  if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "footer.column_deleted", entityType: "settings", entityId: id,
+    summary: "Footer column removed, with its links",
+  });
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+/*
+  One footer link.
+
+  The href must be a SITE-RELATIVE path or an absolute http(s) URL. Anything
+  else — `javascript:`, a bare word, a protocol-relative `//host` — is either a
+  404 in the footer of every page or a script URL rendered as a link, and
+  neither belongs one typo away.
+*/
+export async function saveFooterLink(input: {
+  id?: string; columnId: string; label: string; href: string;
+  sortOrder: number; active: boolean;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  if (!input.label.trim()) return { error: "A label is required." };
+
+  const href = input.href.trim();
+  const relative = href.startsWith("/") && !href.startsWith("//");
+  const absolute = /^https?:\/\//i.test(href);
+  if (!relative && !absolute) {
+    return { error: "Links must start with / for a page on this site, or https:// for another." };
+  }
+
+  const row = {
+    column_id: input.columnId,
+    label: input.label.trim(),
+    href,
+    sort_order: input.sortOrder,
+    active: input.active,
+  };
+
+  const { error } = input.id
+    ? await db.from("footer_links").update(row).eq("id", input.id)
+    : await db.from("footer_links").insert(row);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: input.id ? "footer.link_updated" : "footer.link_created",
+    entityType: "settings", entityId: input.id ?? null,
+    summary: `Footer link ${input.id ? "updated" : "added"}: ${row.label} → ${row.href}`,
+  });
+
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+export async function deleteFooterLink(id: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  const { error } = await db.from("footer_links").delete().eq("id", id);
+  if (error) return { error: error.message };
+  await logAudit(db, {
+    action: "footer.link_deleted", entityType: "settings", entityId: id,
+    summary: "Footer link removed",
   });
   revalidatePath("/admin/cms");
   revalidateStorefront();

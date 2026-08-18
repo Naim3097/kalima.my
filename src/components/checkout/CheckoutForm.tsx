@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { useCart, cartSubtotal, FREE_SHIPPING_THRESHOLD } from "@/stores/cart";
+import { useCart, cartSubtotal } from "@/stores/cart";
 import { formatRM } from "@/lib/format";
 import { useMounted } from "@/hooks/useMounted";
-import { placeOrder, checkDiscount } from "@/app/checkout/actions";
-import type { CartRef } from "@/lib/commerce";
+import { placeOrder, checkDiscount, quoteCart } from "@/app/checkout/actions";
+import type { CartRef, OrderQuote } from "@/lib/commerce";
 import ProductImage from "@/components/brand/ProductImage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,7 +21,12 @@ import {
 
 const MY_STATES = ["Selangor", "Kuala Lumpur", "Johor", "Penang", "Perak", "Kedah", "Kelantan", "Terengganu", "Pahang", "Negeri Sembilan", "Melaka", "Perlis", "Sabah", "Sarawak", "Putrajaya", "Labuan"];
 
-const FLAT_SHIPPING = 10; // RM — placeholder until EasyParcel live rates (Phase 4)
+/*
+  Fallback shipping figures, used only if the settings read fails. They match
+  the column defaults, so a store that has never opened the Shipping screen
+  quotes the same numbers create_order will charge.
+*/
+const FALLBACK_FLAT_SHIPPING = 10; // RM
 
 const fieldClass =
   "h-auto rounded-none border-navy/20 bg-white px-4 py-3 text-[14px] md:text-[14px] text-navy shadow-none placeholder:text-navy-300 focus-visible:border-navy focus-visible:ring-0";
@@ -41,11 +46,25 @@ export type LoyaltyContext = {
   tierName: string;
 };
 
+/*
+  What the shop charges for delivery, read from store_settings on the server.
+
+  Passed in rather than hardcoded because create_order reads the same two
+  columns: when they were constants here, changing the shop's rate meant a
+  deploy, and forgetting one left the checkout quoting a total the order would
+  not honour. `freeShippingAbove` of 0 means there is no free shipping.
+*/
+export type ShippingPricing = {
+  flatRm: number;
+  freeShippingAbove: number;
+};
+
 type Props = {
   defaultEmail?: string;
   defaultName?: string;
   defaultPhone?: string;
   loyalty?: LoyaltyContext | null;
+  shipping?: ShippingPricing;
 };
 
 export default function CheckoutForm({
@@ -53,6 +72,7 @@ export default function CheckoutForm({
   defaultName = "",
   defaultPhone = "",
   loyalty = null,
+  shipping: pricing = { flatRm: FALLBACK_FLAT_SHIPPING, freeShippingAbove: 0 },
 }: Props) {
   const mounted = useMounted();
   const { items } = useCart();
@@ -116,7 +136,6 @@ export default function CheckoutForm({
 
   const [usePoints, setUsePoints] = useState(false);
 
-  const discountRM = discount ? discount.discountSen / 100 : 0;
 
   /*
     Mirrors the server's clamp so the shopper sees the real figure before
@@ -124,27 +143,72 @@ export default function CheckoutForm({
     value, and by what is actually left to pay. The server recomputes all of
     this — this is a preview, not the decision.
   */
-  const goodsAfterDiscountSen = Math.max(0, Math.round((subtotal - discountRM) * 100));
-  const maxByCap = loyalty ? Math.floor((goodsAfterDiscountSen * loyalty.maxRedeemBps) / 10000) : 0;
-  const maxByBalance = loyalty ? loyalty.balance * loyalty.senPerPoint : 0;
-  const pointsDiscountSen =
-    loyalty && usePoints && loyalty.balance >= loyalty.minRedeemPoints
-      ? Math.min(maxByBalance, maxByCap, goodsAfterDiscountSen)
-      : 0;
-  const pointsUsed =
-    loyalty && pointsDiscountSen > 0
-      ? Math.ceil(pointsDiscountSen / loyalty.senPerPoint)
-      : 0;
-  const pointsRM = pointsDiscountSen / 100;
+  /*
+    THE PRICE COMES FROM THE SERVER, and that is the point.
 
-  const freeShipping = subtotal - discountRM >= FREE_SHIPPING_THRESHOLD || !!discount?.freeShipping;
-  const shipping = freeShipping ? 0 : FLAT_SHIPPING;
-  const total = Math.max(0, subtotal - discountRM - pointsRM + shipping);
+    Everything below the subtotal — the code, the new-member discount, the
+    loyalty clamp, the shipping threshold, the rule that the first two never
+    stack — used to be recomputed here in TypeScript alongside the same rules in
+    SQL. Two implementations of one price agree only until one of them is
+    edited. quoteCart calls the very price_order() that create_order will use,
+    so the summary and the charge are the same arithmetic by construction.
+
+    The subtotal stays local: it is the sum of the lines already on screen, it
+    needs no server to be right, and having it instantly means the panel never
+    shows nothing while a quote is in flight.
+  */
+  const [quote, setQuote] = useState<OrderQuote | null>(null);
+  const [quoting, setQuoting] = useState(false);
+
+  const quoteKey = JSON.stringify({
+    cart: cartRefs,
+    code: discount?.code ?? null,
+    points: usePoints,
+  });
+
+  useEffect(() => {
+    if (cartRefs.length === 0) {
+      setQuote(null);
+      return;
+    }
+
+    /* Debounced and cancellable: a quantity stepper fires several changes in a
+       second, and only the last answer should reach the screen. */
+    let cancelled = false;
+    setQuoting(true);
+    const timer = setTimeout(async () => {
+      const res = await quoteCart(cartRefs, {
+        discountCode: discount?.code,
+        /* A request, not a price. price_order clamps it against the real
+           balance exactly as create_order does. */
+        redeemPoints: usePoints && loyalty ? loyalty.balance : 0,
+      });
+      if (cancelled) return;
+      setQuote("error" in res ? null : res);
+      setQuoting(false);
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the serialised inputs above
+  }, [quoteKey]);
+
+  const discountRM = (quote?.discountSen ?? 0) / 100;
+  const firstOrderRM = (quote?.firstOrderDiscountSen ?? 0) / 100;
+  const pointsRM = (quote?.loyaltyDiscountSen ?? 0) / 100;
+  const pointsUsed = quote?.loyaltyPointsUsed ?? 0;
+  const freeShipping = quote?.freeShipping ?? false;
+  const shipping = (quote?.shippingSen ?? 0) / 100;
+  /* Until the first quote lands, the goods themselves are the honest figure to
+     show — never a total that omits shipping and pretends to be final. */
+  const total = quote ? quote.totalSen / 100 : subtotal;
 
   // What this order will earn once complete, at the shopper's current tier.
   const pointsEarned = loyalty
     ? Math.floor(
-        (Math.floor((subtotal - discountRM - pointsRM)) * loyalty.pointsPerRm * loyalty.multiplierBps) / 10000,
+        (Math.floor((subtotal - discountRM - firstOrderRM - pointsRM)) * loyalty.pointsPerRm * loyalty.multiplierBps) / 10000,
       )
     : 0;
 
@@ -294,7 +358,9 @@ export default function CheckoutForm({
               </div>
             </div>
             <p className="mt-3 text-[12px] tracking-wide text-navy-300">
-              Standard delivery {formatRM(FLAT_SHIPPING)} — free over {formatRM(FREE_SHIPPING_THRESHOLD)}.
+              {pricing.freeShippingAbove > 0
+                ? `Standard delivery ${formatRM(pricing.flatRm)} — free over ${formatRM(pricing.freeShippingAbove)}.`
+                : `Standard delivery ${formatRM(pricing.flatRm)}.`}
               Live courier rates arrive with EasyParcel.
             </p>
           </section>
@@ -362,9 +428,11 @@ export default function CheckoutForm({
                   />
                   <span className="text-[13px] leading-relaxed tracking-wide text-navy">
                     Use my {loyalty.balance} points
-                    <span className="text-navy-400">
-                      {" "}— saves {formatRM(Math.min(maxByBalance, maxByCap, goodsAfterDiscountSen) / 100)} on this order
-                    </span>
+                    {pointsRM > 0 && (
+                      <span className="text-navy-400">
+                        {" "}— saves {formatRM(pointsRM)} on this order
+                      </span>
+                    )}
                     {usePoints && pointsUsed < loyalty.balance && (
                       <span className="mt-0.5 block text-[11px] text-navy-400">
                         {pointsUsed} points used · {loyalty.balance - pointsUsed} kept for next time
@@ -376,13 +444,22 @@ export default function CheckoutForm({
             </div>
           )}
 
-          <dl className="mt-5 space-y-2 border-t border-navy/10 pt-4 text-[13px]">
+          <dl
+            className={`mt-5 space-y-2 border-t border-navy/10 pt-4 text-[13px] transition-opacity ${
+              quoting ? "opacity-60" : ""
+            }`}
+          >
             <div className="flex justify-between text-navy-400">
               <dt>Subtotal</dt><dd>{formatRM(subtotal)}</dd>
             </div>
             {discountRM > 0 && (
               <div className="flex justify-between text-emerald-700">
                 <dt>Code {discount?.code}</dt><dd>−{formatRM(discountRM)}</dd>
+              </div>
+            )}
+            {firstOrderRM > 0 && (
+              <div className="flex justify-between text-emerald-700">
+                <dt>Welcome — first order</dt><dd>−{formatRM(firstOrderRM)}</dd>
               </div>
             )}
             {pointsRM > 0 && (

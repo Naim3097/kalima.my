@@ -155,6 +155,107 @@ const SEED_LOOKBOOK: LookbookShot[] = [
 ];
 
 /*
+  The sign-up popup's content, or null when it is switched off.
+
+  Null rather than an `enabled` flag on the way out, so the layout renders
+  nothing at all when the promotion is off — no component, no client bundle, no
+  timer — instead of shipping a modal that has decided to stay closed.
+
+  `perks` is stored as a jsonb array of plain strings and rendered as a list;
+  anything that is not a string is dropped rather than coerced, because the one
+  thing this must not do is put an editor's input into the page as markup.
+*/
+export type SignupPromo = {
+  eyebrow: string | null;
+  heading: string;
+  body: string | null;
+  perks: string[];
+  ctaLabel: string;
+  ctaHref: string;
+  delaySeconds: number;
+  dismissDays: number;
+};
+
+export const getSignupPromo = cache(async (): Promise<SignupPromo | null> => {
+  const supabase = createPublicClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase
+    .from("signup_promo")
+    .select("enabled, eyebrow, heading, body, perks, cta_label, cta_href, delay_seconds, dismiss_days")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (error || !data || !data.enabled) return null;
+
+  return {
+    eyebrow: data.eyebrow,
+    heading: data.heading,
+    body: data.body,
+    perks: Array.isArray(data.perks) ? data.perks.filter((p): p is string => typeof p === "string") : [],
+    ctaLabel: data.cta_label,
+    ctaHref: data.cta_href,
+    delaySeconds: data.delay_seconds,
+    dismissDays: data.dismiss_days,
+  };
+});
+
+/*
+  The new-member discount, in SEN, or 0 when the shop is not running one.
+
+  Read separately from getSignupPromo() because the two are independent: the
+  popup is advertising and this is money. create_order applies the same value
+  from the same row — this read exists only so the checkout can show a shopper
+  what they are about to be given.
+*/
+export const getFirstOrderDiscountSen = cache(async (): Promise<number> => {
+  const supabase = createPublicClient();
+  if (!supabase) return 0;
+
+  const { data, error } = await supabase
+    .from("signup_promo")
+    .select("first_order_discount_sen")
+    .eq("id", 1)
+    .maybeSingle();
+
+  if (error || !data) return 0;
+  return data.first_order_discount_sen ?? 0;
+});
+
+/*
+  What the shop charges for delivery, in RINGGIT for display.
+
+  The same two columns create_order reads, so the checkout summary and the
+  written order cannot disagree — they used to be constants in the form, which
+  is exactly how a quote and a charge drift apart. `freeShippingAbove` of 0
+  means no free shipping; see the free_shipping_threshold_off_at_zero migration.
+
+  Falls back to the column defaults rather than throwing: a checkout that will
+  not render because a settings row is unreadable is worse than one quoting the
+  standard rate.
+*/
+export const getShippingPricing = cache(
+  async (): Promise<{ flatRm: number; freeShippingAbove: number }> => {
+    const fallback = { flatRm: 10, freeShippingAbove: 0 };
+
+    const supabase = createPublicClient();
+    if (!supabase) return fallback;
+
+    const { data, error } = await supabase
+      .from("store_settings")
+      .select("flat_shipping_sen, free_shipping_threshold_sen")
+      .eq("id", 1)
+      .maybeSingle();
+    if (error || !data) return fallback;
+
+    return {
+      flatRm: (data.flat_shipping_sen ?? 1000) / 100,
+      freeShippingAbove: (data.free_shipping_threshold_sen ?? 0) / 100,
+    };
+  },
+);
+
+/*
   Instagram posts for the homepage strip, newest first.
 
   The image is OUR mirrored copy, never Instagram's CDN — see

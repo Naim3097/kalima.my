@@ -2,11 +2,12 @@ import type { Metadata } from "next";
 import CheckoutForm from "@/components/checkout/CheckoutForm";
 import { getCurrentUser } from "@/lib/auth";
 import { getMyClub } from "@/lib/loyalty";
+import { getShippingPricing } from "@/lib/cms";
 
 export const metadata: Metadata = {
   title: "Checkout",
   description:
-    "Secure checkout with delivery across Malaysia. Free shipping over RM300.",
+    "Secure checkout with worldwide delivery. Shipping is calculated at checkout.",
 };
 
 /*
@@ -24,11 +25,17 @@ export default async function CheckoutPage() {
   */
   const club = current ? await getMyClub() : null;
 
+  /* The same two columns create_order charges from, so the summary a shopper
+     agrees to is the total the order is written with. */
+  const shipping = await getShippingPricing();
+
+
   return (
     <CheckoutForm
       defaultEmail={current?.user.email ?? ""}
       defaultName={current?.profile?.full_name ?? ""}
       defaultPhone={current?.profile?.phone ?? ""}
+      shipping={shipping}
       loyalty={
         club && club.rules.enabled && club.balance > 0
           ? {

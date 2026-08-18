@@ -21,7 +21,7 @@ const PAGES: Record<string, { title: string; body: string[] }> = {
   stores: {
     title: "Stores",
     body: [
-      "Our store locator is coming soon. Meanwhile, shop online with free shipping for orders above RM300 nationwide.",
+      "Our store locator is coming soon. Meanwhile, shop online — we deliver worldwide.",
     ],
   },
   /* Body deliberately empty — the previous copy was removed and nothing has

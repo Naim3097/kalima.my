@@ -3,6 +3,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import {
+  cancelAbandonedPendingOrders,
   countPaymentAttempts,
   createOrder,
   findLivePaymentAttempt,
@@ -11,12 +12,15 @@ import {
   validateDiscount,
   getOrderForCheckout,
   recordPendingPayment,
+  quoteOrder,
   type CartRef,
   type DiscountResult,
+  type OrderQuote,
 } from "@/lib/commerce";
 import { buildAtomeReference, configuredProviders, providerForService } from "@/lib/payments";
 import { sendOrderReceivedEmail } from "@/lib/email";
 import { allow, callerKey } from "@/lib/rate-limit";
+import { getCurrentUser } from "@/lib/auth";
 
 /*
   Checkout server actions. The cart arrives from the client as CartRef[]
@@ -40,6 +44,52 @@ const MY_STATES = new Set([
   is 10,000 sequential queries. No real bag is anywhere near this.
 */
 const MAX_CART_LINES = 50;
+
+/*
+  What this bag costs, priced by the database.
+
+  The checkout used to compute the summary itself, which meant the rules existed
+  twice — once in SQL for the charge, once in TypeScript for the preview. This
+  is the whole of that preview now: one call, one set of figures, the same
+  price_order() create_order will use when the order is placed.
+
+  Throttled like checkDiscount and bounded by the same MAX_CART_LINES, because
+  it is equally unauthenticated and equally happy to do work on request.
+
+  The user id comes from the SESSION. Accepting one from the caller would let
+  anyone quote as anybody — and the new-member discount is decided by exactly
+  that id.
+*/
+export async function quoteCart(
+  cart: CartRef[],
+  options?: { discountCode?: string; redeemPoints?: number },
+): Promise<(OrderQuote & { missing: CartRef[] }) | { error: string }> {
+  if (!allow(await callerKey("quote"), 60, 60_000)) {
+    return { error: "Too many attempts. Please wait a moment." };
+  }
+  if (cart.length > MAX_CART_LINES) return { error: "That bag is too large." };
+  if (cart.length === 0) return { error: "Your bag is empty." };
+
+  const { lines, missing } = await resolveCartLines(cart);
+  if (!lines.length) return { error: "Nothing in your bag is still available." };
+
+  const current = await getCurrentUser();
+
+  try {
+    const quote = await quoteOrder({
+      userId: current?.user.id ?? null,
+      items: lines,
+      discountCode: options?.discountCode,
+      redeemPoints: options?.redeemPoints,
+    });
+    /* Reported, not thrown: the summary should still show what the rest of the
+       bag costs while the shopper deals with the line that fell out. */
+    return { ...quote, missing };
+  } catch (e) {
+    console.error("[checkout] quoteCart failed:", (e as Error).message);
+    return { error: "We could not price your bag just now. Please try again." };
+  }
+}
 
 /** Live discount check for the "Apply" button. */
 export async function checkDiscount(
@@ -135,6 +185,20 @@ export async function placeOrder(
     so surface the message rather than letting an uncaught throw become the
     generic crash page. An unrecognised error still fails safe and generic.
   */
+  /*
+    Close out this customer's abandoned checkouts first.
+
+    An abandoned pending order HOLDS the new-member discount — price_order will
+    not grant it while another order still carries it — so without this, a
+    shopper who got as far as the payment page once and came back would silently
+    lose the offer. Only genuinely dead attempts are cancelled; a live hosted
+    bill is left alone.
+  */
+  const shopper = await getCurrentUser();
+  if (shopper?.user.id) {
+    await cancelAbandonedPendingOrders(shopper.user.id).catch(() => {});
+  }
+
   let order: Awaited<ReturnType<typeof createOrder>>;
   try {
     order = await createOrder({

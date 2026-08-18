@@ -478,6 +478,127 @@ export async function listLookbookCandidates(): Promise<LookbookCandidate[]> {
     .filter((p) => p.colors.length > 0);
 }
 
+/* ---- Sign-up popup ------------------------------------------------------- */
+
+export type AdminSignupPromo = {
+  enabled: boolean;
+  eyebrow: string;
+  heading: string;
+  body: string;
+  perks: string[];
+  /* The offer itself, in ringgit. Independent of `enabled`: the popup is
+     advertising, this is money, and either can be set without the other. */
+  firstOrderDiscountRm: number;
+  ctaLabel: string;
+  ctaHref: string;
+  delaySeconds: number;
+  dismissDays: number;
+};
+
+export async function getSignupPromoAdmin(): Promise<AdminSignupPromo> {
+  const client = db();
+
+  const { data, error } = await client
+    .from("signup_promo")
+    .select("enabled, eyebrow, heading, body, perks, first_order_discount_sen, cta_label, cta_href, delay_seconds, dismiss_days")
+    .eq("id", 1)
+    .single();
+  if (error) throw new Error(`getSignupPromoAdmin failed: ${error.message}`);
+
+  return {
+    enabled: data.enabled,
+    eyebrow: data.eyebrow ?? "",
+    heading: data.heading ?? "",
+    body: data.body ?? "",
+    perks: Array.isArray(data.perks) ? (data.perks as unknown[]).filter((p): p is string => typeof p === "string") : [],
+    firstOrderDiscountRm: (data.first_order_discount_sen ?? 0) / 100,
+    ctaLabel: data.cta_label ?? "",
+    ctaHref: data.cta_href ?? "",
+    delaySeconds: data.delay_seconds,
+    dismissDays: data.dismiss_days,
+  };
+}
+
+/* ---- Footer ------------------------------------------------------------- */
+
+export type AdminFooterText = {
+  companyName: string;
+  companyRegNo: string;
+  tagline: string;
+  paymentNote: string;
+};
+
+export type AdminTrustItem = {
+  id: string; icon: string; title: string; body: string | null;
+  sortOrder: number; active: boolean;
+};
+
+export type AdminFooterLink = {
+  id: string; columnId: string; label: string; href: string;
+  sortOrder: number; active: boolean;
+};
+
+export type AdminFooterColumn = {
+  id: string; heading: string; sortOrder: number; links: AdminFooterLink[];
+};
+
+/*
+  The footer as the back office edits it — INACTIVE rows included, unlike the
+  storefront read. This is the screen where something hidden gets restored, so
+  it cannot be the screen that hides it.
+*/
+export async function getFooterText(): Promise<AdminFooterText> {
+  const { data, error } = await db()
+    .from("store_settings")
+    .select("company_name, company_reg_no, footer_tagline, footer_payment_note")
+    .eq("id", 1)
+    .single();
+  if (error) throw new Error(`getFooterText failed: ${error.message}`);
+  return {
+    companyName: data.company_name ?? "",
+    companyRegNo: data.company_reg_no ?? "",
+    tagline: data.footer_tagline ?? "",
+    paymentNote: data.footer_payment_note ?? "",
+  };
+}
+
+export async function listTrustItems(): Promise<AdminTrustItem[]> {
+  const { data, error } = await db()
+    .from("footer_trust")
+    .select("id, icon, title, body, sort_order, active")
+    .order("sort_order");
+  if (error) throw new Error(`listTrustItems failed: ${error.message}`);
+  return (data ?? []).map((t) => ({
+    id: t.id, icon: t.icon, title: t.title, body: t.body,
+    sortOrder: t.sort_order, active: t.active,
+  }));
+}
+
+export async function listFooterColumns(): Promise<AdminFooterColumn[]> {
+  const { data, error } = await db()
+    .from("footer_link_columns")
+    .select("id, heading, sort_order, footer_links ( id, column_id, label, href, sort_order, active )")
+    .order("sort_order");
+  if (error) throw new Error(`listFooterColumns failed: ${error.message}`);
+
+  type Raw = {
+    id: string; heading: string; sort_order: number;
+    footer_links: { id: string; column_id: string; label: string; href: string; sort_order: number; active: boolean }[] | null;
+  };
+
+  return ((data ?? []) as unknown as Raw[]).map((c) => ({
+    id: c.id,
+    heading: c.heading,
+    sortOrder: c.sort_order,
+    links: (c.footer_links ?? [])
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((l) => ({
+        id: l.id, columnId: l.column_id, label: l.label, href: l.href,
+        sortOrder: l.sort_order, active: l.active,
+      })),
+  }));
+}
+
 /* ---- Instagram --------------------------------------------------------- */
 
 export type AdminInstagramPost = {
@@ -935,6 +1056,13 @@ export async function getOrderWeightGrams(orderReference: string): Promise<numbe
 
 export type SenderSettings = {
   easyparcelEnabled: boolean;
+  /* What the CUSTOMER is charged. Distinct from everything else here, which is
+     about booking the parcel: EasyParcel prices what the shop pays a courier,
+     these two decide what appears on the order. */
+  flatShippingSen: number;
+  /* Spend at which shipping becomes free. 0 = no free shipping — see the
+     free_shipping_threshold_off_at_zero migration. */
+  freeShippingThresholdSen: number;
   connected: boolean;
   fallbackEnabled: boolean;
   senderName: string | null;
@@ -949,7 +1077,7 @@ export type SenderSettings = {
 export async function getSenderSettings(): Promise<SenderSettings> {
   const { data, error } = await db()
     .from("store_settings")
-    .select("easyparcel_enabled, easyparcel_access_token, shipping_fallback_enabled, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state")
+    .select("easyparcel_enabled, easyparcel_access_token, shipping_fallback_enabled, flat_shipping_sen, free_shipping_threshold_sen, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state")
     .eq("id", 1)
     .single();
   if (error) throw new Error(`getSenderSettings failed: ${error.message}`);
@@ -957,6 +1085,8 @@ export async function getSenderSettings(): Promise<SenderSettings> {
     easyparcelEnabled: Boolean(data.easyparcel_enabled),
     connected: Boolean(data.easyparcel_access_token),
     fallbackEnabled: Boolean(data.shipping_fallback_enabled),
+    flatShippingSen: data.flat_shipping_sen ?? 0,
+    freeShippingThresholdSen: data.free_shipping_threshold_sen ?? 0,
     senderName: data.sender_name, senderPhone: data.sender_phone,
     senderLine1: data.sender_line1, senderLine2: data.sender_line2,
     senderCity: data.sender_city, senderPostcode: data.sender_postcode,

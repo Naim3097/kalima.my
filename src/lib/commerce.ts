@@ -135,6 +135,96 @@ export async function validateDiscount(
   guests) — resolved here from the auth cookie, never taken from the caller's
   input, so a guest can't spoof someone else's account onto an order.
 */
+/*
+  What this cart costs, before anything is placed.
+
+  Calls the SAME price_order() the charge does, so the summary a shopper agrees
+  to is arithmetic from the identical source — not a second implementation that
+  merely agrees today. Everything that used to be recomputed in the checkout
+  component (the code, the new-member discount, the loyalty clamp, the shipping
+  threshold, the no-stacking rule) is now a field on this result.
+
+  Service role, like every order function, and the user id comes from the
+  session at the call site — never from the browser.
+*/
+export type OrderQuote = {
+  subtotalSen: number;
+  discountSen: number;
+  discountCode: string | null;
+  firstOrderDiscountSen: number;
+  loyaltyPointsUsed: number;
+  loyaltyDiscountSen: number;
+  shippingSen: number;
+  freeShipping: boolean;
+  taxSen: number;
+  totalSen: number;
+};
+
+export async function quoteOrder(params: {
+  userId: string | null;
+  items: CartLine[];
+  discountCode?: string;
+  redeemPoints?: number;
+}): Promise<OrderQuote> {
+  const { data, error } = await admin().rpc("price_order", {
+    p_user_id: params.userId,
+    p_items: params.items,
+    p_discount_code: params.discountCode ?? null,
+    p_redeem_points: params.redeemPoints ?? 0,
+  });
+  if (error) throw new Error(`quoteOrder failed: ${error.message}`);
+
+  const q = data as Record<string, unknown>;
+  return {
+    subtotalSen: Number(q.subtotal_sen ?? 0),
+    discountSen: Number(q.discount_sen ?? 0),
+    discountCode: (q.discount_code as string | null) ?? null,
+    firstOrderDiscountSen: Number(q.first_order_discount_sen ?? 0),
+    loyaltyPointsUsed: Number(q.loyalty_points_used ?? 0),
+    loyaltyDiscountSen: Number(q.loyalty_discount_sen ?? 0),
+    shippingSen: Number(q.shipping_sen ?? 0),
+    freeShipping: Boolean(q.free_shipping),
+    taxSen: Number(q.tax_sen ?? 0),
+    totalSen: Number(q.total_sen ?? 0),
+  };
+}
+
+/*
+  Closes out the customer's abandoned checkouts before a new one is placed.
+
+  Two reasons, and the second is the one that costs money. An abandoned pending
+  order clutters the order list — but it also HOLDS the new-member discount,
+  because price_order refuses to grant it twice while another order still
+  carries it. Without this sweep, abandoning a checkout once would silently
+  withdraw the offer until the nightly expiry ran.
+
+  Only genuinely dead attempts are cancelled. findLivePaymentAttempt is the same
+  check startPayment uses to decide whether to resume a bill: an order whose
+  gateway still says "in progress" is left exactly where it is, because the
+  customer may be on that hosted page right now.
+*/
+export async function cancelAbandonedPendingOrders(userId: string): Promise<number> {
+  const { data: pending, error } = await admin()
+    .from("orders")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("status", "pending");
+  if (error || !pending?.length) return 0;
+
+  let cancelled = 0;
+  for (const order of pending) {
+    const attempt = await findLivePaymentAttempt(order.id);
+    if (attempt.verdict !== "dead") continue;
+
+    const { error: cancelError } = await admin().rpc("cancel_pending_order", {
+      p_order_id: order.id,
+      p_reason: "superseded by a new checkout",
+    });
+    if (!cancelError) cancelled++;
+  }
+  return cancelled;
+}
+
 export async function createOrder(params: {
   items: CartLine[];
   email: string;

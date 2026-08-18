@@ -6,7 +6,6 @@ import {
   useCart,
   cartKey,
   cartSubtotal,
-  FREE_SHIPPING_THRESHOLD,
 } from "@/stores/cart";
 import { useUi } from "@/stores/ui";
 import { useMounted } from "@/hooks/useMounted";
@@ -14,7 +13,6 @@ import { formatRM } from "@/lib/format";
 import { CloseIcon, MinusIcon, PlusIcon } from "@/components/brand/Icons";
 import ProductImage from "@/components/brand/ProductImage";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import {
   Sheet,
   SheetClose,
@@ -37,8 +35,6 @@ export default function CartDrawer() {
   const cartItems = mounted ? items : [];
 
   const subtotal = cartSubtotal(cartItems);
-  const remaining = Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal);
-  const progress = Math.min(100, (subtotal / FREE_SHIPPING_THRESHOLD) * 100);
 
   return (
     <Sheet open={cartOpen} onOpenChange={setCartOpen}>
@@ -58,27 +54,6 @@ export default function CartDrawer() {
           >
             <CloseIcon size={18} />
           </SheetClose>
-        </div>
-
-        <div className="border-b border-navy/10 px-6 py-4">
-          <p className="text-[12px] tracking-wide text-navy-400">
-            {remaining > 0 ? (
-              <>
-                You&apos;re{" "}
-                <span className="text-navy font-medium">{formatRM(remaining)}</span>{" "}
-                away from free shipping
-              </>
-            ) : (
-              <span className="text-navy font-medium">
-                You&apos;ve unlocked free shipping ✨
-              </span>
-            )}
-          </p>
-          <Progress
-            value={progress}
-            aria-label="Progress towards free shipping"
-            className="mt-2 h-1 w-full rounded-none bg-navy-100 [&>*]:bg-navy [&>*]:duration-500"
-          />
         </div>
 
         <div className="flex-1 overflow-y-auto px-6">

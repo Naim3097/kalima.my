@@ -332,7 +332,7 @@ export const NAV: NavItem[] = [
 ];
 
 export const ANNOUNCEMENTS = [
-  "FREE SHIPPING for orders above RM300",
+  "WORLDWIDE DELIVERY — shipping calculated at checkout",
   "New: Serra Scallop — scalloped embroidery over premium satin",
   "Join Kalima Club for exclusive offers & private sales",
 ];
