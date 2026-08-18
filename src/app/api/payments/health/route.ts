@@ -99,12 +99,11 @@ export async function GET(request: Request) {
       ATOME_USERNAME: Boolean(process.env.ATOME_USERNAME),
       ATOME_PASSWORD: Boolean(process.env.ATOME_PASSWORD),
       /*
-        Optional, unlike LeanX's. Atome's callback carries only a referenceId and
-        the adapter re-fetches the payment over authenticated HTTPS, so the
-        signature is defence in depth rather than the thing that decides whether
-        an order was paid. Its absence is reported as a warning, not a failure.
+        No callback-secret row, because Atome issues no such secret: the
+        X-Signature key is Base64(ATOME_PASSWORD). The password line above is
+        therefore also the answer to "are callbacks signature-checked?" — see
+        callbackSigning below, which says so in words.
       */
-      ATOME_CALLBACK_SECRET: Boolean(process.env.ATOME_CALLBACK_SECRET),
     },
     atome: {
       env: atomeEnv,
@@ -112,6 +111,9 @@ export async function GET(request: Request) {
       countryCode: process.env.ATOME_COUNTRY_CODE || "MY",
       minimumRM: ATOME_MIN_SEN / 100,
       callbackUrl: origin ? `${origin}/api/payments/atome/webhook` : null,
+      callbackSigning: process.env.ATOME_PASSWORD
+        ? "enforced — HMAC-SHA256, key is Base64(ATOME_PASSWORD)"
+        : "unconfigured",
     },
     apiHost: process.env.LEANX_API_HOST || "https://api.leanx.io",
     // Must be .io — .dev is legacy and unstable.
@@ -128,11 +130,6 @@ export async function GET(request: Request) {
       ...(siteUrl ? [] : ["NEXT_PUBLIC_SITE_URL is unset — the callback URL follows the request host."]),
       ...(process.env.LEANX_AUTH_TOKEN && !process.env.LEANX_WEBHOOK_SECRET
         ? ["Auth token set without a webhook secret — bills will create but no order can ever be paid."]
-        : []),
-      ...(process.env.ATOME_USERNAME && !process.env.ATOME_CALLBACK_SECRET
-        ? [
-            "Atome is configured without ATOME_CALLBACK_SECRET — callbacks are accepted unsigned. Settlement still relies on an authenticated status lookup, so a forged callback cannot mark an order paid, but ask your Atome account manager for the signing details.",
-          ]
         : []),
       ...(process.env.ATOME_USERNAME && atomeEnv !== "production"
         ? ["Atome is pointed at the sandbox (api.apaylater.net) — set ATOME_ENV=production to take real payments."]

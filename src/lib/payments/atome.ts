@@ -20,7 +20,6 @@ import type {
     ATOME_USERNAME         issued by the Atome account manager (Basic auth user)
     ATOME_PASSWORD         issued by the Atome account manager (Basic auth pass)
     ATOME_COUNTRY_CODE     MY
-    ATOME_CALLBACK_SECRET  shared secret for the X-Signature HMAC (see below)
     ATOME_ENV              "production" selects api.apaylater.com; anything else
                            (or unset) stays on the api.apaylater.net sandbox
 
@@ -32,8 +31,9 @@ import type {
   That inverts where the trust sits, and for the better: a forged callback cannot
   fake a payment, because the body it controls is never the thing we believe. The
   X-Signature HMAC is defence in depth on top of that, not the load-bearing
-  check. Atome's own spec says the signature details must be confirmed with your
-  account manager, which is precisely why the design does not rest on it.
+  check — which is why this adapter worked correctly through the months the
+  signing details were still unconfirmed. They are confirmed now; see
+  CALLBACK_SECRET below.
 */
 
 const PROD_BASE = "https://api.apaylater.com/v2";
@@ -43,7 +43,19 @@ const BASE = process.env.ATOME_ENV === "production" ? PROD_BASE : TEST_BASE;
 const USERNAME = process.env.ATOME_USERNAME || "";
 const PASSWORD = process.env.ATOME_PASSWORD || "";
 const COUNTRY = process.env.ATOME_COUNTRY_CODE || "MY";
-const CALLBACK_SECRET = process.env.ATOME_CALLBACK_SECRET || "";
+/*
+  THE SIGNING KEY IS NOT A SEPARATE SECRET, AND THERE IS NO ENV VAR FOR IT.
+
+  Atome issues no webhook secret in the Merchant Portal — confirmed by our
+  account manager. The key is the ASCII API password Base64-encoded, and it is
+  that Base64 STRING which keys the HMAC; it is never decoded back to bytes
+  first. (Encoding-then-keying looks like a mistake and is not: it is what the
+  other side does, so it is what we must do.)
+
+  Consequence worth noticing: signing is live the moment ATOME_PASSWORD is set.
+  There is nothing left to switch on and no second variable to forget.
+*/
+const CALLBACK_SECRET = PASSWORD ? Buffer.from(PASSWORD, "utf8").toString("base64") : "";
 
 /*
   Atome's documented MYR floor is RM10.00. Exported because the checkout page
@@ -142,21 +154,23 @@ async function getPayment(referenceId: string): Promise<AtomePayment | null> {
   HMAC-SHA256 over the EXACT raw body, timing-safe, fail-closed — the same shape
   as verifySignature in leanx.ts.
 
-  Atome sends hex; a base64 digest is accepted too because the spec does not
-  pin the encoding and the account manager confirms it per merchant. Comparing
-  both is not a weakness: each comparison is still against a digest only the
-  holder of the secret could produce.
+  Base64 digest, compared against X-Signature verbatim. An earlier version also
+  accepted hex, because the published spec pins no encoding; the account manager
+  has since confirmed Base64, so the tolerance is gone rather than left lying
+  around as a second thing that could accidentally pass.
+
+  The body must be the bytes Atome sent — minified, UTF-8, fields in their
+  order. Re-serialising a parsed object would change both and fail every time,
+  which is why the caller hands us text it has not touched.
 */
 function verifySignature(rawBody: string, signature: string): boolean {
   if (!CALLBACK_SECRET || !signature) return false;
-  /* Two separate Hmac objects: one is consumed by digest(), so a single instance
-     cannot produce both encodings. */
-  const digest = (enc: "hex" | "base64") =>
-    crypto.createHmac("sha256", CALLBACK_SECRET).update(rawBody).digest(enc);
-  return [digest("hex"), digest("base64")].some((expected) => {
-    if (signature.length !== expected.length) return false;
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-  });
+  const expected = crypto
+    .createHmac("sha256", CALLBACK_SECRET)
+    .update(rawBody, "utf8")
+    .digest("base64");
+  if (signature.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
 }
 
 export const atome: PaymentProvider = {
@@ -332,26 +346,7 @@ export const atome: PaymentProvider = {
     const raw = await request.text();
 
     /*
-      Only enforced when a secret is configured. With none set the callback is
-      still not trusted for anything: the status and amount below come from the
-      authenticated GET, so the worst a forged POST achieves is making us ask
-      Atome about a reference we already own.
-    */
-    /*
-      WATCH THIS WHEN YOU SET THE SECRET. The signature check runs before the
-      ping tolerance below, so if Atome's POST /auth reachability probe is sent
-      UNSIGNED, enabling the secret will make that probe 401 and /auth will go
-      back to reporting CALLBACK_FAILED — with real callbacks still working
-      fine. Ask the account manager whether the connectivity probe is signed;
-      if it is not, the check has to move after the referenceId test.
-    */
-    if (CALLBACK_SECRET) {
-      const sig = request.headers.get("x-signature") ?? "";
-      if (!verifySignature(raw, sig)) throw new Error("Atome webhook signature invalid");
-    }
-
-    /*
-      A BODY WITH NO referenceId IS A PING, NOT A FAULT.
+      A BODY WITH NO referenceId IS A PING, NOT A FAULT — AND IT IS READ FIRST.
 
       Atome's POST /auth connectivity check posts to this endpoint and treats
       any non-20x as CALLBACK_FAILED — which is exactly what happened when this
@@ -359,10 +354,17 @@ export const atome: PaymentProvider = {
       the integration unusable, because the reachability probe carries no
       referenceId and got a 401 back.
 
+      The probe is not signed either, which is why the signature check sits
+      BELOW this rather than above it. Now that the key is derived from the
+      password there is no longer an unsigned configuration to fall back on, so
+      checking first would revive that same failure the moment Atome is
+      credentialled. Reading the reference first costs nothing: with no
+      reference nothing is looked up and nothing can be settled, so an unsigned
+      probe is acknowledged while every real callback is still fully verified.
+
       Same reasoning the channel webhook already applies to heartbeats and
-      status pings. Acknowledging costs nothing: there is no reference, so no
-      order is looked up and nothing can be settled. 401 stays reserved for a
-      failed signature, which is a genuine authentication failure.
+      status pings. 401 stays reserved for a failed signature, which is a
+      genuine authentication failure.
     */
     let referenceId = "";
     try {
@@ -372,6 +374,17 @@ export const atome: PaymentProvider = {
     }
 
     if (!referenceId) return { paid: false, status: "unknown" };
+
+    /*
+      Now enforce, over the raw text captured above rather than a re-serialised
+      copy of the object just parsed out of it. CALLBACK_SECRET is empty only
+      when ATOME_PASSWORD is unset — in which case no payment could have been
+      created to be called back about.
+    */
+    if (CALLBACK_SECRET) {
+      const sig = request.headers.get("x-signature") ?? "";
+      if (!verifySignature(raw, sig)) throw new Error("Atome webhook signature invalid");
+    }
 
     const payment = await getPayment(referenceId);
     if (!payment) {

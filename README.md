@@ -161,8 +161,7 @@ WhatsApp, Instagram, Facebook, Shopee and TikTok.
 | `SUPABASE_SERVICE_ROLE_KEY` | Order operations throw — required from Phase 2 on |
 | `LEANX_AUTH_TOKEN` / `LEANX_COLLECTION_UUID` | Checkout completes as "order received, payment pending" |
 | `LEANX_WEBHOOK_SECRET` | Payment webhook returns 401 — an order can never be marked paid |
-| `ATOME_USERNAME` / `ATOME_PASSWORD` | Atome is absent from the payment picker; LeanX unaffected |
-| `ATOME_CALLBACK_SECRET` | Atome callbacks are accepted unsigned — safe, because settlement reads the payment back from Atome over authenticated HTTPS rather than trusting the callback body. `/api/payments/health` warns while it is unset |
+| `ATOME_USERNAME` / `ATOME_PASSWORD` | Atome is absent from the payment picker; LeanX unaffected. The password doubles as the callback-signing key — Atome issues no separate webhook secret, so `X-Signature` is verified whenever Atome is configured at all |
 | `ATOME_ENV` ≠ `production` | Atome stays on the `api.apaylater.net` sandbox — real money needs an explicit opt-in |
 | `RESEND_API_KEY` | Emails no-op silently |
 | `EASYPARCEL_*` | Shipping settings show disconnected; booking unavailable |
