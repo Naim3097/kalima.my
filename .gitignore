@@ -22,3 +22,8 @@ public/products/**/*.mp4
 
 # Locally-installed agent templates (per-developer, not shared)
 .claude/agents/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
