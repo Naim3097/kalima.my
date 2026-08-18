@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { getCurrentUser, isStaff, type Role } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
+import { EDITORIAL_SLOTS, type EditorialSlot } from "@/lib/editorial";
+import { syncInstagram, type InstagramSyncSummary } from "@/lib/instagram/sync";
 import { parseCsvRecords } from "@/lib/csv";
 import { getOrder } from "@/lib/admin";
 import { awardLoyaltyPoints } from "@/lib/commerce";
@@ -1934,8 +1936,84 @@ export async function deleteLookbookShot(id: string): Promise<ActionResult> {
   return { ok: true };
 }
 
+/*
+  Deletes the object a replaced CMS image used to point at.
+
+  Deliberately narrow. It only ever removes a key WE minted — a `hero/` or
+  `editorial/` object in our own bucket — so a row pointing at /public artwork
+  or at production's bucket (which staging's copied rows do) is left alone.
+
+  And only when nothing still shows it. Both CMS tables are checked, not just
+  the one being edited: a hero slide and an editorial slot can be pointed at the
+  same photograph, and sweeping on the strength of one table would blank the
+  other. Nothing stops two rows in the SAME table sharing it either.
+
+  Failure is swallowed: an orphaned object costs storage, a thrown error costs
+  the editor their save.
+*/
+async function sweepReplacedCmsImage(
+  db: Awaited<ReturnType<typeof assertStaff>>, url: string,
+): Promise<void> {
+  const marker = `/storage/v1/object/public/${IMAGE_BUCKET}/`;
+  const at = url.indexOf(marker);
+  if (at === -1) return;
+
+  const path = url.slice(at + marker.length);
+  if (!/^(hero|editorial)\//.test(path)) return;
+
+  for (const table of ["hero_slides", "editorial_images"] as const) {
+    const { count, error } = await db
+      .from(table)
+      .select("image", { count: "exact", head: true })
+      .eq("image", url);
+    // Unreadable is not the same as unreferenced — keep the object.
+    if (error || count) return;
+  }
+
+  await db.storage.from(IMAGE_BUCKET).remove([path]).catch(() => {});
+}
+
+/*
+  Signed upload URL for CMS photography — hero slides and the homepage's
+  editorial slots. Same shape as createImageUploadUrl: the browser PUTs straight
+  to Storage so the bytes never cross a server action, and the token is scoped
+  to this one object key.
+
+  Shares the product-images bucket under a per-surface prefix rather than adding
+  buckets — same visibility, same size ceiling, same mime allowlist, and no
+  second set of policies to drift out of step with the first.
+
+  The folder is a CLOSED SET, not a caller-supplied string: it lands in the
+  object path, and an open one is a path the caller chooses.
+
+  The key itself is random. A caller-supplied filename here is the same problem.
+*/
+const CMS_IMAGE_FOLDERS = new Set(["hero", "editorial"]);
+
+export async function createCmsImageUploadUrl(
+  folder: string, contentType: string, sizeBytes: number,
+): Promise<{ path: string; token: string; publicUrl: string } | { error: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!CMS_IMAGE_FOLDERS.has(folder)) return { error: "Unknown image slot." };
+  if (!ALLOWED_IMAGE_TYPES.has(contentType)) return { error: "Use a JPEG, PNG, WebP or AVIF image." };
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return { error: "That file looks empty." };
+  if (sizeBytes > MAX_IMAGE_BYTES) return { error: "Images must be 5 MB or smaller." };
+
+  const path = `${folder}/${crypto.randomUUID()}.${EXT_BY_TYPE[contentType]}`;
+  const { data, error } = await db.storage.from(IMAGE_BUCKET).createSignedUploadUrl(path);
+  if (error) return { error: error.message };
+
+  const { data: pub } = db.storage.from(IMAGE_BUCKET).getPublicUrl(path);
+  if (!pub?.publicUrl) return { error: "Could not resolve the upload location." };
+
+  return { path: data.path, token: data.token, publicUrl: pub.publicUrl };
+}
+
 export async function saveHeroSlide(input: {
   id?: string; eyebrow: string; title: string; body: string; image: string; focal: string;
+  zoom: number;
   primaryLabel: string; primaryHref: string; secondaryLabel: string; secondaryHref: string;
   sortOrder: number; active: boolean;
 }): Promise<ActionResult> {
@@ -1944,12 +2022,23 @@ export async function saveHeroSlide(input: {
   if (!input.title.trim()) return { error: "Title is required." };
   if (!input.image.trim()) return { error: "Image path is required." };
 
+  // Read before the write: after it, the row no longer knows what it replaced.
+  const { data: before } = input.id
+    ? await db.from("hero_slides").select("image").eq("id", input.id).maybeSingle()
+    : { data: null };
+
   const row = {
     eyebrow: input.eyebrow.trim() || null,
     title: input.title.trim(),
     body: input.body.trim() || null,
     image: input.image.trim(),
     focal: input.focal.trim() || "center",
+    /*
+      Clamped rather than rejected: zoom arrives from a slider, and the column
+      carries the same 1–3 CHECK. A stray value should reframe the slide, not
+      hand whoever pressed Save a constraint violation.
+    */
+    zoom: Math.min(3, Math.max(1, Number(input.zoom) || 1)),
     primary_label: input.primaryLabel.trim() || null,
     primary_href: input.primaryHref.trim() || null,
     secondary_label: input.secondaryLabel.trim() || null,
@@ -1961,6 +2050,11 @@ export async function saveHeroSlide(input: {
     ? await db.from("hero_slides").update(row).eq("id", input.id)
     : await db.from("hero_slides").insert(row);
   if (error) return { error: error.message };
+
+  // Only once the new image is committed — never strand a slide on a dead URL.
+  const previous = before?.image as string | undefined;
+  if (previous && previous !== row.image) await sweepReplacedCmsImage(db, previous);
+
   await logAudit(db, {
     action: input.id ? "hero_slide.updated" : "hero_slide.created",
     entityType: "cms", entityId: input.id ?? null,
@@ -1975,12 +2069,181 @@ export async function saveHeroSlide(input: {
 export async function deleteHeroSlide(id: string): Promise<ActionResult> {
   let db;
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: before } = await db.from("hero_slides").select("image").eq("id", id).maybeSingle();
+
   const { error } = await db.from("hero_slides").delete().eq("id", id);
   if (error) return { error: error.message };
+
+  // The slide is gone, so its upload has nothing left pointing at it.
+  if (before?.image) await sweepReplacedCmsImage(db, before.image as string);
+
   await logAudit(db, {
     action: "hero_slide.deleted", entityType: "cms", entityId: id,
     summary: "Hero slide deleted",
   });
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+/* ---- Instagram ---------------------------------------------------------- */
+
+/*
+  Tags a synced Instagram post with a product, or clears the tag.
+
+  The tag is the whole reason this section still feeds the catalogue: tagged
+  tiles open the product page, untagged ones open the post on Instagram.
+*/
+export async function tagInstagramPost(
+  postId: string, productId: string | null,
+): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { error } = await db
+    .from("instagram_posts")
+    .update({ product_id: productId })
+    .eq("id", postId);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: productId ? "instagram_post.tagged" : "instagram_post.untagged",
+    entityType: "cms", entityId: postId,
+    summary: productId ? "Instagram post tagged with a product" : "Instagram post tag cleared",
+    meta: { productId },
+  });
+
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+/*
+  Keeps a post off the storefront without deleting it — the next sync would only
+  fetch it again, so `hidden` is the only durable way to say "not this one".
+*/
+export async function setInstagramPostHidden(
+  postId: string, hidden: boolean,
+): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { error } = await db.from("instagram_posts").update({ hidden }).eq("id", postId);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: hidden ? "instagram_post.hidden" : "instagram_post.shown",
+    entityType: "cms", entityId: postId,
+    summary: `Instagram post ${hidden ? "hidden from" : "restored to"} the storefront`,
+  });
+
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+/*
+  Pulls from Instagram now, rather than waiting for the daily schedule. Same
+  job the scheduler runs — this is the manual escape hatch, exactly as the
+  marketplace screen's "Sync now" is.
+*/
+export async function syncInstagramNow(): Promise<
+  ActionResult & { summary?: InstagramSyncSummary }
+> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  try {
+    const summary = await syncInstagram();
+    await logAudit(db, {
+      action: "instagram.synced", entityType: "cms", entityId: null,
+      summary:
+        `Instagram sync — ${summary.added} added, ${summary.updated} updated, ` +
+        `${summary.pruned} removed`,
+      meta: { ...summary },
+    });
+    revalidatePath("/admin/cms");
+    revalidateStorefront();
+    return { ok: true, summary };
+  } catch (err) {
+    /* Meta's own wording reaches the staff member — "(#200) Requires
+       instagram_basic" names the fix, "sync failed" does not. */
+    return { error: err instanceof Error ? err.message : "Instagram sync failed." };
+  }
+}
+
+/* ---- Homepage editorial imagery ----------------------------------------- */
+
+/*
+  The category tiles and the collection spotlight. One row per SLOT, and the
+  slot list is the one in src/lib/editorial.ts — an unknown slot would write a
+  row nothing renders, which looks like a save that silently did nothing.
+
+  Upsert rather than insert-or-update: a slot has no row at all until someone
+  first changes it (the code default renders in the meantime), so "create" and
+  "edit" are the same action from the editor's side.
+*/
+export async function saveEditorialImage(input: {
+  slot: string; image: string; focal: string; zoom: number; alt: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  if (!EDITORIAL_SLOTS.includes(input.slot as EditorialSlot)) return { error: "Unknown image slot." };
+  if (!input.image.trim()) return { error: "Upload an image, or enter an image path." };
+
+  const { data: before } = await db
+    .from("editorial_images").select("image").eq("slot", input.slot).maybeSingle();
+
+  const row = {
+    slot: input.slot,
+    image: input.image.trim(),
+    focal: input.focal.trim() || "center",
+    // Clamped, not rejected — same reasoning as the hero slide's zoom.
+    zoom: Math.min(3, Math.max(1, Number(input.zoom) || 1)),
+    alt: input.alt.trim() || null,
+  };
+
+  const { error } = await db.from("editorial_images").upsert(row, { onConflict: "slot" });
+  if (error) return { error: error.message };
+
+  const previous = before?.image as string | undefined;
+  if (previous && previous !== row.image) await sweepReplacedCmsImage(db, previous);
+
+  await logAudit(db, {
+    action: "editorial_image.updated", entityType: "cms", entityId: input.slot,
+    summary: `Homepage image updated: ${input.slot}`,
+    meta: { focal: row.focal, zoom: row.zoom },
+  });
+
+  revalidatePath("/admin/cms");
+  revalidateStorefront();
+  return { ok: true };
+}
+
+/*
+  Hands a slot back to the shot the code picks. Deleting the row IS the reset —
+  there is no "original" to restore to, because the default was never stored.
+*/
+export async function resetEditorialImage(slot: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  if (!EDITORIAL_SLOTS.includes(slot as EditorialSlot)) return { error: "Unknown image slot." };
+
+  const { data: before } = await db
+    .from("editorial_images").select("image").eq("slot", slot).maybeSingle();
+
+  const { error } = await db.from("editorial_images").delete().eq("slot", slot);
+  if (error) return { error: error.message };
+
+  if (before?.image) await sweepReplacedCmsImage(db, before.image as string);
+
+  await logAudit(db, {
+    action: "editorial_image.reset", entityType: "cms", entityId: slot,
+    summary: `Homepage image reset to the default: ${slot}`,
+  });
+
   revalidatePath("/admin/cms");
   revalidateStorefront();
   return { ok: true };

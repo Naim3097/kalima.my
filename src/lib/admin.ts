@@ -1,6 +1,12 @@
 import "server-only";
 
 import { createAdminClient } from "@/lib/supabase/server";
+import {
+  EDITORIAL_DEFAULTS,
+  EDITORIAL_SLOTS,
+  EDITORIAL_SLOT_LABELS,
+  type EditorialSlot,
+} from "@/lib/editorial";
 
 /*
   Back-office data access (Phase 3). Staff-only screens, so everything runs
@@ -315,6 +321,7 @@ export async function listRoleGrants(): Promise<RoleGrant[]> {
 export type AdminAnnouncement = { id: string; text: string; sortOrder: number; active: boolean };
 export type AdminHeroSlide = {
   id: string; eyebrow: string | null; title: string; body: string | null; image: string; focal: string | null;
+  zoom: number;
   primaryLabel: string | null; primaryHref: string | null; secondaryLabel: string | null; secondaryHref: string | null;
   sortOrder: number; active: boolean;
 };
@@ -330,15 +337,58 @@ export async function listAnnouncements(): Promise<AdminAnnouncement[]> {
 export async function listHeroSlides(): Promise<AdminHeroSlide[]> {
   const { data, error } = await db()
     .from("hero_slides")
-    .select("id, eyebrow, title, body, image, focal, primary_label, primary_href, secondary_label, secondary_href, sort_order, active")
+    .select("id, eyebrow, title, body, image, focal, zoom, primary_label, primary_href, secondary_label, secondary_href, sort_order, active")
     .order("sort_order");
   if (error) throw new Error(`listHeroSlides failed: ${error.message}`);
   return (data ?? []).map((s) => ({
     id: s.id, eyebrow: s.eyebrow, title: s.title, body: s.body, image: s.image, focal: s.focal,
+    zoom: s.zoom ?? 1,
     primaryLabel: s.primary_label, primaryHref: s.primary_href,
     secondaryLabel: s.secondary_label, secondaryHref: s.secondary_href,
     sortOrder: s.sort_order, active: s.active,
   }));
+}
+
+/*
+  The homepage's editorial slots, defaults merged with whatever the CMS has
+  overridden — the same merge the storefront does, so the back office lists what
+  a visitor sees rather than only the rows that happen to exist.
+
+  `customised` is what tells them apart: it is what the Reset control keys off,
+  and without it a slot showing its code default is indistinguishable from one
+  somebody deliberately set to the same photograph.
+*/
+export type AdminEditorialImage = {
+  slot: EditorialSlot;
+  label: string;
+  image: string;
+  focal: string;
+  zoom: number;
+  alt: string;
+  customised: boolean;
+};
+
+export async function listEditorialImages(): Promise<AdminEditorialImage[]> {
+  const { data, error } = await db()
+    .from("editorial_images")
+    .select("slot, image, focal, zoom, alt");
+  if (error) throw new Error(`listEditorialImages failed: ${error.message}`);
+
+  const rows = new Map((data ?? []).map((r) => [r.slot as string, r]));
+
+  return EDITORIAL_SLOTS.map((slot) => {
+    const fallback = EDITORIAL_DEFAULTS[slot];
+    const row = rows.get(slot);
+    return {
+      slot,
+      label: EDITORIAL_SLOT_LABELS[slot],
+      image: row?.image || fallback.image,
+      focal: row?.focal || fallback.focal,
+      zoom: row?.zoom ?? fallback.zoom,
+      alt: row?.alt ?? fallback.alt,
+      customised: Boolean(row),
+    };
+  });
 }
 
 export type AdminLookbookShot = {
@@ -426,6 +476,71 @@ export async function listLookbookCandidates(): Promise<LookbookCandidate[]> {
       return { id: p.id as string, name: p.name as string, slug: p.slug as string, colors };
     })
     .filter((p) => p.colors.length > 0);
+}
+
+/* ---- Instagram --------------------------------------------------------- */
+
+export type AdminInstagramPost = {
+  id: string;
+  image: string;
+  permalink: string;
+  caption: string | null;
+  mediaType: string;
+  postedAt: string;
+  productId: string | null;
+  productName: string | null;
+  hidden: boolean;
+};
+
+/*
+  Every synced post, hidden ones included — this is the screen where hiding is
+  undone, so it cannot be the screen that hides them from itself.
+*/
+export async function listInstagramPosts(): Promise<AdminInstagramPost[]> {
+  const { data, error } = await db()
+    .from("instagram_posts")
+    .select("id, image, permalink, caption, media_type, posted_at, hidden, product_id, products ( name )")
+    .order("posted_at", { ascending: false });
+  if (error) throw new Error(`listInstagramPosts failed: ${error.message}`);
+
+  type Row = {
+    id: string; image: string; permalink: string; caption: string | null;
+    media_type: string; posted_at: string; hidden: boolean; product_id: string | null;
+    products: { name: string } | { name: string }[] | null;
+  };
+
+  return (data as unknown as Row[] ?? []).map((row) => {
+    const product = Array.isArray(row.products) ? row.products[0] : row.products;
+    return {
+      id: row.id,
+      image: row.image,
+      permalink: row.permalink,
+      caption: row.caption,
+      mediaType: row.media_type,
+      postedAt: row.posted_at,
+      productId: row.product_id,
+      productName: product?.name ?? null,
+      hidden: row.hidden,
+    };
+  });
+}
+
+/*
+  Products a post can be tagged with.
+
+  NOT listLookbookCandidates(): that one requires colour-scoped photography,
+  because a Lookbook row names a product AND one of its colourways. An Instagram
+  post carries its own photograph and only needs somewhere to send the click, so
+  narrowing to products that happen to have per-colour images would hide
+  perfectly taggable ones.
+*/
+export type TaggableProduct = { id: string; name: string; slug: string };
+
+export async function listTaggableProducts(): Promise<TaggableProduct[]> {
+  const { data, error } = await db()
+    .from("products").select("id, name, slug").eq("published", true).order("name");
+  if (error) throw new Error(`listTaggableProducts failed: ${error.message}`);
+  return (data ?? []).map((p) => ({ id: p.id, name: p.name, slug: p.slug }));
 }
 
 export async function listContentPages(): Promise<AdminContentPage[]> {

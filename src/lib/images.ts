@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 /*
   Product photography lives in the Supabase Storage bucket `product-images`,
   one file per colourway at <slug>/<colour>.jpg. Catalogue pages get their URLs
@@ -56,4 +58,24 @@ export function blurSeed(tone: string): string {
     hydration. Encoding needs neither.
   */
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/*
+  The inline style that frames a CMS-managed photograph in a fixed-aspect box.
+
+  `focal` places the photo (object-position) and `zoom` scales it about that
+  same point, which crops IN without touching the file. Shared by the
+  storefront and the admin preview precisely so the two cannot drift: an editor
+  that frames a photo differently from the page is worse than no editor.
+
+  The transform is omitted entirely at zoom 1 — an identity transform still
+  promotes the element to its own compositing layer for nothing.
+*/
+export function framingStyle(framing: { focal: string; zoom: number }): CSSProperties {
+  return {
+    objectPosition: framing.focal,
+    ...(framing.zoom > 1
+      ? { transform: `scale(${framing.zoom})`, transformOrigin: framing.focal }
+      : null),
+  };
 }

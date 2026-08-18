@@ -20,6 +20,8 @@ export type HeroSlide = {
   body: string | null;
   image: string;
   focal: string;
+  /* Scales the image around `focal`, cropping into the frame. 1 = untouched. */
+  zoom: number;
   primary: { label: string; href: string } | null;
   secondary: { label: string; href: string } | null;
 };
@@ -60,6 +62,7 @@ export const getHeroSlides = cache(async (): Promise<HeroSlide[]> => {
     body: s.body,
     image: s.image,
     focal: s.focal ?? "center",
+    zoom: s.zoom ?? 1,
     primary: s.primary_label ? { label: s.primary_label, href: s.primary_href ?? "#" } : null,
     secondary: s.secondary_label ? { label: s.secondary_label, href: s.secondary_href ?? "#" } : null,
   }));
@@ -150,6 +153,68 @@ const SEED_LOOKBOOK: LookbookShot[] = [
   { slug: "anna-top", tone: "#c08b93", image: "/lookbook/anna-top.jpg", alt: "Anna Top in the Dusty Lily print" },
   { slug: "luna-palazzo", tone: "#c8bcb0", image: "/lookbook/luna-palazzo.jpg", alt: "Luna Palazo in sand" },
 ];
+
+/*
+  Instagram posts for the homepage strip, newest first.
+
+  The image is OUR mirrored copy, never Instagram's CDN — see
+  src/lib/instagram/sync.ts for why that is not an optimisation but a
+  correctness requirement.
+
+  `slug` is present only when staff have tagged the post with a product; that is
+  what decides whether a tile opens a product page or the post on Instagram.
+  RLS hides `hidden` rows from the public, so nothing here re-filters them.
+
+  An empty array is the normal state before the first sync, and the caller falls
+  back to the curated Lookbook rather than rendering a gap.
+*/
+export type InstagramPost = {
+  id: string;
+  image: string;
+  permalink: string;
+  alt: string;
+  slug: string | null;
+  /* Reels and video posts show a still; the badge is what stops that still
+     reading as a photograph. */
+  video: boolean;
+};
+
+export const getInstagramPosts = cache(async (): Promise<InstagramPost[]> => {
+  const supabase = createPublicClient();
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("instagram_posts")
+    .select("id, image, permalink, caption, media_type, products ( slug )")
+    .order("posted_at", { ascending: false })
+    .limit(20);
+
+  if (error || !data?.length) return [];
+
+  type Row = {
+    id: string;
+    image: string;
+    permalink: string;
+    caption: string | null;
+    media_type: string;
+    products: { slug: string } | { slug: string }[] | null;
+  };
+
+  return (data as unknown as Row[]).map((row) => {
+    const product = Array.isArray(row.products) ? row.products[0] : row.products;
+    return {
+      id: row.id,
+      image: row.image,
+      permalink: row.permalink,
+      /* The caption is the only description Instagram gives us. First line
+         only, and trimmed — captions run to paragraphs and hashtag walls, none
+         of which is useful read aloud. */
+      alt: row.caption?.split("\n")[0]?.slice(0, 120).trim() || "Kalima on Instagram",
+      slug: product?.slug ?? null,
+      video: row.media_type === "VIDEO",
+    };
+  });
+});
 
 /*
   Homepage Lookbook tiles, in order.
@@ -310,6 +375,7 @@ function seedHero(): HeroSlide[] {
     body: s.body,
     image: s.image,
     focal: s.focal,
+    zoom: 1,
     primary: { label: s.primary.label, href: s.primary.to },
     secondary: { label: s.secondary.label, href: s.secondary.to },
   }));

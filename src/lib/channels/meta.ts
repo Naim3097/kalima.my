@@ -66,7 +66,15 @@ const PAGE_TOKEN = process.env.META_PAGE_TOKEN ?? "";
   a deploy. Bump it consciously, after reading the changelog.
 */
 const GRAPH_VERSION = "v21.0";
-const GRAPH = `https://graph.facebook.com/${GRAPH_VERSION}`;
+/*
+  Exported so the Instagram media reader (src/lib/instagram/media.ts) hits the
+  SAME pinned version and the same credential, rather than deriving a second
+  copy that can be bumped independently — two pins is how one of them silently
+  goes stale.
+*/
+export const GRAPH = `https://graph.facebook.com/${GRAPH_VERSION}`;
+export const metaInstagramId = () => INSTAGRAM_ID;
+export const metaPageToken = () => PAGE_TOKEN;
 
 const ENV_KEYS = ["META_APP_ID", "META_APP_SECRET", "META_REDIRECT_URI"] as const;
 

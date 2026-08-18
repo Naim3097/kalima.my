@@ -1,6 +1,6 @@
 import Image from "next/image";
 import PlaceholderImage from "./PlaceholderImage";
-import { blurSeed } from "@/lib/images";
+import { blurSeed, framingStyle } from "@/lib/images";
 import { cn } from "@/lib/utils";
 
 /*
@@ -18,6 +18,10 @@ type Props = {
   alt: string;
   className?: string;
   position?: string;
+  /* Scales the photo about `position`, cropping into the frame. CMS-managed
+     shots pass this; catalogue imagery leaves it at 1. The wrapper already
+     clips (overflow-hidden), so the overspill has nowhere to go. */
+  zoom?: number;
   /** Rendered-width hint for srcset selection. Defaults to a PLP card slot. */
   sizes?: string;
   priority?: boolean;
@@ -29,6 +33,7 @@ export default function ProductImage({
   alt,
   className = "",
   position = "center top",
+  zoom = 1,
   sizes = "(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw",
   priority = false,
 }: Props) {
@@ -48,7 +53,7 @@ export default function ProductImage({
         blurDataURL={blurSeed(tone)}
         draggable={false}
         className="object-cover select-none"
-        style={{ objectPosition: position }}
+        style={framingStyle({ focal: position, zoom })}
       />
     </div>
   );

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { saveHeroSlide, deleteHeroSlide } from "@/app/admin/actions";
+import { CmsImageField, HERO_FRAMES } from "@/components/admin/cms/CmsImageField";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,6 +36,7 @@ export function HeroSlideEditor({ slide }: Props) {
   const [body, setBody] = useState(slide?.body ?? "");
   const [image, setImage] = useState(slide?.image ?? "");
   const [focal, setFocal] = useState(slide?.focal ?? "");
+  const [zoom, setZoom] = useState(slide?.zoom ?? 1);
   const [primaryLabel, setPrimaryLabel] = useState(slide?.primaryLabel ?? "");
   const [primaryHref, setPrimaryHref] = useState(slide?.primaryHref ?? "");
   const [secondaryLabel, setSecondaryLabel] = useState(slide?.secondaryLabel ?? "");
@@ -48,6 +50,7 @@ export function HeroSlideEditor({ slide }: Props) {
     setBody(slide?.body ?? "");
     setImage(slide?.image ?? "");
     setFocal(slide?.focal ?? "");
+    setZoom(slide?.zoom ?? 1);
     setPrimaryLabel(slide?.primaryLabel ?? "");
     setPrimaryHref(slide?.primaryHref ?? "");
     setSecondaryLabel(slide?.secondaryLabel ?? "");
@@ -62,7 +65,7 @@ export function HeroSlideEditor({ slide }: Props) {
       return;
     }
     if (!image.trim()) {
-      toast.error("Image path is required.");
+      toast.error("Upload an image, or enter an image path.");
       return;
     }
     startTransition(async () => {
@@ -73,6 +76,7 @@ export function HeroSlideEditor({ slide }: Props) {
         body,
         image,
         focal,
+        zoom,
         primaryLabel,
         primaryHref,
         secondaryLabel,
@@ -168,30 +172,17 @@ export function HeroSlideEditor({ slide }: Props) {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="hero-image" className="label-caps text-navy-400">
-                Image path
-              </Label>
-              <Input
-                id="hero-image"
-                value={image}
-                onChange={(e) => setImage(e.target.value)}
-                placeholder="/products/ruwa-caftan.jpg"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="hero-focal" className="label-caps text-navy-400">
-                Focal point
-              </Label>
-              <Input
-                id="hero-focal"
-                value={focal}
-                onChange={(e) => setFocal(e.target.value)}
-                placeholder="center 30%"
-              />
-            </div>
-          </div>
+          <CmsImageField
+            image={image}
+            focal={focal}
+            zoom={zoom}
+            disabled={pending}
+            folder="hero"
+            frames={HERO_FRAMES}
+            onImageChange={setImage}
+            onFocalChange={setFocal}
+            onZoomChange={setZoom}
+          />
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">

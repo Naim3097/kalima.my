@@ -1,10 +1,17 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRightIcon } from "@/components/brand/Icons";
-import { blurSeed, productPhoto } from "@/lib/images";
+import { getEditorialImages } from "@/lib/editorial";
+import { blurSeed, framingStyle } from "@/lib/images";
 
-/* Server Component — editorial band, purely presentational. */
-export default function CollectionSpotlight() {
+/*
+  Server Component — editorial band. The copy and the link are layout; the
+  photograph and its framing come from the CMS `spotlight` slot, falling back
+  to the hand-picked shot when nobody has changed it.
+*/
+export default async function CollectionSpotlight() {
+  const shot = (await getEditorialImages()).spotlight;
+
   return (
     <section className="bg-cream">
       <div className="mx-auto grid max-w-7xl items-center gap-10 px-4 py-14 lg:grid-cols-2">
@@ -24,14 +31,20 @@ export default function CollectionSpotlight() {
           {/* Arch-masked visual per mockup */}
           <div className="relative aspect-[4/5] w-full max-w-lg overflow-hidden rounded-t-[999px]">
             <Image
-              src={productPhoto("serra-scallop", "burgundy")}
-              alt="Serra Scallop cardigan abaya in burgundy"
+              src={shot.image}
+              alt={shot.alt}
               placeholder="blur"
-              blurDataURL={blurSeed("#631934")}
+              /*
+                Seeded with the band's own cream, not the garment's burgundy:
+                the shot is editable now, so a tone tied to one photograph is
+                wrong the moment it is replaced.
+              */
+              blurDataURL={blurSeed("#f7f3ec")}
               fill
               sizes="(max-width: 1024px) 100vw, 32rem"
               draggable={false}
-              className="object-cover object-top select-none"
+              className="object-cover select-none"
+              style={framingStyle(shot)}
             />
           </div>
         </div>

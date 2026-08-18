@@ -50,6 +50,14 @@ export const BagIcon = (p: P) => (
   </svg>
 );
 
+/* Filled rather than stroked, unlike its neighbours: it sits on photography at
+   14px, where a 1.25 stroke reads as a smudge. */
+export const PlayIcon = (p: P) => (
+  <svg {...base(p)} fill="currentColor" stroke="none">
+    <path d="M8 5.5v13l11-6.5z" />
+  </svg>
+);
+
 export const ChevronDownIcon = (p: P) => (
   <svg {...base(p)}>
     <path d="m6 9 6 6 6-6" />

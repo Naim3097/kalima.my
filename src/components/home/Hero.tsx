@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import type { HeroSlide } from "@/lib/cms";
-import { blurSeed } from "@/lib/images";
+import { blurSeed, framingStyle } from "@/lib/images";
 import { Button } from "@/components/ui/button";
 
 /*
@@ -40,7 +40,9 @@ export default function Hero({ slides }: { slides: HeroSlide[] }) {
     >
       <div className="grid items-stretch lg:min-h-[600px] lg:grid-cols-[1.05fr_1fr]">
         {/* Campaign image — bleeds to the right viewport edge */}
-        <div className="relative order-1 h-[440px] sm:h-[520px] lg:order-2 lg:h-auto">
+        {/* overflow-hidden is load-bearing: a zoomed slide is scaled UP, and
+            without it the overspill lands on top of the copy column. */}
+        <div className="relative order-1 h-[440px] overflow-hidden sm:h-[520px] lg:order-2 lg:h-auto">
           {slides.map((s, i) => (
             <Image
               key={s.image}
@@ -64,7 +66,14 @@ export default function Hero({ slides }: { slides: HeroSlide[] }) {
               className={`object-cover select-none transition-opacity duration-[1200ms] ease-in-out ${
                 i === index ? "opacity-100" : "opacity-0"
               }`}
-              style={{ objectPosition: s.focal ?? "center 20%" }}
+              /*
+                Framing comes off the row, not out of the file. `focal` places
+                the photo in the frame; `zoom` scales it around that same point
+                so cropping in never drags the subject off to one side. Both are
+                editable in the CMS and applied here, so the full upload is kept
+                and every breakpoint gets the framing it needs.
+              */
+              style={framingStyle({ focal: s.focal ?? "center 20%", zoom: s.zoom })}
             />
           ))}
           {/* Soft seams into the cream canvas */}

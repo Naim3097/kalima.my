@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { fetchProducts } from "@/data/catalog.queries";
-import { getHeroSlides, getLookbookShots, getSocialLinks } from "@/lib/cms";
+import { getHeroSlides, getInstagramPosts, getLookbookShots, getSocialLinks } from "@/lib/cms";
 import Hero from "@/components/home/Hero";
 import CategoryTiles from "@/components/home/CategoryTiles";
 import CollectionSpotlight from "@/components/home/CollectionSpotlight";
@@ -24,11 +24,15 @@ export const metadata: Metadata = {
 export const revalidate = 3600;
 
 export default async function HomePage() {
-  const [products, heroSlides, socialLinks, lookbook] = await Promise.all([
+  const [products, heroSlides, socialLinks, lookbook, instagramPosts] = await Promise.all([
     fetchProducts(),
     getHeroSlides(),
     getSocialLinks(),
+    /* Both, always: the Lookbook shows Instagram when the sync has posts and
+       the curated shots when it does not, and which one that is cannot be known
+       without asking. Two cached reads, one round trip each. */
     getLookbookShots(),
+    getInstagramPosts(),
   ]);
 
   /* The Lookbook CTA says "View Instagram", so point it at Instagram when the
@@ -42,7 +46,7 @@ export default async function HomePage() {
       <CollectionSpotlight />
       <OnSale products={products} />
       <UspStrip />
-      <Lookbook shots={lookbook} instagramHref={instagramHref} />
+      <Lookbook posts={instagramPosts} shots={lookbook} instagramHref={instagramHref} />
       <Follow links={socialLinks} />
       <Newsletter />
     </>

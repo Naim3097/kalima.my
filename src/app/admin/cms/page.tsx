@@ -2,13 +2,18 @@ import type { Metadata } from "next";
 import ProductImage from "@/components/brand/ProductImage";
 import { AnnouncementEditor } from "@/components/admin/cms/AnnouncementEditor";
 import { ContentPageEditor } from "@/components/admin/cms/ContentPageEditor";
+import { EditorialImageEditor } from "@/components/admin/cms/EditorialImageEditor";
 import { HeroSlideEditor } from "@/components/admin/cms/HeroSlideEditor";
+import { InstagramPosts } from "@/components/admin/cms/InstagramPosts";
 import { LookbookEditor } from "@/components/admin/cms/LookbookEditor";
 import { Card, CardHeader, Pill, Table, Td, Tr } from "@/components/admin/ui";
 import {
   listAnnouncements,
   listContentPages,
+  listEditorialImages,
   listHeroSlides,
+  listInstagramPosts,
+  listTaggableProducts,
   listLookbookCandidates,
   listLookbookShots,
 } from "@/lib/admin";
@@ -21,14 +26,25 @@ export const metadata: Metadata = {
 
 /* Server Component — live CMS content pulled straight from the storefront tables. */
 export default async function AdminCmsPage() {
-  const [announcements, heroSlides, contentPages, lookbookShots, lookbookCandidates] =
-    await Promise.all([
-      listAnnouncements(),
-      listHeroSlides(),
-      listContentPages(),
-      listLookbookShots(),
-      listLookbookCandidates(),
-    ]);
+  const [
+    announcements,
+    heroSlides,
+    editorialImages,
+    contentPages,
+    lookbookShots,
+    lookbookCandidates,
+    instagramPosts,
+    taggableProducts,
+  ] = await Promise.all([
+    listAnnouncements(),
+    listHeroSlides(),
+    listEditorialImages(),
+    listContentPages(),
+    listLookbookShots(),
+    listLookbookCandidates(),
+    listInstagramPosts(),
+    listTaggableProducts(),
+  ]);
 
   return (
     <div className="space-y-8">
@@ -89,6 +105,7 @@ export default async function AdminCmsPage() {
                         alt={s.title}
                         sizes="40px"
                         position={s.focal ?? undefined}
+                        zoom={s.zoom}
                         className="object-cover"
                       />
                     </div>
@@ -112,6 +129,54 @@ export default async function AdminCmsPage() {
             ))}
           </Table>
         )}
+      </Card>
+
+      {/* Homepage imagery — the category tiles and the collection spotlight */}
+      <Card>
+        <CardHeader title="Homepage imagery" />
+        <p className="border-b border-navy/10 px-5 pb-4 text-[13px] tracking-wide text-navy-400">
+          The three category tiles and the collection spotlight. Upload a photograph and frame it —
+          the wording and the links are part of the page layout, not content.
+        </p>
+        <Table head={["Section", "Image", "Framing", "Source", ""]}>
+          {editorialImages.map((shot) => (
+            <Tr key={shot.slot}>
+              <Td className="whitespace-normal">
+                <div className="flex items-center gap-3">
+                  <div className="relative h-12 w-10 shrink-0 overflow-hidden rounded bg-navy-100">
+                    <ProductImage
+                      image={shot.image}
+                      tone="#efe7db"
+                      alt={shot.alt}
+                      sizes="40px"
+                      position={shot.focal}
+                      zoom={shot.zoom}
+                      className="object-cover"
+                    />
+                  </div>
+                  <p className="font-medium text-navy">{shot.label}</p>
+                </div>
+              </Td>
+              <Td className="font-mono text-[12px] text-navy-400">{shot.image}</Td>
+              <Td className="text-[12px] text-navy-400">
+                {shot.focal}
+                {shot.zoom > 1 ? ` · ${shot.zoom.toFixed(2)}×` : ""}
+              </Td>
+              <Td>
+                <Pill value={shot.customised ? "custom" : "default"} />
+              </Td>
+              <Td className="text-right">
+                <EditorialImageEditor shot={shot} />
+              </Td>
+            </Tr>
+          ))}
+        </Table>
+      </Card>
+
+      {/* Instagram — the homepage Lookbook strip */}
+      <Card>
+        <CardHeader title="Instagram" />
+        <InstagramPosts posts={instagramPosts} products={taggableProducts} />
       </Card>
 
       {/* Lookbook */}
