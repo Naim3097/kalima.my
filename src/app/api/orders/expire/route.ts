@@ -49,7 +49,16 @@ function isCron(request: Request): boolean {
 
 async function handle(request: Request) {
   let authorised = isCron(request);
-  if (!authorised) {
+  /*
+    THE STAFF SESSION IS A POST-ONLY CREDENTIAL.
+
+    A cookie rides along with any cross-site GET the browser is told to make,
+    so accepting a session on GET meant an &lt;img src="…/api/orders/expire"&gt; on a
+    hostile page ran a cancellation sweep as whichever staff member loaded it.
+    Cron keeps its GET because it authenticates with a Bearer header, which no
+    third-party page can attach.
+  */
+  if (!authorised && request.method !== "GET") {
     const current = await getCurrentUser();
     authorised = Boolean(current && isStaff(current.role));
   }

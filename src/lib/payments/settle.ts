@@ -3,12 +3,12 @@ import "server-only";
 import { NextResponse } from "next/server";
 import type { PaymentProvider } from "./types";
 import {
-  attributeReferral,
+  flagDuplicatePayment,
   markOrderPaid,
   refundOrderFromWebhook,
   resolveWebhookOrder,
+  runPaidSideEffects,
 } from "@/lib/commerce";
-import { sendNewOrderNotification, sendPaymentConfirmedEmail } from "@/lib/email";
 
 /*
   The ONLY place an order becomes paid (guide §6; PROJECT_PLAN §4.2).
@@ -61,7 +61,11 @@ export async function settlePaymentWebhook(
     apart.
   */
   if (result.status === "refunded") {
-    const target = await resolveWebhookOrder(result.providerRef, result.orderReference);
+    const target = await resolveWebhookOrder(
+      result.providerRef,
+      result.orderReference,
+      provider.name,
+    );
     if (!target) return NextResponse.json({ received: true, note: "order not found" });
     try {
       const outcome = await refundOrderFromWebhook({
@@ -87,7 +91,11 @@ export async function settlePaymentWebhook(
     return NextResponse.json({ received: true, status: result.status });
   }
 
-  const order = await resolveWebhookOrder(result.providerRef, result.orderReference);
+  const order = await resolveWebhookOrder(
+    result.providerRef,
+    result.orderReference,
+    provider.name,
+  );
   if (!order) {
     return NextResponse.json({ received: true, note: "order not found" });
   }
@@ -135,11 +143,23 @@ export async function settlePaymentWebhook(
 
   // Side effects exactly once — only on the transition to paid, not on retries.
   if (outcome.status === "paid") {
-    await sendPaymentConfirmedEmail(order.reference, order.email).catch(() => {});
-    // The shop needs telling too, or a sale waits until someone opens the admin.
-    await sendNewOrderNotification(order.reference, order.email).catch(() => {});
-    // Affiliate commission accrues on a settled sale, not on a placed order.
-    await attributeReferral(order.id);
+    await runPaidSideEffects(order);
+  }
+
+  /*
+    A SECOND REAL PAYMENT MUST NOT LEAVE QUIETLY.
+
+    mark_order_paid answers "already_paid" for two very different events: the
+    same callback delivered twice, which is ordinary and correct to ignore, and
+    a genuinely different payment attempt landing on an order somebody has
+    already paid for. The shopper can produce the second — the success page
+    offers "Try payment again" while the order is pending, so two live bills can
+    exist and both can be paid. Until now the second one returned 200 and
+    vanished: a real double charge with no log line anywhere, in a codebase that
+    already shouts about amount mismatches.
+  */
+  if (outcome.status !== "paid") {
+    await flagDuplicatePayment(order, provider.name, result.providerRef);
   }
 
   return NextResponse.json({ received: true });

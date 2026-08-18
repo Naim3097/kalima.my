@@ -62,7 +62,12 @@ function isCron(request: Request): boolean {
 async function handle(request: Request) {
   let authorised = isCron(request);
 
-  if (!authorised) {
+  /*
+    Session auth on POST only — a cookie is attached to any cross-site GET a
+    hostile page provokes, and this route drains marketplaces. Vercel cron is
+    unaffected: it presents CRON_SECRET as a Bearer header.
+  */
+  if (!authorised && request.method !== "GET") {
     const current = await getCurrentUser();
     authorised = Boolean(current && isStaff(current.role));
   }

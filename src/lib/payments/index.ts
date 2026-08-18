@@ -55,20 +55,51 @@ export function getPaymentProvider(): PaymentProvider | null {
   A provider whose list call fails is skipped rather than fatal: one gateway
   being down must not take the whole checkout with it.
 */
+/*
+  The bank list, cached briefly in process.
+
+  WHY A CACHE IS A SECURITY CONTROL HERE. Every render of /checkout/pay used to
+  issue four authenticated POSTs to LeanX with the merchant credentials, cache:
+  "no-store", behind nothing but a cookie anyone gets by placing one order. A
+  caller reloading in a loop drives the merchant account toward LeanX's rate
+  limits — the exact abuse the health route's ?probe=services branch is gated
+  against, left open on the shopper-facing path.
+
+  Sixty seconds: a bank going offline shows up within a minute, and a hundred
+  reloads inside that minute cost one upstream call rather than four hundred.
+  Per-instance and in-memory, so it is a ceiling on amplification rather than a
+  guarantee — same honest limit as lib/rate-limit.ts.
+*/
+type ServiceList = { fpx: PaymentService[]; ewallet: PaymentService[] };
+let serviceCache: { at: number; lists: ServiceList[] } | null = null;
+const SERVICE_TTL_MS = 60_000;
+
 export async function listAllPaymentServices(totalSen: number): Promise<{
   fpx: PaymentService[];
   ewallet: PaymentService[];
   bnpl: PaymentService[];
 }> {
-  const results = await Promise.all(
-    configuredProviders().map(async (p) => {
-      try {
-        return await p.listPaymentServices();
-      } catch {
-        return { fpx: [], ewallet: [] };
-      }
-    }),
-  );
+  const fresh = serviceCache && Date.now() - serviceCache.at < SERVICE_TTL_MS;
+  const results = fresh
+    ? serviceCache!.lists
+    : await Promise.all(
+        configuredProviders().map(async (p) => {
+          try {
+            return await p.listPaymentServices();
+          } catch {
+            return { fpx: [], ewallet: [] };
+          }
+        }),
+      );
+
+  /*
+    Only a list that actually has something in it is worth keeping — caching an
+    all-empty result would pin a checkout with no payment options in place for a
+    minute after a transient gateway blip.
+  */
+  if (!fresh && results.some((r) => r.fpx.length || r.ewallet.length)) {
+    serviceCache = { at: Date.now(), lists: results };
+  }
 
   const flat = results.flatMap((r) => [...r.fpx, ...r.ewallet]);
 

@@ -39,7 +39,14 @@ export function maintenanceEnabled(): boolean {
   rest of the content pages stay closed.
 */
 const OPEN_DURING_MAINTENANCE = [
-  "/api/payments/webhook",
+  /*
+    The whole payments prefix, not one route. This listed the LeanX callback
+    only, on the reasoning that a gateway has already taken the customer's money
+    by the time it calls us — which is just as true of Atome, whose callback
+    lives at /api/payments/atome/webhook and was being 503'd. A closed shop must
+    still settle a payment it has already accepted.
+  */
+  "/api/payments",
   "/api/shipping/webhook",
   "/api/shipping/callback",
   "/api/shipping/connect",

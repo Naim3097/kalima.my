@@ -130,6 +130,22 @@ export type PaymentStatus = {
 
 export interface PaymentProvider {
   readonly name: string;
+  /*
+    How long one payment attempt stays completable at this gateway, in minutes.
+
+    THIS IS A SAFETY BOUND, NOT A DISPLAY HINT. The expiry sweep cancels orders
+    the gateway does not confirm as paid, and a failed status lookup is
+    indistinguishable from "never existed" — so the only thing separating "safe
+    to cancel" from "the shopper is mid-payment on a page that still works" is
+    how long this gateway keeps an attempt alive. LeanX's FPX bill dies in
+    minutes; Atome's lives twelve hours. Cancelling inside that window charges a
+    customer for an order we have already closed.
+
+    Set it from the gateway's documented lifetime, and round UP: the cost of
+    being generous is an order that expires late, and the cost of being mean is
+    a customer's money.
+  */
+  readonly payableWindowMinutes: number;
   /** Active FPX banks + e-wallets for the shopper to choose. */
   listPaymentServices(): Promise<{ fpx: PaymentService[]; ewallet: PaymentService[] }>;
   /** Create a hosted-payment session for an order + chosen service. */

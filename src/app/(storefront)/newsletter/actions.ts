@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/server";
+import { allow, callerKey } from "@/lib/rate-limit";
 
 /*
   Footer "Join Kalima Club" signup.
@@ -18,6 +19,11 @@ export async function subscribeToNewsletter(
   email: string,
   source = "footer",
 ): Promise<{ ok: true } | { error: string }> {
+  // Unauthenticated and it writes a consent record — throttle before anything else.
+  if (!allow(await callerKey("newsletter"), 5, 60_000)) {
+    return { error: "Too many attempts. Please wait a moment." };
+  }
+
   const clean = email.trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clean)) {
     return { error: "Please enter a valid email address." };

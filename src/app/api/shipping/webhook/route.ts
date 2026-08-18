@@ -41,11 +41,20 @@ const STATUS_MAP: Record<string, string> = {
 
 function authorised(req: Request): boolean {
   if (!SECRET) return false; // fail closed
-  const url = new URL(req.url);
+  /*
+    HEADERS ONLY. A ?secret= fallback used to be accepted here, which put the
+    shared secret into Vercel's access logs, any intermediary proxy log, and the
+    Referer of anything the page later loaded — the comment above already
+    described this route as header-authenticated, and the query fallback quietly
+    contradicted it.
+
+    If EasyParcel's dashboard ever turns out to be unable to send a header, the
+    answer is a long random path segment on the endpoint, not a secret in the
+    query string: the path is at least not forwarded onward in a Referer.
+  */
   const presented =
     req.headers.get("x-webhook-secret") ??
     req.headers.get("x-easyparcel-secret") ??
-    url.searchParams.get("secret") ??
     "";
   const a = Buffer.from(presented);
   const b = Buffer.from(SECRET);

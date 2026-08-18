@@ -22,10 +22,20 @@ import { getCurrentUser, isStaff } from "@/lib/auth";
   Deliberately leaks nothing: booleans for whether each credential is present,
   never a prefix or a length. `configured` follows the same rule the checkout
   uses, so this answers "will the shopper be offered payment" honestly.
+
+  STAFF ONLY, ALL OF IT. "Booleans, not values" was true and was not the whole
+  question: the body also names which gateways are live, whether Atome is on
+  sandbox or production, both callback URLs, and a warnings array that states
+  the current breakage in plain English ("bills will create but no order can
+  ever be paid"). That is a reconnaissance map of the payment integration's weak
+  spot, and there is no reason an anonymous caller needs it. Anonymous callers
+  get a bare liveness answer, which is all an uptime monitor ever wanted.
 */
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
+  const viewer = await getCurrentUser();
+  const staff = isStaff(viewer?.role);
   /*
     ?probe=services performs the first call that actually exercises the
     credentials, and is the only way to see the bank list before an order
@@ -39,8 +49,7 @@ export async function GET(request: Request) {
     up as entries the parser dropped for having no usable label.
   */
   if (new URL(request.url).searchParams.get("probe") === "services") {
-    const me = await getCurrentUser();
-    if (!isStaff(me?.role)) {
+    if (!staff) {
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
     const provider = providerByName("leanx");
@@ -77,6 +86,15 @@ export async function GET(request: Request) {
     } catch (e) {
       return NextResponse.json({ error: (e as Error).message, atome: atomeCheck }, { status: 502 });
     }
+  }
+
+  /*
+    Anonymous callers get liveness and nothing else. An uptime monitor needs a
+    200 and a shape it can match; it does not need to know which credential is
+    missing today.
+  */
+  if (!staff) {
+    return NextResponse.json({ ok: true, configured: Boolean(getPaymentProvider()) });
   }
 
   const h = await headers();

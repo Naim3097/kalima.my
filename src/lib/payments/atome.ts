@@ -177,6 +177,15 @@ export const atome: PaymentProvider = {
   name: "atome",
 
   /*
+    TWELVE HOURS — Atome auto-cancels an unpaid payment after that, and not one
+    minute before. This is the number the expiry sweep needs: for the whole of
+    that window the shopper's Atome page still takes money, so an order whose
+    status we merely failed to read must be held, never cancelled. See the note
+    on payableWindowMinutes in types.ts.
+  */
+  payableWindowMinutes: 720,
+
+  /*
     ONE SYNTHETIC OPTION, NOT AN API CALL.
 
     This is the single place the adapter bends the PaymentProvider interface.

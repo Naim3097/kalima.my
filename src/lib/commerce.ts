@@ -409,7 +409,7 @@ export async function reconcileOrderPayment(
   */
   const { data: payment } = await admin()
     .from("payments")
-    .select("provider, provider_ref, amount_sen")
+    .select("provider, provider_ref, amount_sen, created_at")
     .eq("order_id", orderId)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -448,13 +448,28 @@ export async function reconcileOrderPayment(
       );
       return "live";
     }
-    await markOrderPaid({
+    const outcome = await markOrderPaid({
       orderId,
       provider: provider.name,
       providerRef: billNo,
       amountSen: verdict.amountSen ?? (payment?.amount_sen as number),
       raw: verdict.raw,
     });
+
+    /*
+      Only on the transition. "already_paid" means the webhook got here first
+      and has already sent everything — see runPaidSideEffects.
+    */
+    if (outcome.status === "paid") {
+      const { data: full } = await admin()
+        .from("orders")
+        .select("id, reference, email")
+        .eq("id", orderId)
+        .maybeSingle();
+      if (full) {
+        await runPaidSideEffects(full as { id: string; reference: string; email: string });
+      }
+    }
     return "paid";
   }
 
@@ -474,14 +489,96 @@ export async function reconcileOrderPayment(
   if (verdict.status === "processing") return "live";
 
   /*
-    "unknown" stays cancellable, deliberately. LeanX's status endpoint answers
-    404 for bills that genuinely exist, so treating an unreadable lookup as
-    "hold" would mean abandoned FPX orders never expired at all. An FPX bill is
-    not payable hours later, so cancelling is the safe reading here — the
-    opposite of the processing case above, and for a concrete reason rather than
-    as a default.
+    "unknown" — the lookup told us nothing. A 404 for a bill that genuinely
+    exists, a 5xx, a timeout, or a reference the gateway has not committed yet
+    all land here, and none of them can be told apart from "there was never a
+    payment".
+
+    SO THE CLOCK DECIDES, NOT THE FAILURE. Cancellable only once the attempt is
+    older than the window in which this gateway would still take the money.
+    Inside that window we hold, because the shopper may be looking at a payment
+    page that still works — and cancelling then charges them against a closed
+    order, which is the exact failure the processing case above exists to
+    prevent. It was reachable here too: this branch read "an FPX bill is not
+    payable hours later" and applied that to Atome, whose payments live for
+    twelve hours.
+
+    Past the window, cancelling is right and necessary: LeanX's status endpoint
+    404s for real bills, so holding forever would mean abandoned FPX orders that
+    never expire at all.
   */
+  const startedAt = Date.parse(String(payment?.created_at ?? ""));
+  const ageMinutes = Number.isFinite(startedAt) ? (Date.now() - startedAt) / 60_000 : Infinity;
+  if (ageMinutes < provider.payableWindowMinutes) return "live";
+
   return "pending";
+}
+
+/*
+  Everything that must happen exactly once when an order BECOMES paid, in one
+  place because there are two callers.
+
+  settlePaymentWebhook is the front door. reconcileOrderPayment is the other
+  one — it settles an order whose callback was lost, from the return page and
+  from the expiry sweep — and it used to call markOrderPaid and stop there. So
+  an order rescued by reconcile got no customer receipt, no notification to the
+  shop, and no affiliate commission, silently. Lose LEANX_WEBHOOK_SECRET and
+  EVERY order settles down that path: money in, nobody told.
+
+  This is the fifth time this project has split one money path across two call
+  sites; the note at the top of settle.ts lists the previous four. Callers must
+  invoke this on the paid transition ONLY — markOrderPaid reporting
+  "already_paid" means someone else has already sent these.
+*/
+export async function runPaidSideEffects(order: {
+  id: string;
+  reference: string;
+  email: string;
+}): Promise<void> {
+  const { sendPaymentConfirmedEmail, sendNewOrderNotification } = await import("@/lib/email");
+  // Never let a mail failure undo a settlement — the money is already in.
+  await sendPaymentConfirmedEmail(order.reference, order.email).catch(() => {});
+  await sendNewOrderNotification(order.reference, order.email).catch(() => {});
+  await attributeReferral(order.id).catch(() => {});
+}
+
+/*
+  Shouts when a settled order receives a payment it did not expect.
+
+  Called on the NON-transition — mark_order_paid said "already_paid". Most of
+  those are a gateway redelivering the same callback, which is ordinary and must
+  stay silent. What must not stay silent is a DIFFERENT provider_ref arriving:
+  that is a second real payment attempt on an order somebody has already paid
+  for, and it means a customer has been charged twice with nothing in the logs.
+
+  Read-only and best-effort. Deciding what to do about the money is a person's
+  job — this exists so the person finds out at all.
+*/
+export async function flagDuplicatePayment(
+  order: { id: string; reference: string },
+  providerName: string,
+  providerRef: string | undefined,
+): Promise<void> {
+  if (!providerRef) return;
+  try {
+    const { data } = await admin()
+      .from("payments")
+      .select("provider, provider_ref, status, amount_sen")
+      .eq("order_id", order.id);
+
+    const others = (data ?? []).filter(
+      (p) => (p.provider_ref as string | null) && p.provider_ref !== providerRef,
+    );
+    if (!others.length) return;
+
+    console.error(
+      `[payments] DOUBLE PAYMENT on ${order.reference}: ${providerName}/${providerRef} settled an order that already has ` +
+        `${others.map((p) => `${p.provider}/${p.provider_ref} (${p.status})`).join(", ")}. ` +
+        `The customer may have been charged twice — needs manual review and possibly a refund.`,
+    );
+  } catch {
+    /* Never let the alerting path fail the webhook — the money is already in. */
+  }
 }
 
 /*
@@ -579,16 +676,28 @@ export async function expireStalePendingOrders(
 export async function resolveWebhookOrder(
   providerRef: string | undefined,
   orderReference: string | undefined,
+  /*
+    WHOSE reference this is. It used to be hardcoded to "leanx", which was
+    invisible while LeanX was the only gateway and wrong the moment Atome
+    arrived: Atome's rows are written with provider "atome", so the primary
+    lookup could never match one and every Atome settlement fell through to the
+    order-reference fallback. Worse, an Atome reference was being matched
+    against LeanX's provider_ref namespace, which is not the same space.
+
+    Optional so a caller that genuinely does not know still gets the fallback
+    rather than a compile error.
+  */
+  providerName?: string,
 ): Promise<{ id: string; total_sen: number; email: string; reference: string } | null> {
   const supabase = admin();
 
   if (providerRef) {
-    const { data } = await supabase
+    let q = supabase
       .from("payments")
       .select("order_id, orders(id, total_sen, email, reference)")
-      .eq("provider", "leanx")
-      .eq("provider_ref", providerRef)
-      .maybeSingle();
+      .eq("provider_ref", providerRef);
+    if (providerName) q = q.eq("provider", providerName);
+    const { data } = await q.maybeSingle();
     const order = data?.orders as unknown as
       | { id: string; total_sen: number; email: string; reference: string }
       | null;

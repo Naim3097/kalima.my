@@ -148,7 +148,16 @@ export async function listOrders(filter?: { status?: OrderStatus; q?: string }):
     .limit(100);
 
   if (filter?.status) query = query.eq("status", filter.status);
-  if (filter?.q) query = query.or(`reference.ilike.%${filter.q}%,email.ilike.%${filter.q}%`);
+  if (filter?.q) {
+    /*
+      `or` takes a filter GRAMMAR, not a value: an unescaped comma or paren in
+      the search box adds terms to the expression rather than searching for
+      them. Staff-only and single-table, so the blast radius is small — but the
+      shape is wrong, and this is the line that gets copied.
+    */
+    const q = filter.q.replace(/[,()\\]/g, " ").trim();
+    if (q) query = query.or(`reference.ilike.%${q}%,email.ilike.%${q}%`);
+  }
 
   const { data, error } = await query;
   if (error) throw new Error(`listOrders failed: ${error.message}`);

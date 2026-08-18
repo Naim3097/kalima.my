@@ -245,6 +245,14 @@ const STATUS_MAP: Record<string, string> = {
 export const leanx: PaymentProvider = {
   name: "leanx",
 
+  /*
+    An FPX bill is short-lived — the hosted page dies in minutes, which is why
+    the 30-minute expiry cutoff was safe for years while LeanX was the only
+    gateway. 60 rather than 30: rounding up costs a late expiry, rounding down
+    costs a customer who was still on the bank's page.
+  */
+  payableWindowMinutes: 60,
+
   async listPaymentServices() {
     const [fpx, ewallet] = await Promise.all([
       fetchServices("WEB_PAYMENT"),

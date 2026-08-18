@@ -14,6 +14,7 @@ import {
 } from "@/lib/commerce";
 import { buildAtomeReference, configuredProviders, providerForService } from "@/lib/payments";
 import { sendOrderReceivedEmail } from "@/lib/email";
+import { allow, callerKey } from "@/lib/rate-limit";
 
 /*
   Checkout server actions. The cart arrives from the client as CartRef[]
@@ -29,11 +30,31 @@ const MY_STATES = new Set([
   "Sarawak", "Putrajaya", "Labuan",
 ]);
 
+/*
+  The biggest cart we will look at in one request.
+
+  resolveCartLines issues one query per line under the service role, and nothing
+  upstream bounds the array — a 10,000-line cart from an unauthenticated caller
+  is 10,000 sequential queries. No real bag is anywhere near this.
+*/
+const MAX_CART_LINES = 50;
+
 /** Live discount check for the "Apply" button. */
 export async function checkDiscount(
   code: string,
   cart: CartRef[],
 ): Promise<DiscountResult & { subtotalSen: number }> {
+  /*
+    THIS IS A CODE ORACLE, so it gets a throttle before it gets a database.
+    Unauthenticated and free, it answers "is this a live discount code, and what
+    is it worth" for any string — including the per-affiliate codes. The limit
+    is generous enough that nobody typing into the Apply box will meet it.
+  */
+  if (!allow(await callerKey("discount"), 20, 60_000)) {
+    return { valid: false, reason: "Too many attempts. Please wait a moment.", discount_sen: 0, subtotalSen: 0 };
+  }
+  if (cart.length > MAX_CART_LINES) return { valid: false, reason: "That bag is too large.", discount_sen: 0, subtotalSen: 0 };
+
   const { subtotalSen } = await resolveCartLines(cart);
   const result = await validateDiscount(code, subtotalSen);
   return { ...result, subtotalSen };
@@ -57,6 +78,18 @@ export async function placeOrder(
   },
 ): Promise<PlaceOrderState> {
   if (!cart.length) return { error: "Your bag is empty." };
+  if (cart.length > MAX_CART_LINES) return { error: "That bag is too large." };
+
+  /*
+    Placing an order is not free to us: it writes a row and sends mail from our
+    own verified domain to an address the caller chose. Unthrottled that is a
+    quota-burner and a reputation risk, so a caller gets a handful of real
+    checkouts a minute — far more than a person needs, far less than a script
+    wants.
+  */
+  if (!allow(await callerKey("order"), 5, 60_000)) {
+    return { error: "Too many attempts. Please wait a moment and try again." };
+  }
 
   const email = form.email.trim();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {

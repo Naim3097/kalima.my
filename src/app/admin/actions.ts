@@ -56,6 +56,25 @@ async function assertStaff() {
   return client;
 }
 
+/*
+  STRICTER THAN assertStaff, AND ONLY FOR GRANTING POWER.
+
+  isStaff() is true for both `staff` and `admin`, which is right for the ninety
+  actions that run the shop. It is wrong for the three that decide who is staff:
+  guarded by assertStaff, a staff account could call setUserRole(self, "admin")
+  — the write goes through the service-role client, which protect_profile_role
+  deliberately permits — and could demote a real admin on the way past. The app
+  models staff and admin as different privilege levels everywhere else; role
+  management is where that distinction has to actually hold.
+*/
+async function assertAdmin() {
+  const current = await getCurrentUser();
+  if (!current || current.role !== "admin") throw new Error("Not authorized");
+  const client = createAdminClient();
+  if (!client) throw new Error("Admin is not configured");
+  return client;
+}
+
 export type ActionResult = { ok: true } | { error: string };
 
 /*
@@ -1422,6 +1441,15 @@ export async function createImageUploadUrl(
   if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) return { error: "That file looks empty." };
   if (sizeBytes > MAX_IMAGE_BYTES) return { error: "Images must be 5 MB or smaller." };
 
+  /*
+    productId decides the folder, so it has to BE an id — unvalidated it is just
+    a caller-supplied string, and `../` in it steers the signed upload to a key
+    of the caller's choosing elsewhere in the bucket.
+  */
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(productId)) {
+    return { error: "Unknown product." };
+  }
+
   // Random key — never trust the client's filename for the object path.
   const path = `${productId}/${crypto.randomUUID()}.${EXT_BY_TYPE[contentType]}`;
   const { data, error } = await db.storage.from(IMAGE_BUCKET).createSignedUploadUrl(path);
@@ -2082,7 +2110,7 @@ export async function saveSettings(input: {
 
 export async function setUserRole(userId: string, role: string): Promise<ActionResult> {
   let db;
-  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  try { db = await assertAdmin(); } catch { return { error: "Not authorized." }; }
 
   if (!ROLES.includes(role as Role)) return { error: "Unknown role." };
 
@@ -2106,7 +2134,7 @@ export async function setUserRole(userId: string, role: string): Promise<ActionR
 
 export async function addRoleGrant(email: string, role: string): Promise<ActionResult> {
   let db;
-  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+  try { db = await assertAdmin(); } catch { return { error: "Not authorized." }; }
   const clean = email.trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(clean)) return { error: "Enter a valid email." };
   if (!ROLES.includes(role as Role)) return { error: "Unknown role." };

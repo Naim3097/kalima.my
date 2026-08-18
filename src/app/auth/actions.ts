@@ -84,7 +84,8 @@ export async function signUp(formData: FormData): Promise<AuthResult> {
         phone: phone || null,
         marketing_consent: marketingConsent,
       },
-      emailRedirectTo: `${await siteUrl()}/auth/callback`,
+      // Omitted when the origin is not configured — see siteUrl().
+      ...(await siteUrl().then((o) => (o ? { emailRedirectTo: `${o}/auth/callback` } : {}))),
     },
   });
   if (error) return { error: error.message };
@@ -128,8 +129,11 @@ export async function requestPasswordReset(formData: FormData): Promise<AuthResu
     Requires the Supabase "Reset Password" email template to send
     {{ .TokenHash }} rather than {{ .ConfirmationURL }} — see supabase/README.md.
   */
+  const origin = await siteUrl();
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${await siteUrl()}/auth/confirm?next=/reset-password`,
+    // No origin configured → no redirectTo, so a forged Host cannot aim the
+    // recovery link. Supabase uses the project's own Site URL instead.
+    ...(origin ? { redirectTo: `${origin}/auth/confirm?next=/reset-password` } : {}),
   });
   if (error) return { error: error.message };
 
@@ -211,8 +215,30 @@ export async function changePassword(formData: FormData): Promise<AuthResult> {
   redirect("/account?password=changed");
 }
 
-/** Absolute site origin for auth redirect links. */
-async function siteUrl(): Promise<string> {
+/*
+  Absolute site origin for auth redirect links — CONFIGURED, never sniffed.
+
+  This value goes into the recovery and confirmation emails Supabase sends. It
+  used to be built from x-forwarded-host/host, which are attacker-controllable
+  on an unauthenticated endpoint: POST the password-reset action for someone
+  else's address with a forged Host and the victim receives a genuine recovery
+  token pointing at your origin. That is account takeover, not a redirect bug,
+  and the Supabase allowlist does not save it while it contains a wildcard
+  anyone can deploy under.
+
+  Returns null rather than a guess when it cannot be known. Callers then omit
+  redirectTo entirely, and Supabase falls back to the Site URL configured in the
+  project — a safe default that we do not control from the request.
+
+  Same rule, same reasoning as headersOrigin() in checkout/actions.ts: sniffing
+  the host is a dev-only convenience and is refused once deployed.
+*/
+async function siteUrl(): Promise<string | null> {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "");
+  if (configured) return configured;
+
+  if (process.env.NODE_ENV === "production") return null;
+
   const { headers } = await import("next/headers");
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3000";

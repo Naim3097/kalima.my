@@ -80,12 +80,25 @@ function shell(heading: string, body: string): string {
   </body></html>`;
 }
 
+/*
+  Customer-supplied text goes into an HTML mail, so it is escaped — the same
+  rule the campaign sender in lib/messaging/send.ts already applies, and for a
+  stronger reason: the delivery address and the recipient's name arrive from an
+  unauthenticated checkout, and the new-order copy of this mail lands in the
+  SHOP's inbox from the shop's own verified domain.
+*/
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!,
+  );
+}
+
 function itemsTable(items: { product_name: string; color_name: string; size: string; qty: number; line_total_sen: number }[]): string {
   const rows = items
     .map(
       (i) => `<tr>
         <td style="padding:8px 0;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#383c61">
-          ${i.product_name} <span style="color:#9b9cb0">· ${i.color_name} · ${i.size} × ${i.qty}</span>
+          ${escapeHtml(i.product_name)} <span style="color:#9b9cb0">· ${escapeHtml(i.color_name)} · ${escapeHtml(i.size)} × ${i.qty}</span>
         </td>
         <td align="right" style="padding:8px 0;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#383c61">${formatRM(i.line_total_sen / 100)}</td>
       </tr>`,
@@ -142,7 +155,9 @@ function addressBlock(address: OrderAddress | null): string {
     address.state,
     address.country,
     address.phone,
-  ].filter(Boolean);
+  ]
+    .filter(Boolean)
+    .map((l) => escapeHtml(String(l)));
 
   return `<p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.7;color:#383c61;margin:22px 0 0">
       <span style="font-size:10px;letter-spacing:2px;color:#9b9cb0;text-transform:uppercase">Delivering to</span><br>
@@ -227,7 +242,7 @@ export async function sendNewOrderNotification(reference: string, email: string)
     ${totalsTable(order, "Total paid")}
     ${addressBlock(order.shipping_address)}
     <p style="font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#686c8f;margin-top:14px">
-      ${order.email}
+      ${escapeHtml(order.email)}
     </p>`;
 
   await send(to, `New paid order — ${reference}`, shell("New paid order", body));

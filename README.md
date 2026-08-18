@@ -165,7 +165,7 @@ WhatsApp, Instagram, Facebook, Shopee and TikTok.
 | `ATOME_ENV` ≠ `production` | Atome stays on the `api.apaylater.net` sandbox — real money needs an explicit opt-in |
 | `RESEND_API_KEY` | Emails no-op silently |
 | `EASYPARCEL_*` | Shipping settings show disconnected; booking unavailable |
-| `EASYPARCEL_WEBHOOK_SECRET` | Tracking webhook returns 503 — fails closed |
+| `EASYPARCEL_WEBHOOK_SECRET` | Tracking webhook returns 503 — fails closed. Presented as `X-Webhook-Secret`; the query-string form is no longer accepted, because a secret in a URL lands in access logs |
 | Supabase unconfigured entirely | Catalog falls back to `seed.sql` and `/admin` is ungated (local demo mode) |
 
 ## Environments
