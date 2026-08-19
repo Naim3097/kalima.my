@@ -199,6 +199,15 @@ export default async function AdminCmsPage() {
           title="Lookbook"
           action={<LookbookEditor candidates={lookbookCandidates} />}
         />
+        {/*
+          Said plainly, because the alternative is somebody curating shots into
+          a void. The homepage strip is Instagram-only now; these rows are kept
+          and still editable, but nothing on the storefront renders them.
+        */}
+        <p className="border-b border-navy/10 bg-cream-50 px-5 py-3 text-[13px] tracking-wide text-navy-400">
+          Not shown on the homepage. That section is the Instagram strip now — these
+          shots are kept for a future use and appear nowhere on the storefront today.
+        </p>
         {lookbookShots.length === 0 ? (
           <p className="px-5 py-10 text-center text-[13px] text-navy-400">
             No Lookbook shots yet. Add your first with “New shot”.

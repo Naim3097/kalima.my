@@ -40,6 +40,7 @@ type ProductRow = {
   new_arrival: boolean;
   offers_custom_sizing: boolean;
   tone: string;
+  created_at: string;
   product_variants: {
     color_name: string;
     color_hex: string;
@@ -58,7 +59,7 @@ type ProductRow = {
 
 const PRODUCT_SELECT = `
   id, slug, name, description, fabric, category, price_sen, sale_price_sen, size_chart_url,
-  best_seller, new_arrival, offers_custom_sizing, tone,
+  best_seller, new_arrival, offers_custom_sizing, tone, created_at,
   product_variants ( color_name, color_hex, size, color_position, position, stock_on_hand ),
   product_images ( url, color_name, position ),
   collection_products ( collections ( slug ) )
@@ -124,6 +125,7 @@ function mapProduct(row: ProductRow): Product {
     description: row.description ?? "",
     bestSeller: row.best_seller,
     newArrival: row.new_arrival,
+    createdAt: row.created_at,
     offersCustomSizing: row.offers_custom_sizing,
     tone: row.tone,
     image: primaryImage,

@@ -2,8 +2,8 @@ import SocialLinks from "@/components/brand/SocialLinks";
 import type { SocialLink } from "@/lib/cms";
 
 /*
-  Server Component — the follow strip, sitting between the lookbook and the
-  newsletter so the two "keep in touch" asks are next to each other rather
+  Server Component — the follow strip, sitting between the Instagram strip and
+  the newsletter so the two "keep in touch" asks are next to each other rather
   than scattered.
 
   Renders nothing at all when no profile has been set in Settings. An empty

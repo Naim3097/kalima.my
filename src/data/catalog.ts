@@ -57,6 +57,12 @@ export type Product = {
   description: string;
   bestSeller?: boolean;
   newArrival?: boolean;
+  /**
+   * When the piece was added, ISO-8601. Present on database-backed products;
+   * absent on the seed fallback, which carries no dates. Anything ordering by
+   * recency must tolerate the gap rather than assume it.
+   */
+  createdAt?: string;
   /** Tone used to render the placeholder imagery until photography is supplied */
   tone: string;
   /** Photoshoot image (public path). Falls back to placeholder gradient when absent. */

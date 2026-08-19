@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import { fetchProducts } from "@/data/catalog.queries";
-import { getHeroSlides, getInstagramPosts, getLookbookShots, getSocialLinks } from "@/lib/cms";
+import { getHeroSlides, getInstagramPosts, getSocialLinks } from "@/lib/cms";
 import Hero from "@/components/home/Hero";
 import CategoryTiles from "@/components/home/CategoryTiles";
 import CollectionSpotlight from "@/components/home/CollectionSpotlight";
+import NewArrivals from "@/components/home/NewArrivals";
 import OnSale from "@/components/home/OnSale";
 import UspStrip from "@/components/home/UspStrip";
-import Lookbook from "@/components/home/Lookbook";
+import InstagramStrip from "@/components/home/InstagramStrip";
 import Follow from "@/components/home/Follow";
 import Newsletter from "@/components/home/Newsletter";
 
@@ -17,25 +18,28 @@ export const metadata: Metadata = {
 };
 
 /*
-  Home. Server Component — the catalogue is fetched here once and handed to
-  OnSale, so no section below needs its own data boundary. Only Hero
-  (carousel) and Newsletter (email form) ship client JS.
+  Home. Server Component — the catalogue is fetched here once and handed to both
+  product rows, so no section below needs its own data boundary. Only Hero
+  (carousel), the Instagram strip (scroll state) and Newsletter (email form)
+  ship client JS.
+
+  THE ORDER IS THE ARGUMENT THE PAGE MAKES. What is new comes before what is
+  discounted: a shopper who meets the sale rack first reads the shop as a sale
+  rack. The spotlight then slows the page down after two dense grids, the trust
+  strip answers the doubts that follow a decision, and Instagram sits last
+  because it is the one section whose links leave the site.
 */
 export const revalidate = 3600;
 
 export default async function HomePage() {
-  const [products, heroSlides, socialLinks, lookbook, instagramPosts] = await Promise.all([
+  const [products, heroSlides, socialLinks, instagramPosts] = await Promise.all([
     fetchProducts(),
     getHeroSlides(),
     getSocialLinks(),
-    /* Both, always: the Lookbook shows Instagram when the sync has posts and
-       the curated shots when it does not, and which one that is cannot be known
-       without asking. Two cached reads, one round trip each. */
-    getLookbookShots(),
     getInstagramPosts(),
   ]);
 
-  /* The Lookbook CTA says "View Instagram", so point it at Instagram when the
+  /* The strip's CTA says "View Instagram", so point it at Instagram when the
      shop has one configured. Falls back to the contact page. */
   const instagramHref = socialLinks.find((l) => l.platform === "instagram")?.href ?? null;
 
@@ -43,10 +47,11 @@ export default async function HomePage() {
     <>
       <Hero slides={heroSlides} />
       <CategoryTiles />
-      <CollectionSpotlight />
+      <NewArrivals products={products} />
       <OnSale products={products} />
+      <CollectionSpotlight />
       <UspStrip />
-      <Lookbook posts={instagramPosts} shots={lookbook} instagramHref={instagramHref} />
+      <InstagramStrip posts={instagramPosts} instagramHref={instagramHref} />
       <Follow links={socialLinks} />
       <Newsletter />
     </>

@@ -6,21 +6,27 @@ import Link from "next/link";
 import { PlayIcon } from "@/components/brand/Icons";
 import SectionHeader from "@/components/brand/SectionHeader";
 import { blurSeed } from "@/lib/images";
-import type { InstagramPost, LookbookShot } from "@/lib/cms";
+import type { InstagramPost } from "@/lib/cms";
 
 /*
-  The homepage Lookbook — the shop's Instagram feed as a swipeable carousel.
+  The homepage Instagram strip — the shop's feed as a swipeable carousel.
 
-  TWO SOURCES, one strip. Instagram posts when the daily sync has any (see
-  src/lib/instagram/sync.ts); otherwise the curated `lookbook_shots`, which is
-  what an unconnected shop, a failed sync and a fresh clone all fall back to. The
-  section never disappears and never renders a hole.
+  ONE SOURCE, AND IT IS INSTAGRAM. This was the Lookbook, which fell back to
+  curated `lookbook_shots` whenever the sync had nothing, so a section headed
+  with the shop's social presence could be filled entirely with studio
+  photography that had never been posted. Under a heading that says Instagram
+  that is not a graceful degradation, it is a false claim — so the fallback is
+  gone and an empty feed renders nothing at all.
 
-  Where a tile GOES depends on what we know about it. A curated shot is a product
-  shot, so it links to the product. An Instagram post links to the product only
-  when staff have tagged it; untagged, it opens the post on Instagram. The point
-  of the tagging is that this section keeps pulling people into the catalogue
-  instead of sending all of them to another app.
+  THE PRICE OF THAT IS A MISSING SECTION, and it is the intended price. If this
+  strip is absent the sync is not running, which is worth noticing on the
+  homepage rather than papering over with six curated shots that make a stalled
+  integration look healthy. See src/lib/instagram/sync.ts.
+
+  Where a tile GOES depends on what we know about it: a post links to the
+  product when staff have tagged it, and opens the post on Instagram when they
+  have not. The tagging is what keeps this section pulling people into the
+  catalogue instead of sending all of them to another app.
 
   Client Component for the carousel's scroll state — the arrows have to know
   whether there is anything left to scroll to. The scrolling itself is native
@@ -45,44 +51,30 @@ type Tile = {
    to pick a tone from, and the strip sits on cream. */
 const TILE_TONE = "#efe7db";
 
-function tilesFrom(posts: InstagramPost[], shots: LookbookShot[]): Tile[] {
-  if (posts.length > 0) {
-    return posts.map((post) => ({
-      key: post.id,
-      image: post.image,
-      alt: post.alt,
-      tone: TILE_TONE,
-      href: post.slug ? `/products/${post.slug}` : post.permalink,
-      external: !post.slug,
-      video: post.video,
-    }));
-  }
-
-  return shots.map((shot) => ({
-    key: `${shot.slug}-${shot.image}`,
-    image: shot.image,
-    alt: shot.alt,
-    tone: shot.tone,
-    href: `/products/${shot.slug}`,
-    external: false,
-    video: false,
+function tilesFrom(posts: InstagramPost[]): Tile[] {
+  return posts.map((post) => ({
+    key: post.id,
+    image: post.image,
+    alt: post.alt,
+    tone: TILE_TONE,
+    href: post.slug ? `/products/${post.slug}` : post.permalink,
+    external: !post.slug,
+    video: post.video,
   }));
 }
 
-export default function Lookbook({
+export default function InstagramStrip({
   posts = [],
-  shots,
   instagramHref,
 }: {
   posts?: InstagramPost[];
-  shots: LookbookShot[];
   instagramHref?: string | null;
 }) {
   const railRef = useRef<HTMLDivElement>(null);
   const [atStart, setAtStart] = useState(true);
   const [atEnd, setAtEnd] = useState(false);
 
-  const tiles = tilesFrom(posts, shots);
+  const tiles = tilesFrom(posts);
 
   /*
     Which arrows are live. Read off the rail rather than tracked as an index:
@@ -109,7 +101,8 @@ export default function Lookbook({
     };
   }, [tiles.length]);
 
-  /* Nothing to show → render nothing, rather than a heading over an empty rail. */
+  /* No posts → no section. Not a heading over an empty rail, and not curated
+     stand-ins either: see the note at the top on why the gap is the point. */
   if (tiles.length === 0) return null;
 
   /* Scroll by a viewport of the rail, less one tile, so nothing is skipped past. */
@@ -122,7 +115,7 @@ export default function Lookbook({
   return (
     <section className="mx-auto max-w-7xl px-4 py-14">
       <SectionHeader
-        title="Lookbook"
+        title="Instagram"
         cta={{ label: "View Instagram", href: instagramHref || "/pages/contact" }}
       />
 
