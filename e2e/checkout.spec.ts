@@ -78,8 +78,14 @@ async function seedBag(page: Page) {
 
 /** The totals panel, read off the page as numbers. */
 async function readSummary(page: Page) {
-  const row = async (label: string): Promise<number | null> => {
-    const dt = page.locator("dl dt", { hasText: label }).first();
+  /*
+    Matched as a REGEX anchored at the start, not as a substring. Playwright's
+    string `hasText` is a case-insensitive contains — so "Total" also matches
+    "Subtotal", and every total read here was silently the subtotal. It went
+    unnoticed because RM10 of shipping and RM10 of discount cancel out.
+  */
+  const row = async (label: RegExp): Promise<number | null> => {
+    const dt = page.locator("dl dt").filter({ hasText: label }).first();
     if ((await dt.count()) === 0) return null;
     const text = await dt.locator("xpath=following-sibling::dd[1]").innerText();
     const value = Number(text.replace(/[^\d.]/g, ""));
@@ -87,10 +93,10 @@ async function readSummary(page: Page) {
   };
 
   return {
-    subtotal: await row("Subtotal"),
-    firstOrder: await row("Welcome"),
-    shipping: await row("Shipping"),
-    total: await row("Total"),
+    subtotal: await row(/^Subtotal$/),
+    firstOrder: await row(/^Welcome/),
+    shipping: await row(/^Shipping$/),
+    total: await row(/^Total$/),
   };
 }
 
@@ -132,5 +138,114 @@ test.describe("checkout — new-member discount", () => {
     await page.goto("/checkout");
     await expect(page.getByText("Subtotal")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText("Welcome — first order")).toHaveCount(0);
+  });
+});
+
+/*
+  Overseas delivery.
+
+  The thing worth defending here is not that a list appears — it is that the
+  price on the summary is one the SERVER issued. So these assert the join: the
+  figure printed beside a courier is the figure the total moves by, and until a
+  courier is chosen there is no total at all.
+
+  They run against live EasyParcel rates, so no amount is hardcoded; every
+  assertion is a relationship between two numbers on the page.
+*/
+const OVERSEAS = {
+  country: "Singapore",
+  recipient: "E2E Buyer",
+  line1: "1 Marina Boulevard",
+  city: "Singapore",
+  postcode: "018956",
+  state: "Central",
+  phone: "+6591234567",
+};
+
+async function chooseCountry(page: Page, name: string) {
+  await page.locator("#co-country").click();
+  await page.getByRole("option", { name, exact: true }).click();
+}
+
+async function fillOverseasAddress(page: Page) {
+  await chooseCountry(page, OVERSEAS.country);
+  await page.fill("#co-email", "overseas@kalima.test");
+  await page.fill("#co-recipient", OVERSEAS.recipient);
+  await page.fill("#co-line1", OVERSEAS.line1);
+  await page.fill("#co-city", OVERSEAS.city);
+  await page.fill("#co-postcode", OVERSEAS.postcode);
+  await page.fill("#co-state", OVERSEAS.state);
+  /* Filled last, and non-Malaysian on purpose: the ^01 rule has to have dropped
+     with the country, or this address never reaches the courier guard. */
+  await page.fill("#co-phone", OVERSEAS.phone);
+}
+
+/** The Shipping line, which is the one figure these tests are really about. */
+function shippingCell(page: Page) {
+  return page.locator("dl dt", { hasText: "Shipping" }).first()
+    .locator("xpath=following-sibling::dd[1]");
+}
+
+test.describe("checkout — overseas delivery", () => {
+  test("no courier chosen means no total to charge", async ({ page }) => {
+    await page.goto("/");
+    await seedBag(page);
+    await page.goto("/checkout");
+    await expect(page.getByText("Subtotal")).toBeVisible({ timeout: 20_000 });
+
+    await fillOverseasAddress(page);
+
+    /* Not "RM0". A zero here would read as free delivery beside a total that
+       silently omitted it — the exact misstatement this shop does not make. */
+    await expect(shippingCell(page)).toHaveText("Choose a courier", { timeout: 20_000 });
+
+    await page.getByRole("button", { name: /place order/i }).click();
+    await expect(page.getByText(/choose a delivery service/i)).toBeVisible();
+  });
+
+  test("the courier's price is the price charged", async ({ page }) => {
+    await page.goto("/");
+    await seedBag(page);
+    await page.goto("/checkout");
+    await expect(page.getByText("Subtotal")).toBeVisible({ timeout: 20_000 });
+
+    await fillOverseasAddress(page);
+    await page.getByRole("button", { name: /get delivery options/i }).click();
+
+    const couriers = page.locator('input[type="radio"]');
+    await expect(couriers.first()).toBeVisible({ timeout: 60_000 });
+
+    /* Whatever the second-cheapest happens to be today. Picking a named courier
+       would make this fail when EasyParcel's line-up changes, which is not the
+       thing under test. */
+    const row = couriers.nth(1).locator("xpath=ancestor::label[1]");
+    const quoted = Number((await row.innerText()).match(/RM\s*([\d.,]+)/)![1].replace(/,/g, ""));
+    await couriers.nth(1).check();
+
+    await expect(shippingCell(page)).toContainText("RM", { timeout: 20_000 });
+
+    const s = await readSummary(page);
+    expect(s.shipping).toBeCloseTo(quoted, 2);
+    expect(s.total).toBeCloseTo(s.subtotal! + quoted - (s.firstOrder ?? 0), 2);
+  });
+
+  test("Malaysia stays flat, and asks for no courier", async ({ page }) => {
+    await page.goto("/");
+    await seedBag(page);
+    await page.goto("/checkout");
+    await expect(page.getByText("Subtotal")).toBeVisible({ timeout: 20_000 });
+
+    /* The default. A country selector that quietly changed the domestic price
+       would be the worst way to learn this feature shipped. */
+    await expect(page.locator("#co-country")).toHaveText("Malaysia");
+    await expect(page.getByRole("button", { name: /get delivery options/i })).toHaveCount(0);
+
+    /* Waited for, not read at once: the first render shows the goods total
+       until the server's quote lands, and asserting into that gap would test
+       the loading state rather than the price. */
+    await expect(shippingCell(page)).toHaveText(/RM\s*[1-9]/, { timeout: 20_000 });
+
+    const s = await readSummary(page);
+    expect(s.total).toBeCloseTo(s.subtotal! + s.shipping! - (s.firstOrder ?? 0), 2);
   });
 });

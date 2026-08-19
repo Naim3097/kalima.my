@@ -130,6 +130,39 @@ function pick<T = unknown>(o: Record<string, unknown>, ...keys: string[]): T | u
   return undefined;
 }
 
+/*
+  Transit time, in words a shopper reads.
+
+  EasyParcel returns this field in more than one shape: a plain string for some
+  couriers, and `{ type: "days", value: "1" }` for others — which is how
+  `{"type":"days","value":"1"}` ended up printed beside FedEx on the checkout.
+  Anything unrecognised becomes null rather than a stringified object; no
+  transit estimate beats a visible one made of punctuation.
+*/
+export function formatDuration(raw: unknown): string | null {
+  if (typeof raw === "string") return raw.trim() || null;
+  if (!raw || typeof raw !== "object") return null;
+
+  const d = raw as Record<string, unknown>;
+  const unit = typeof d.type === "string" ? d.type.trim().replace(/s$/, "") : null;
+  if (!unit) return null;
+
+  const num = (v: unknown) => {
+    const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const min = num(d.min ?? d.from);
+  const max = num(d.max ?? d.to);
+  if (min !== null && max !== null) {
+    return min === max ? `${min} ${unit}${min === 1 ? "" : "s"}` : `${min}\u2013${max} ${unit}s`;
+  }
+
+  const value = num(d.value);
+  if (value === null) return null;
+  return `${value} ${unit}${value === 1 ? "" : "s"}`;
+}
+
 export class EasyParcelClient {
   constructor(private readonly accessToken: string) {}
 
@@ -257,7 +290,7 @@ export class EasyParcelClient {
           serviceName: String(pick(courier, "service_name") ?? "Delivery"),
           courierName: String(pick(courier, "courier_name") ?? "Courier"),
           amountSen: toSen(pick(pricing, "total_amount")),
-          deliveryDuration: (pick<string>(courier, "delivery_duration") ?? null) as string | null,
+          deliveryDuration: formatDuration(courier.delivery_duration),
           /* Every courier is offered twice — once collecting from the door, once
              from a drop-off point, usually at the same price. The checkout shows
              one row per courier, and this is what tells them apart. */
