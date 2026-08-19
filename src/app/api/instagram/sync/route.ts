@@ -4,16 +4,26 @@ import { getCurrentUser, isStaff } from "@/lib/auth";
 import { InstagramNotConfigured, syncInstagram } from "@/lib/instagram/sync";
 
 /*
-  Refreshes the homepage Instagram strip. Driven daily by
-  .github/workflows/instagram-sync.yml, and by staff from the CMS screen.
+  Refreshes the homepage Instagram strip.
 
-  WHY NOT A VERCEL CRON. vercel.json already carries two entries and the project
-  is on Vercel's Hobby plan, which caps a project at two cron jobs — a third
-  fails the BUILD, not just the cron. The marketplace fast lane already solves
-  this exact problem from GitHub Actions and documents the trade-off; this
-  follows it. If the project moves to Pro, delete the workflow and add
-    { "path": "/api/instagram/sync", "schedule": "0 2 * * *" }
-  to vercel.json. Nothing in this file changes either way.
+  NOTHING SCHEDULES THIS ANY MORE. It ran daily from
+  .github/workflows/instagram-sync.yml, deleted on 2026-08-19 along with the
+  marketplace one: the account's Actions billing is locked, so every run failed
+  in seconds and mailed a failure notice, and a workflow that cannot run and
+  only generates alarm is worse than none.
+
+  The only caller left is staff pressing "Refresh from Instagram" on the CMS
+  screen. Until someone does, the homepage strip stays empty — it shows real
+  posts or nothing, having lost its curated fallback deliberately, so an
+  unsynced feed is a missing section rather than a quiet lie.
+
+  To bring the schedule back, either clear the Actions billing and restore that
+  file from git history, or drive it from a Vercel cron. Vercel's Hobby plan
+  caps a project at two and vercel.json already carries two — a third fails the
+  BUILD, not just the cron — so on Hobby that means riding on an existing entry,
+  the way the EasyParcel connection check rides on /api/orders/expire. On Pro it
+  is simply a third entry for this path. Nothing in this file changes either
+  way.
 
   AUTHENTICATION, and why it fails closed. This endpoint spends Meta API quota
   and writes to Storage. Left open, anyone could drive both. So with no
