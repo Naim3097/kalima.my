@@ -20,6 +20,8 @@ import {
 import { buildAtomeReference, configuredProviders, providerForService } from "@/lib/payments";
 import { sendOrderReceivedEmail } from "@/lib/email";
 import { allow, callerKey } from "@/lib/rate-limit";
+import { quoteForCart } from "@/lib/shipping/rates";
+import { isKnownCountry } from "@/lib/shipping/countries";
 import { getCurrentUser } from "@/lib/auth";
 
 /*
@@ -70,7 +72,9 @@ export async function quoteCart(
        quotes the default zone until they finish. */
     country?: string;
     state?: string | null;
-    chosenShippingSen?: number | null;
+    /* A server-issued quote id and the chosen service — never a price. */
+    quoteId?: string | null;
+    serviceId?: string | null;
   },
 ): Promise<(OrderQuote & { missing: CartRef[] }) | { error: string }> {
   if (!allow(await callerKey("quote"), 60, 60_000)) {
@@ -92,7 +96,8 @@ export async function quoteCart(
       redeemPoints: options?.redeemPoints,
       country: options?.country,
       state: options?.state,
-      chosenShippingSen: options?.chosenShippingSen,
+      quoteId: options?.quoteId,
+      serviceId: options?.serviceId,
     });
     /* Reported, not thrown: the summary should still show what the rest of the
        bag costs while the shopper deals with the line that fell out. */
@@ -101,6 +106,71 @@ export async function quoteCart(
     console.error("[checkout] quoteCart failed:", (e as Error).message);
     return { error: "We could not price your bag just now. Please try again." };
   }
+}
+
+/*
+  Live courier options for an overseas address, before any order exists.
+
+  Throttled and bounded like every other public checkout action: it is
+  unauthenticated and each call spends the shop's EasyParcel quota, so an
+  anonymous caller must not be able to hammer it. Twenty a minute is far more
+  than a shopper editing an address will ever need.
+
+  Returns a quote id and a list. NOT a price the caller can quote back — the
+  amounts are frozen server-side and read from there when the order is priced.
+
+  Malaysia is refused outright rather than quoted: its price is a zone rate, and
+  producing a courier list for it would offer a choice the checkout does not
+  honour.
+*/
+export async function quoteShippingOptions(
+  cart: CartRef[],
+  address: { country: string; postcode: string; state: string },
+): Promise<
+  | { quoteId: string; options: { serviceId: string; label: string; courier: string; amountSen: number; duration: string | null }[] }
+  | { error: string }
+> {
+  if (!allow(await callerKey("shipquote"), 20, 60_000)) {
+    return { error: "Too many attempts. Please wait a moment." };
+  }
+  if (cart.length === 0) return { error: "Your bag is empty." };
+  if (cart.length > MAX_CART_LINES) return { error: "That bag is too large." };
+
+  const country = address.country.trim().toUpperCase();
+  if (!country || country === "MY") {
+    return { error: "Malaysian delivery is charged at a flat rate — no courier to choose." };
+  }
+  if (!isKnownCountry(country)) return { error: "We do not ship to that country yet." };
+  if (!address.postcode.trim()) return { error: "A postcode is needed to quote delivery." };
+
+  const { lines, subtotalSen } = await resolveCartLines(cart);
+  if (!lines.length) return { error: "Nothing in your bag is still available." };
+
+  const quote = await quoteForCart({
+    lines,
+    country,
+    postcode: address.postcode.trim(),
+    subdivision: address.state.trim(),
+    /* Declared value drives insurance and customs ceilings, so it is the goods
+       total — not the total the shopper pays, which includes the delivery being
+       quoted. */
+    parcelValueRm: subtotalSen / 100,
+  });
+
+  if ("unavailable" in quote) return { error: quote.unavailable };
+
+  return {
+    quoteId: quote.quoteId,
+    options: quote.options.map((o) => ({
+      serviceId: o.serviceId,
+      /* One readable line. EasyParcel's service names already carry the method
+         ("(Pick Up) (From Door to Door)"), which is more than a shopper needs. */
+      label: o.serviceName.replace(/\s*\(From [^)]*\)\s*/i, "").trim(),
+      courier: o.courierName,
+      amountSen: o.amountSen,
+      duration: o.deliveryDuration,
+    })),
+  };
 }
 
 /** Live discount check for the "Apply" button. */
@@ -135,8 +205,13 @@ export async function placeOrder(
     city: string;
     postcode: string;
     state: string;
+    country: string;
     shippingMethod: string;
     discountCode: string;
+    /** Overseas only: the server-issued quote and the chosen service. Never a
+        price — create_order reads the amount from the frozen quote. */
+    quoteId?: string | null;
+    serviceId?: string | null;
     /** Points the shopper wants to spend; clamped server-side. */
     redeemPoints?: number;
   },
@@ -168,18 +243,50 @@ export async function placeOrder(
     Malaysian mobile: 01 followed by 8 or 9 digits, spaces/dashes tolerated.
     Landlines are deliberately not accepted; couriers text the recipient.
   */
+  /*
+    Address rules follow the DESTINATION. Malaysian ones are exact — a 5-digit
+    postcode, a state from the list, an 01 mobile — because we know what a
+    Malaysian address looks like and a wrong state misprices the parcel.
+
+    For everywhere else the same strictness would reject perfectly good
+    addresses: postcodes run from three characters to eight with letters,
+    subdivisions are not ISO codes anyone types, and a phone number starts with
+    a country code. So the overseas checks are presence checks. The address is
+    handed to a courier who will reject a bad one, and the shopper is told.
+  */
+  const destination = (form.country || "MY").trim().toUpperCase();
+  const overseas = destination !== "MY";
+
+  if (!isKnownCountry(destination)) {
+    return { error: "We do not ship to that country yet." };
+  }
+
   const phoneDigits = form.phone.replace(/\D/g, "");
-  if (!/^01\d{8,9}$/.test(phoneDigits)) {
+  if (!overseas && !/^01\d{8,9}$/.test(phoneDigits)) {
     return { error: "Enter a valid Malaysian mobile number, e.g. 012 345 6789." };
+  }
+  if (overseas && phoneDigits.length < 7) {
+    return { error: "Enter a phone number the courier can reach you on." };
   }
   if (!form.recipient.trim() || !form.line1.trim() || !form.city.trim()) {
     return { error: "Please complete the delivery address." };
   }
-  if (!/^\d{5}$/.test(form.postcode.trim())) {
+  if (!overseas && !/^\d{5}$/.test(form.postcode.trim())) {
     return { error: "Enter a valid 5-digit postcode." };
   }
-  if (!MY_STATES.has(form.state)) {
+  if (overseas && form.postcode.trim().length < 3) {
+    return { error: "Enter the postcode or ZIP for that address." };
+  }
+  if (!overseas && !MY_STATES.has(form.state)) {
     return { error: "Please choose a state." };
+  }
+  if (overseas && !form.state.trim()) {
+    return { error: "Enter the state, province or region." };
+  }
+  /* create_order refuses an overseas order with no quote anyway; this says so
+     in words a shopper can act on instead of surfacing a raised exception. */
+  if (overseas && (!form.quoteId || !form.serviceId)) {
+    return { error: "Choose a delivery service before placing your order." };
   }
 
   // Resolve the cart to variants; refuse to proceed if anything fell out of catalog.
@@ -225,10 +332,15 @@ export async function placeOrder(
         city: form.city.trim(),
         postcode: form.postcode.trim(),
         state: form.state,
-        country: "MY",
+        /* The destination drives the price: Malaysia by zone, elsewhere by the
+           frozen courier quote. It is stored on the order too, so the address
+           that priced it is the address on it. */
+        country: (form.country || "MY").trim().toUpperCase(),
       },
       shippingMethod: form.shippingMethod,
       discountCode: form.discountCode.trim() || undefined,
+      quoteId: form.quoteId ?? null,
+      serviceId: form.serviceId ?? null,
       // A request, not a price — the database clamps it against the real balance.
       redeemPoints: form.redeemPoints,
     });

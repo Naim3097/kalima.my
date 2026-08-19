@@ -159,6 +159,10 @@ export type OrderQuote = {
   shippingSen: number;
   freeShipping: boolean;
   zone: ShippingZone;
+  /* Copied from the frozen quote, so the summary names the courier that was
+     quoted rather than one the caller asked for. Null for Malaysian orders. */
+  shippingServiceName: string | null;
+  shippingCourier: string | null;
   /* True when the destination is overseas and no courier has been chosen yet.
      `shippingSen` is 0 in that state — it means "not known", never "free", and
      an order must not be placed until it is resolved. */
@@ -177,9 +181,13 @@ export async function quoteOrder(params: {
      quote for the wrong thing. Defaults to Malaysia, matching the form. */
   country?: string;
   state?: string | null;
-  /* The overseas service the shopper picked, in sen. Passed through rather
-     than re-quoted, so the price they were shown is the price they pay. */
-  chosenShippingSen?: number | null;
+  /*
+    The server-issued quote and the service chosen from it. NOT a price — the
+    amount is read from shipping_quotes inside price_order, so nothing between
+    the browser and the database can name what shipping costs.
+  */
+  quoteId?: string | null;
+  serviceId?: string | null;
 }): Promise<OrderQuote> {
   const { data, error } = await admin().rpc("price_order", {
     p_user_id: params.userId,
@@ -188,7 +196,8 @@ export async function quoteOrder(params: {
     p_redeem_points: params.redeemPoints ?? 0,
     p_country: params.country ?? "MY",
     p_state: params.state ?? null,
-    p_chosen_shipping_sen: params.chosenShippingSen ?? null,
+    p_quote_id: params.quoteId ?? null,
+    p_service_id: params.serviceId ?? null,
   });
   if (error) throw new Error(`quoteOrder failed: ${error.message}`);
 
@@ -203,6 +212,8 @@ export async function quoteOrder(params: {
     shippingSen: Number(q.shipping_sen ?? 0),
     freeShipping: Boolean(q.free_shipping),
     zone: (q.shipping_zone as ShippingZone) ?? "west",
+    shippingServiceName: (q.shipping_service_name as string | null) ?? null,
+    shippingCourier: (q.shipping_courier as string | null) ?? null,
     requiresShippingSelection: Boolean(q.requires_shipping_selection),
     taxSen: Number(q.tax_sen ?? 0),
     totalSen: Number(q.total_sen ?? 0),
@@ -259,14 +270,16 @@ export async function createOrder(params: {
   */
   redeemPoints?: number;
   /*
-    The overseas courier the shopper chose, in sen, as they were quoted it.
+    The server-issued quote and the service chosen from it.
 
-    Malaysia never sets this — its price is a zone rate the database already
-    knows. Overseas REQUIRES it: create_order refuses the order otherwise
+    Malaysia never sets these — its price is a zone rate the database already
+    knows. Overseas REQUIRES them: create_order refuses the order otherwise
     rather than shipping a parcel for nothing, because "no service chosen" and
-    "free" must never be the same value.
+    "free" must never be the same value. Neither is a price; the amount lives
+    in shipping_quotes and is read there.
   */
-  chosenShippingSen?: number | null;
+  quoteId?: string | null;
+  serviceId?: string | null;
 }): Promise<CreateOrderResult> {
   const auth = await createClient();
   const userId = auth ? (await auth.auth.getUser()).data.user?.id ?? null : null;
@@ -282,7 +295,8 @@ export async function createOrder(params: {
     p_shipping_method: params.shippingMethod,
     p_discount_code: params.discountCode ?? null,
     p_redeem_points: Math.max(0, Math.trunc(params.redeemPoints ?? 0)),
-    p_chosen_shipping_sen: params.chosenShippingSen ?? null,
+    p_quote_id: params.quoteId ?? null,
+    p_service_id: params.serviceId ?? null,
   });
   if (error) throw new Error(`createOrder failed: ${error.message}`);
   const result = data as CreateOrderResult;

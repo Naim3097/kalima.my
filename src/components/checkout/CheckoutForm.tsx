@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useCart, cartSubtotal } from "@/stores/cart";
 import { formatRM } from "@/lib/format";
 import { useMounted } from "@/hooks/useMounted";
-import { placeOrder, checkDiscount, quoteCart } from "@/app/checkout/actions";
+import { placeOrder, checkDiscount, quoteCart, quoteShippingOptions } from "@/app/checkout/actions";
+import { COUNTRIES, DEFAULT_COUNTRY } from "@/lib/shipping/countries";
 import type { CartRef, OrderQuote } from "@/lib/commerce";
 import ProductImage from "@/components/brand/ProductImage";
 import { Button } from "@/components/ui/button";
@@ -89,6 +90,7 @@ export default function CheckoutForm({
     city: "",
     postcode: "",
     state: "Selangor",
+    country: DEFAULT_COUNTRY,
   });
   const set = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -109,13 +111,27 @@ export default function CheckoutForm({
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(form.email.trim())) {
     problems.email = "Enter a valid email address.";
   }
-  if (!/^01\d{8,9}$/.test(form.phone.replace(/\D/g, ""))) {
+  /*
+    The rules follow the destination. Malaysian addresses are checked exactly —
+    01 mobile, five-digit postcode — because we know their shape. Applying the
+    same rules to Sydney or Riyadh would reject correct addresses, so overseas
+    ones are checked for presence and left alone. placeOrder repeats all of
+    this; this only saves the round trip.
+  */
+  const overseas = form.country !== "MY";
+
+  if (!overseas && !/^01\d{8,9}$/.test(form.phone.replace(/\D/g, ""))) {
     problems.phone = "Malaysian mobile, e.g. 012 345 6789.";
+  }
+  if (overseas && form.phone.replace(/\D/g, "").length < 7) {
+    problems.phone = "Include the country code, e.g. +65 8123 4567.";
   }
   if (!form.recipient.trim()) problems.recipient = "Who should we address it to?";
   if (!form.line1.trim()) problems.line1 = "Street address is required.";
   if (!form.city.trim()) problems.city = "City is required.";
-  if (!/^\d{5}$/.test(form.postcode.trim())) problems.postcode = "5 digits.";
+  if (!overseas && !/^\d{5}$/.test(form.postcode.trim())) problems.postcode = "5 digits.";
+  if (overseas && form.postcode.trim().length < 3) problems.postcode = "Postcode or ZIP.";
+  if (overseas && !form.state.trim()) problems.state = "State, province or region.";
 
   /* Shown once a field has been left, or once pay has been pressed — never
      while someone is still part-way through typing their email. */
@@ -159,6 +175,72 @@ export default function CheckoutForm({
     needs no server to be right, and having it instantly means the panel never
     shows nothing while a quote is in flight.
   */
+  /*
+    Overseas delivery: a list of couriers, and which one was picked.
+
+    `quoteId` is opaque — the server froze the prices behind it and reads them
+    back when the order is priced. Nothing here holds an amount the checkout
+    could send; the figures below are for DISPLAY, and the summary's shipping
+    line comes from the server quote like every other figure.
+  */
+  const [courierOptions, setCourierOptions] = useState<
+    { serviceId: string; label: string; courier: string; amountSen: number; duration: string | null }[]
+  >([]);
+  const [shipQuoteId, setShipQuoteId] = useState<string | null>(null);
+  const [chosenService, setChosenService] = useState<string | null>(null);
+  const [courierError, setCourierError] = useState<string | null>(null);
+  const [fetchingRates, setFetchingRates] = useState(false);
+
+  /* An address good enough to quote against. Below this the courier call would
+     only fail, and asking EasyParcel on every keystroke spends the shop's
+     quota. */
+  const addressQuotable =
+    overseas && form.postcode.trim().length >= 3 && form.city.trim().length > 0;
+
+  async function getDeliveryOptions() {
+    setFetchingRates(true);
+    setCourierError(null);
+    /* A fresh quote invalidates the old choice — pairing a stale service with a
+       new quote is exactly the mismatch freezing exists to prevent. */
+    setChosenService(null);
+    setShipQuoteId(null);
+    setCourierOptions([]);
+
+    const res = await quoteShippingOptions(cartRefs, {
+      country: form.country,
+      postcode: form.postcode,
+      state: form.state,
+    });
+    setFetchingRates(false);
+
+    if ("error" in res) {
+      setCourierError(res.error);
+      return;
+    }
+    setCourierOptions(res.options);
+    setShipQuoteId(res.quoteId);
+  }
+
+  /*
+    Changing the destination retires whatever was quoted for the old one — and
+    the subdivision with it. "Selangor" left sitting in a Singapore address is
+    not a small cosmetic leftover: it is what gets printed on the label.
+  */
+  const firstRender = useRef(true);
+  useEffect(() => {
+    setCourierOptions([]);
+    setShipQuoteId(null);
+    setChosenService(null);
+    setCourierError(null);
+    /* Not on mount, or a signed-in shopper's saved state would be wiped before
+       they had touched anything. */
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    setForm((f) => ({ ...f, state: "" }));
+  }, [form.country]);
+
   const [quote, setQuote] = useState<OrderQuote | null>(null);
   const [quoting, setQuoting] = useState(false);
 
@@ -172,6 +254,11 @@ export default function CheckoutForm({
     code: discount?.code ?? null,
     points: usePoints,
     state: form.state,
+    country: form.country,
+    /* The chosen courier IS the shipping price overseas, so the summary has to
+       re-price when it changes. */
+    quoteId: shipQuoteId,
+    serviceId: chosenService,
   });
 
   useEffect(() => {
@@ -186,8 +273,10 @@ export default function CheckoutForm({
     setQuoting(true);
     const timer = setTimeout(async () => {
       const res = await quoteCart(cartRefs, {
-        country: "MY",
+        country: form.country,
         state: form.state,
+        quoteId: shipQuoteId,
+        serviceId: chosenService,
         discountCode: discount?.code,
         /* A request, not a price. price_order clamps it against the real
            balance exactly as create_order does. */
@@ -211,6 +300,13 @@ export default function CheckoutForm({
   const pointsUsed = quote?.loyaltyPointsUsed ?? 0;
   const freeShipping = quote?.freeShipping ?? false;
   const shipping = (quote?.shippingSen ?? 0) / 100;
+  /*
+    Overseas, before a courier is picked, price_order returns zero shipping and
+    flags the order unpriceable. Rendering that zero would read as free delivery
+    and understate the total — the one claim this shop does not make. So the
+    line asks for the choice instead, and the total waits for it.
+  */
+  const shippingPending = quote?.requiresShippingSelection ?? false;
   /* Until the first quote lands, the goods themselves are the honest figure to
      show — never a total that omits shipping and pretends to be final. */
   const total = quote ? quote.totalSen / 100 : subtotal;
@@ -254,12 +350,27 @@ export default function CheckoutForm({
       return;
     }
 
+    /* Overseas, the courier IS the price — there is nothing to charge until one
+       is chosen. The server refuses this too; saying so here saves a round trip
+       and points at the section rather than at the button. */
+    if (overseas && !chosenService) {
+      document.getElementById("co-postcode")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setError("Please choose a delivery service before placing your order.");
+      return;
+    }
+
     startPlace(async () => {
       const result = await placeOrder(cartRefs, {
         ...form,
-        shippingMethod: freeShipping ? "Standard (free)" : "Standard",
+        shippingMethod: overseas
+          ? courierOptions.find((o) => o.serviceId === chosenService)?.courier ?? "International"
+          : freeShipping
+            ? "Standard (free)"
+            : "Standard",
         redeemPoints: pointsUsed,
         discountCode: discount?.code ?? "",
+        quoteId: shipQuoteId,
+        serviceId: chosenService,
       });
       // Success redirects server-side; only a failure returns here.
       if (result && "error" in result) setError(result.error);
@@ -313,6 +424,23 @@ export default function CheckoutForm({
           <section>
             <h2 className="label-caps mb-4 !text-[13px]">2 · Delivery</h2>
             <div className="grid gap-3 sm:grid-cols-2">
+              {/* First, because it decides everything below it: which fields are
+                  validated how, and whether delivery is a flat zone rate or a
+                  courier the shopper picks. */}
+              <div className="sm:col-span-2">
+                <Label htmlFor="co-country" className="sr-only">Country</Label>
+                <Select value={form.country} onValueChange={set("country")}>
+                  <SelectTrigger id="co-country"
+                    className="w-full rounded-none border-navy/20 bg-white px-4 py-3 text-[14px] text-navy shadow-none focus-visible:border-navy focus-visible:ring-0 data-[size=default]:h-auto">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {COUNTRIES.map((c) => (
+                      <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="sm:col-span-2">
                 <Label htmlFor="co-recipient" className="sr-only">Recipient name</Label>
                 <Input id="co-recipient" placeholder="Recipient full name" className={fieldClass}
@@ -356,26 +484,125 @@ export default function CheckoutForm({
               </div>
               <div className="sm:col-span-2">
                 <Label htmlFor="co-state" className="sr-only">State</Label>
-                <Select value={form.state} onValueChange={set("state")}>
-                  <SelectTrigger id="co-state"
-                    className="w-full rounded-none border-navy/20 bg-white px-4 py-3 text-[14px] text-navy shadow-none focus-visible:border-navy focus-visible:ring-0 data-[size=default]:h-auto">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MY_STATES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                {/* A fixed list for Malaysia, because the state decides the zone
+                    rate and a typo would misprice the parcel. Free text
+                    everywhere else — the world's subdivisions are not a list
+                    anyone should be made to scroll. */}
+                {overseas ? (
+                  <Input id="co-state" placeholder="State / province / region" className={fieldClass}
+                    value={form.state} onChange={(e) => set("state")(e.target.value)}
+                    required aria-invalid={!!showProblem("state")} onBlur={markTouched("state")} />
+                ) : (
+                  <Select value={form.state} onValueChange={set("state")}>
+                    <SelectTrigger id="co-state"
+                      className="w-full rounded-none border-navy/20 bg-white px-4 py-3 text-[14px] text-navy shadow-none focus-visible:border-navy focus-visible:ring-0 data-[size=default]:h-auto">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MY_STATES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+                {overseas && showProblem("state") && (
+                  <p className="mt-1 text-[12px] text-red-700">{showProblem("state")}</p>
+                )}
               </div>
             </div>
-            <p className="mt-3 text-[12px] tracking-wide text-navy-300">
-              {/* The policy, not this cart: the summary above already prices the
-                  address they typed. Both zones are named because "delivery
-                  RM10" beside a RM15 line is the contradiction this replaced. */}
-              {`${formatRM(pricing.westRm)} to Semenanjung, ${formatRM(pricing.eastRm)} to Sabah & Sarawak.`}
-              {pricing.freeShippingAbove > 0
-                ? ` Free over ${formatRM(pricing.freeShippingAbove)}.`
-                : ""}
-            </p>
+            {overseas ? (
+              <div className="mt-4 border border-navy/15 bg-cream-50 px-4 py-4">
+                <p className="label-caps !text-[11px] text-navy-400">Delivery service</p>
+
+                {courierOptions.length === 0 ? (
+                  <>
+                    <p className="mt-2 text-[13px] leading-relaxed text-navy-400">
+                      Rates are quoted live for your address. Fill in the city and postcode, then
+                      choose a courier.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="kalimaOutline"
+                      size="editorial"
+                      className="mt-3"
+                      disabled={!addressQuotable || fetchingRates}
+                      onClick={getDeliveryOptions}
+                    >
+                      {fetchingRates ? "Getting rates…" : "Get delivery options"}
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <ul className="mt-3 space-y-2">
+                      {courierOptions.map((o) => (
+                        <li key={o.serviceId}>
+                          <label
+                            className={`flex cursor-pointer items-center justify-between gap-3 border px-3 py-2.5 text-[13px] transition-colors ${
+                              chosenService === o.serviceId
+                                ? "border-navy bg-white"
+                                : "border-navy/15 hover:border-navy/40"
+                            }`}
+                          >
+                            <span className="flex items-center gap-2.5">
+                              <input
+                                type="radio"
+                                name="courier"
+                                className="size-4 accent-navy"
+                                checked={chosenService === o.serviceId}
+                                onChange={() => setChosenService(o.serviceId)}
+                              />
+                              <span>
+                                <span className="text-navy">{o.courier}</span>
+                                <span className="block text-[12px] text-navy-400">
+                                  {o.label}
+                                  {o.duration ? ` · ${o.duration}` : ""}
+                                </span>
+                              </span>
+                            </span>
+                            <span className="shrink-0 text-navy">{formatRM(o.amountSen / 100)}</span>
+                          </label>
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      type="button"
+                      onClick={getDeliveryOptions}
+                      disabled={fetchingRates}
+                      className="mt-3 cursor-pointer text-[12px] tracking-wide text-navy-400 underline underline-offset-4 hover:text-navy"
+                    >
+                      {fetchingRates ? "Refreshing…" : "Refresh rates"}
+                    </button>
+                  </>
+                )}
+
+                {/*
+                  No rates is a full stop, not a guess. Quoting a flat figure for
+                  an unserved country is how a shop loses more than the order is
+                  worth, so the sale is offered a human instead.
+                */}
+                {courierError && (
+                  <div className="mt-3 border border-red-200 bg-red-50 px-3 py-2.5">
+                    <p className="text-[13px] text-red-800">{courierError}</p>
+                    <p className="mt-1 text-[12px] text-red-800/80">
+                      Message us and we will arrange it personally, or try a different address.
+                    </p>
+                  </div>
+                )}
+
+                <p className="mt-3 text-[12px] tracking-wide text-navy-300">
+                  Import duties and taxes, where the destination charges them, are the
+                  customer&apos;s responsibility.
+                </p>
+              </div>
+            ) : (
+              <p className="mt-3 text-[12px] tracking-wide text-navy-300">
+                {/* The policy, not this cart: the summary above already prices the
+                    address they typed. Both zones are named because "delivery
+                    RM10" beside a RM15 line is the contradiction this replaced. */}
+                {`${formatRM(pricing.westRm)} to Semenanjung, ${formatRM(pricing.eastRm)} to Sabah & Sarawak.`}
+                {pricing.freeShippingAbove > 0
+                  ? ` Free over ${formatRM(pricing.freeShippingAbove)}.`
+                  : ""}
+              </p>
+            )}
           </section>
 
           <section>
@@ -481,11 +708,20 @@ export default function CheckoutForm({
               </div>
             )}
             <div className="flex justify-between text-navy-400">
-              <dt>Shipping</dt><dd>{freeShipping ? "FREE" : formatRM(shipping)}</dd>
+              <dt>Shipping</dt>
+              <dd>
+                {shippingPending
+                  ? "Choose a courier"
+                  : freeShipping
+                    ? "FREE"
+                    : formatRM(shipping)}
+              </dd>
             </div>
             <div className="flex justify-between border-t border-navy/10 pt-3 text-[16px] text-navy">
               <dt className="font-medium">Total</dt>
-              <dd className="font-display text-xl">{formatRM(total)}</dd>
+              <dd className="font-display text-xl">
+                {shippingPending ? "—" : formatRM(total)}
+              </dd>
             </div>
           </dl>
 
