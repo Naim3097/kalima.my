@@ -64,7 +64,11 @@ export default function ProductCard({ product }: { product: Product }) {
             <span className="text-navy-400">{formatRM(product.price)}</span>
           )}
         </div>
-        <div className="flex items-center gap-1.5 pt-0.5">
+        {/* Wraps for the same reason the product page's swatches do: ten
+            colours need ~194px and a card is ~169px on a 390px phone. The grid
+            track is minmax(0,1fr) so this could never scroll the page, but the
+            swatches would spill into the card beside it. */}
+        <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
           {product.colors.map((c, i) => (
             <button
               key={c.name}

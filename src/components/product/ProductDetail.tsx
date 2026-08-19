@@ -243,7 +243,14 @@ export default function ProductDetail({ product }: { product: Product }) {
           <p className="label-caps mb-3 text-navy-400">
             Colour — <span className="text-navy">{color.name}</span>
           </p>
-          <div className="flex gap-2.5">
+          {/*
+            WRAPS, like the size row below it. A shawl comes in ten colours, and
+            ten 32px swatches plus their gaps are ~410px — wider than a phone,
+            so the whole PAGE scrolled sideways and the title, price and buttons
+            sat half off-screen. Nothing here was visibly broken on a desktop,
+            which is why it survived.
+          */}
+          <div className="flex flex-wrap gap-2.5">
             {product.colors.map((c, i) => (
               <button
                 key={c.name}
