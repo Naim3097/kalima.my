@@ -1070,6 +1070,10 @@ export type SenderSettings = {
      free_shipping_threshold_off_at_zero migration. */
   freeShippingThresholdSen: number;
   connected: boolean;
+  /* When the connection itself lapses — the refresh token's date, not the
+     ten-hour access token, which renews itself unattended. Null for a
+     connection made before we started recording it. */
+  connectionExpires: string | null;
   fallbackEnabled: boolean;
   senderName: string | null;
   senderPhone: string | null;
@@ -1083,13 +1087,14 @@ export type SenderSettings = {
 export async function getSenderSettings(): Promise<SenderSettings> {
   const { data, error } = await db()
     .from("store_settings")
-    .select("easyparcel_enabled, easyparcel_access_token, shipping_fallback_enabled, flat_shipping_sen, shipping_west_sen, shipping_east_sen, free_shipping_threshold_sen, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state")
+    .select("easyparcel_enabled, easyparcel_access_token, easyparcel_refresh_expires, shipping_fallback_enabled, flat_shipping_sen, shipping_west_sen, shipping_east_sen, free_shipping_threshold_sen, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state")
     .eq("id", 1)
     .single();
   if (error) throw new Error(`getSenderSettings failed: ${error.message}`);
   return {
     easyparcelEnabled: Boolean(data.easyparcel_enabled),
     connected: Boolean(data.easyparcel_access_token),
+    connectionExpires: (data.easyparcel_refresh_expires as string | null) ?? null,
     fallbackEnabled: Boolean(data.shipping_fallback_enabled),
     shippingWestSen: data.shipping_west_sen ?? 1000,
     shippingEastSen: data.shipping_east_sen ?? 1500,

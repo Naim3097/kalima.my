@@ -41,6 +41,11 @@ const STATES = [...new Map(
   it ends.
 */
 export function ShippingSettingsForm({ settings }: { settings: SenderSettings }) {
+  /* Days until the connection lapses; null when we have no recorded date. */
+  const connectionDaysLeft = settings.connectionExpires
+    ? Math.floor((new Date(settings.connectionExpires).getTime() - Date.now()) / 86_400_000)
+    : null;
+
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -213,9 +218,37 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
               : "Connect the store's EasyParcel account to book parcels from here."}
           </p>
         </div>
+
+        {/*
+          The one date worth watching. The ten-hour access token renews itself
+          whenever a checkout needs it and is nobody's business; this is the
+          refresh token behind it, and when it goes the connection goes with it
+          — silently, until an overseas shopper cannot be quoted. Said here so
+          that is found months early rather than by a customer.
+        */}
+        {settings.connected && (
+          <p
+            className={`mt-3 text-[13px] tracking-wide ${
+              connectionDaysLeft !== null && connectionDaysLeft <= 30 ? "text-red-700" : "text-navy-400"
+            }`}
+          >
+            {connectionDaysLeft === null
+              ? "Renews itself. This connection predates expiry tracking, so its end date is unknown — reconnecting records it."
+              : connectionDaysLeft <= 0
+                ? "This connection has lapsed. Overseas customers cannot be quoted until you reconnect."
+                : `Renews itself. Sign in again before ${new Date(settings.connectionExpires!).toLocaleDateString("en-MY", { day: "numeric", month: "long", year: "numeric" })} — ${connectionDaysLeft} days away.`}
+          </p>
+        )}
+
         <p className="mt-3 text-[12px] tracking-wide text-navy-400">
           This does not change what customers pay — that is the card above. Booking a
           courier is Kalima&apos;s own cost, paid from the EasyParcel wallet.
+        </p>
+        {/* Malaysia is never affected by any of this: its price is the zone rate
+            in the card above, which the database knows without EasyParcel. */}
+        <p className="mt-1 text-[12px] tracking-wide text-navy-400">
+          Only overseas checkout depends on this. Malaysian orders are priced by zone
+          and keep working whether or not EasyParcel is reachable.
         </p>
         </CardBody>
       </Card>
