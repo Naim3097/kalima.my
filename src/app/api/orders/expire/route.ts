@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { getCurrentUser, isStaff } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/server";
 import { expireStalePendingOrders } from "@/lib/commerce";
+import { checkConnection } from "@/lib/shipping/config";
 
 /*
   Cancels checkouts that were placed and never paid.
@@ -73,7 +75,10 @@ async function handle(request: Request) {
 
   try {
     const report = await expireStalePendingOrders(minutes);
-    return NextResponse.json({ ok: true, cutoffMinutes: minutes, ...report });
+    return NextResponse.json({
+      ok: true, cutoffMinutes: minutes, ...report,
+      shipping: await checkShipping(),
+    });
   } catch (err) {
     // A 500 is correct here — the caller is our own cron, and a failed sweep
     // should surface as a failed invocation, not a silent success.
@@ -86,3 +91,50 @@ async function handle(request: Request) {
 
 export const GET = handle; // Vercel cron issues a GET
 export const POST = handle; // admin / external scheduler may POST
+
+/*
+  Rides along on this daily tick to prove the EasyParcel connection still works.
+
+  IT IS HERE BECAUSE THERE IS NOWHERE ELSE. The Hobby plan allows two cron jobs
+  and both are spoken for, and this one runs daily at a quiet hour, which is
+  exactly the cadence the check wants — see checkConnection for why a day's gap
+  is what makes it exercise the token renewal rather than just read a valid one.
+  It is an odd lodger in an order-expiry route; a third cron slot is the tidy
+  answer if the plan ever allows one.
+
+  DELIBERATELY CANNOT FAIL THE SWEEP. The sweep is this endpoint's job and it
+  either cancelled abandoned orders or it did not; folding an unrelated
+  courier-integration fault into that verdict would make a working sweep look
+  broken, and would eventually be ignored. So the result is reported in the body
+  and, when it is bad, written to the audit trail — never thrown.
+
+  Only failures are logged. A daily "still fine" row would bury the back office
+  in three hundred and sixty-five entries a year that nobody needs to read, and
+  the one that mattered with them.
+*/
+async function checkShipping() {
+  try {
+    const result = await checkConnection();
+
+    if (result.status === "failed") {
+      console.error("[shipping] daily connection check failed:", result.detail);
+      /* Service role, actor null: nobody did this, a machine noticed it. */
+      await createAdminClient()?.from("admin_audit_log").insert({
+        actor_id: null,
+        actor_email: null,
+        action: "shipping.connection_check_failed",
+        entity_type: "settings",
+        entity_id: "shipping",
+        summary: "EasyParcel connection check failed — overseas checkout cannot quote",
+        meta: { detail: result.detail },
+      });
+    }
+
+    return result;
+  } catch (e) {
+    /* The check itself broke, which is not the sweep's problem either. */
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error("[shipping] daily connection check errored:", detail);
+    return { status: "failed" as const, detail, renewed: false };
+  }
+}

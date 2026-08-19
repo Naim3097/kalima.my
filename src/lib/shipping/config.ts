@@ -218,3 +218,77 @@ export async function getValidAccessToken(): Promise<string> {
 export async function easyparcelClient(): Promise<EasyParcelClient> {
   return new EasyParcelClient(await getValidAccessToken());
 }
+
+/*
+  Daily proof that the connection still works, run from the order-expiry cron.
+
+  WHY IT NEEDS PROVING. Renewal only happens when a checkout asks for a token,
+  so a broken renewal stays invisible until an overseas shopper meets it — and
+  since Malaysian orders never touch EasyParcel, that could be weeks. This runs
+  the same path a checkout runs, a day ahead of anyone who cares.
+
+  The daily cadence does the work for free: the access token lives about ten
+  hours, so a check twenty-four hours later almost always finds it stale and
+  performs a real refresh. That is the fragile step and the one worth
+  exercising — a check that only read a still-valid token would prove nothing.
+
+  Then one authenticated call, because a token the server accepts is the only
+  evidence that matters. The wallet is the cheapest endpoint that requires one.
+
+  NOT CONNECTED IS NOT A FAILURE. A shop that has not linked EasyParcel, or has
+  deliberately disconnected it, is in a valid state — reporting that as broken
+  would train whoever reads this to ignore it.
+*/
+export type ConnectionCheck = {
+  status: "ok" | "not-connected" | "failed";
+  detail: string;
+  /** True when this check performed a real token renewal — the fragile step. */
+  renewed: boolean;
+};
+
+export async function checkConnection(): Promise<ConnectionCheck> {
+  if (!easyparcelConfigured()) {
+    return { status: "not-connected", detail: "EasyParcel OAuth credentials are not set.", renewed: false };
+  }
+
+  const cfg = await getShippingConfig();
+  if (!cfg.enabled || !cfg.connected) {
+    return { status: "not-connected", detail: "No EasyParcel account is linked.", renewed: false };
+  }
+
+  /* Read before, compare after: the only way to know whether the renewal
+     actually ran, rather than the stored token merely still being valid. */
+  const { data: before } = await admin()
+    .from("store_settings")
+    .select("easyparcel_token_expires")
+    .eq("id", 1)
+    .single();
+
+  try {
+    const client = await easyparcelClient();
+    await client.getWalletBalanceSen();
+
+    const { data: after } = await admin()
+      .from("store_settings")
+      .select("easyparcel_token_expires, easyparcel_refresh_expires")
+      .eq("id", 1)
+      .single();
+
+    const renewed = before?.easyparcel_token_expires !== after?.easyparcel_token_expires;
+    const lapses = after?.easyparcel_refresh_expires as string | null | undefined;
+
+    return {
+      status: "ok",
+      detail: lapses
+        ? `Connection healthy; it lapses ${new Date(lapses).toISOString().slice(0, 10)}.`
+        : "Connection healthy; no lapse date recorded.",
+      renewed,
+    };
+  } catch (e) {
+    return {
+      status: "failed",
+      detail: e instanceof Error ? e.message : "Could not reach EasyParcel.",
+      renewed: false,
+    };
+  }
+}
