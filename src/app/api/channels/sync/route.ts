@@ -10,8 +10,20 @@ import { drain } from "@/lib/channels/sync";
   TWO LANES, because the work has two very different costs.
 
     FAST (default, no query string) — drain the push queue and poll each
-    connected channel for new orders. Cheap: a handful of API calls. Runs every
-    5 minutes from .github/workflows/channel-sync.yml.
+    connected channel for new orders. Cheap: a handful of API calls.
+
+    NOTHING SCHEDULES THE FAST LANE ANY MORE. It ran every 5 minutes from
+    .github/workflows/channel-sync.yml, which was deleted on 2026-08-19: the
+    account's Actions billing was locked, so every run failed in three seconds
+    and mailed a failure notice, twelve times an hour. A workflow that only
+    generates alarm is worse than no workflow.
+
+    So the fast lane is now only what the deep lane does for it once a night,
+    plus whatever staff trigger by hand from the admin screen. Stock pushes and
+    unwebhooked orders can therefore lag by up to a day. To restore it: clear
+    the Actions billing and restore that file from git history, or — on Vercel
+    Pro — add a vercel.json cron for /api/channels/sync on a five-minute
+    expression. The endpoint is identical either way.
 
     DEEP (?reconcile=1) — everything the fast lane does, plus a reconcile sweep
     that reads back each listing's quantity from the marketplace and queues a
