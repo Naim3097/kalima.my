@@ -1,3 +1,4 @@
+import { GoogleTagManager } from "@next/third-parties/google";
 import AnnouncementBar from "@/components/layout/AnnouncementBar";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
@@ -19,7 +20,30 @@ import { getAnnouncements, getSignupPromo } from "@/lib/cms";
   layout dynamic, which is the price of not showing "join us" to someone who
   already did — and it only applies when the promotion is switched on, since an
   off promo returns null before the session is ever read.
+
+  GOOGLE TAG MANAGER LIVES HERE, NOT IN THE ROOT LAYOUT. This shell wraps every
+  customer-facing route including the whole checkout funnel, so the coverage is
+  the same "every page of your website" the GTM instructions ask for — but the
+  back office is outside it. A tag manager can be given tags that read page
+  content or record sessions, and /admin renders order emails, phone numbers and
+  delivery addresses. Keeping it out is also what stops staff pageviews from
+  being counted as shoppers.
 */
+
+/* The container. A public identifier — it appears in the page source of every
+   site that uses it — so it is written here rather than kept as a secret it is
+   not. */
+const GTM_ID = "GTM-MT6TFF39";
+
+/*
+  PREVIEW DEPLOYMENTS DO NOT REPORT. staging.kalima.my runs the same code, and
+  every rehearsal, Playwright run and browser check done against it would
+  otherwise land in the shop's analytics as real shopper behaviour — quietly
+  wrong numbers being worse than none. VERCEL_ENV is set by the platform, so
+  this needs no configuration and cannot be forgotten. Locally it is undefined,
+  which also means no tag fires during development.
+*/
+const TRACKING_ON = process.env.VERCEL_ENV === "production";
 export default async function StorefrontLayout({
   children,
 }: {
@@ -33,6 +57,28 @@ export default async function StorefrontLayout({
 
   return (
     <div className="flex min-h-screen flex-col">
+      {TRACKING_ON && (
+        <>
+          <GoogleTagManager gtmId={GTM_ID} />
+          {/*
+            The no-JavaScript half of GTM's snippet, which <GoogleTagManager />
+            does not render — it only emits the two scripts. Without this a
+            visitor with JS disabled is invisible to the container. It sits at
+            the top of the shell rather than immediately after <body> because
+            <body> belongs to the root layout, which deliberately has no tag on
+            it; an iframe's position in the body does not affect whether it
+            loads.
+          */}
+          <noscript>
+            <iframe
+              src={`https://www.googletagmanager.com/ns.html?id=${GTM_ID}`}
+              height="0"
+              width="0"
+              style={{ display: "none", visibility: "hidden" }}
+            />
+          </noscript>
+        </>
+      )}
       <AnnouncementBar messages={announcements} />
       <Header />
       <main className="flex-1">{children}</main>
