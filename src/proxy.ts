@@ -172,6 +172,18 @@ async function route(request: NextRequest): Promise<NextResponse> {
   uses; a longer window would claim attribution Meta will not honour.
 */
 function attachMetaCookies(request: NextRequest, response: NextResponse): void {
+  /*
+    Only where the Conversions API can actually use them.
+
+    Gated on the dataset id rather than on VERCEL_ENV, and the difference
+    matters: staging has no credentials, so it minted two tracking cookies for
+    every visitor and never sent a byte anywhere — cookies nothing reads, on a
+    site that does not track. Keying on the same setting that decides whether
+    events are sent keeps the two in step, and means configuring staging for a
+    deliberate end-to-end test still produces a representative one.
+  */
+  if (!process.env.META_PIXEL_ID) return;
+
   const NINETY_DAYS = 60 * 60 * 24 * 90;
   const options = {
     httpOnly: false,
