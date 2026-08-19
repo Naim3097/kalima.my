@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useProducts } from "@/hooks/useCatalog";
+import { track } from "@/lib/meta/track";
 import { useUi } from "@/stores/ui";
 import { formatRM } from "@/lib/format";
 import { CloseIcon, SearchIcon } from "@/components/brand/Icons";
@@ -32,6 +33,21 @@ export default function SearchOverlay() {
   const results = query.trim()
     ? products.filter((p) => p.name.toLowerCase().includes(query.trim().toLowerCase()))
     : [];
+
+  /*
+    Search, reported once the shopper stops typing.
+
+    DEBOUNCED BECAUSE THIS FILTERS ON EVERY KEYSTROKE. Reporting per keystroke
+    would send "s", "sh", "sha", "shaw", "shawl" as five searches and make the
+    term nobody actually searched for the most common one in Events Manager.
+    A second of stillness is what separates a query from a prefix of one.
+  */
+  useEffect(() => {
+    const term = query.trim();
+    if (!searchOpen || term.length < 2) return;
+    const timer = setTimeout(() => track("Search", { searchString: term }), 1000);
+    return () => clearTimeout(timer);
+  }, [query, searchOpen]);
 
   return (
     <Dialog open={searchOpen} onOpenChange={setSearchOpen}>

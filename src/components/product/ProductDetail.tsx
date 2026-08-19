@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import {
 } from "@/data/catalog";
 import { formatRM } from "@/lib/format";
 import { useCart } from "@/stores/cart";
+import { track } from "@/lib/meta/track";
 import { useWishlist } from "@/stores/wishlist";
 import { useUi } from "@/stores/ui";
 import { useMounted } from "@/hooks/useMounted";
@@ -124,6 +125,18 @@ export default function ProductDetail({ product }: { product: Product }) {
       return next;
     });
 
+  /*
+    ViewContent. Fired from the client because the product page is statically
+    prerendered with ISR — a server-side fire would mean opting the page out of
+    static rendering, which is a real cost for an analytics event.
+
+    Keyed on the slug so a shopper moving between products reports each one, and
+    changing colour or size — which re-renders plenty — reports nothing extra.
+  */
+  useEffect(() => {
+    track("ViewContent", { items: [{ slug: product.slug, qty: 1 }] });
+  }, [product.slug]);
+
   const addToBag = () => {
     if (!size || !selectedInStock) return;
     add({
@@ -157,6 +170,20 @@ export default function ProductDetail({ product }: { product: Product }) {
         image: a.image,
       });
     }
+
+    /*
+      ONE AddToCart FOR THE WHOLE CLICK, not one per line. `add()` above runs
+      once for the piece and again for every add-on, so firing per call would
+      report a shopper who chose two matching pieces as three separate
+      add-to-carts and make the funnel look broken against ViewContent. Meta's
+      `contents` array is what carries the several lines.
+    */
+    track("AddToCart", {
+      items: [
+        { slug: product.slug, qty: 1 },
+        ...picked.map((a) => ({ slug: a.slug, qty: 1 })),
+      ],
+    });
 
     toast.success(`${product.name} added to your bag`, {
       description:

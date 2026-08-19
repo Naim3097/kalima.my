@@ -7,6 +7,7 @@ import { formatRM } from "@/lib/format";
 import { useMounted } from "@/hooks/useMounted";
 import { placeOrder, checkDiscount, quoteCart, quoteShippingOptions } from "@/app/checkout/actions";
 import { COUNTRIES, DEFAULT_COUNTRY } from "@/lib/shipping/countries";
+import { track } from "@/lib/meta/track";
 import type { CartRef, OrderQuote } from "@/lib/commerce";
 import ProductImage from "@/components/brand/ProductImage";
 import { Button } from "@/components/ui/button";
@@ -240,6 +241,27 @@ export default function CheckoutForm({
     }
     setForm((f) => ({ ...f, state: "" }));
   }, [form.country]);
+
+  /*
+    InitiateCheckout — the shopper reached this page with something in the bag.
+
+    GATED ON A NON-EMPTY BAG, and on `mounted`, because this component renders
+    for an empty one too (it shows "Your bag is empty" below). Firing on the
+    bare mount would report a checkout every time someone landed here by
+    accident, and the cart is read from localStorage so it is empty on the first
+    render regardless.
+
+    Fires once per visit, not per cart edit: adding a second piece is an
+    AddToCart, not a second checkout.
+  */
+  const reportedCheckout = useRef(false);
+  useEffect(() => {
+    if (!mounted || items.length === 0 || reportedCheckout.current) return;
+    reportedCheckout.current = true;
+    track("InitiateCheckout", {
+      items: items.map((i) => ({ slug: i.slug, qty: i.qty })),
+    });
+  }, [mounted, items]);
 
   const [quote, setQuote] = useState<OrderQuote | null>(null);
   const [quoting, setQuoting] = useState(false);

@@ -6,6 +6,7 @@ import { discountPercent, type Product } from "@/data/catalog";
 import { formatRM } from "@/lib/format";
 import { useWishlist } from "@/stores/wishlist";
 import { useMounted } from "@/hooks/useMounted";
+import { track } from "@/lib/meta/track";
 import { HeartIcon } from "./Icons";
 import ProductImage from "./ProductImage";
 
@@ -37,7 +38,16 @@ export default function ProductCard({ product }: { product: Product }) {
           </span>
         )}
         <button
-          onClick={() => toggle(product.id)}
+          onClick={() => {
+            /*
+              ONLY THE ADD HALF. This control is a toggle, so reporting on every
+              press would count a shopper who changed their mind as two
+              AddToWishlist events — and the second one for an action that
+              removed the piece. `wished` is the state BEFORE this press.
+            */
+            if (!wished) track("AddToWishlist", { items: [{ slug: product.slug, qty: 1 }] });
+            toggle(product.id);
+          }}
           aria-label={wished ? "Remove from wishlist" : "Add to wishlist"}
           className={`absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full bg-white/90 shadow-sm transition-colors cursor-pointer ${
             wished ? "text-navy" : "text-navy-400 hover:text-navy"
