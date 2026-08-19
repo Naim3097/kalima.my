@@ -19,8 +19,20 @@ import { isBrowserEvent, toMajorUnit, type CapiEvent } from "@/lib/meta/events";
   them would be a poor trade. Only money earns that; see dead-letter.ts.
 */
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://www.kalima.my";
+/*
+  The site's origin, with any trailing slash removed.
+
+  NOT COSMETIC. These values are typed into a dashboard by a person, and
+  "https://www.kalima.my/" is at least as natural to write as the bare origin.
+  Left alone it composes "https://www.kalima.my//products/serra-scallop", and
+  Meta answers a double slash by discarding the path — every event then reports
+  the homepage, which silently breaks URL-based custom audiences ("people who
+  viewed a product page") while the events themselves still say Processed.
+  Found exactly that way, in Test Events, after everything else looked right.
+*/
+const BASE_URL = (
+  process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://www.kalima.my"
+).replace(/\/+$/, "");
 
 /* Bounds on what a caller may claim. Generous for a person, tedious for a
    script — the same posture as MAX_CART_LINES in the checkout. */

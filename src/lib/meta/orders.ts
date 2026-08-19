@@ -25,8 +25,20 @@ import { ATTRIBUTED_ORDER_COLUMNS, identityFromOrder, type AttributedOrder } fro
   in placeOrder while they were actually on the line. See src/lib/meta/attribution.ts.
 */
 
-const BASE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://www.kalima.my";
+/*
+  The site's origin, with any trailing slash removed.
+
+  NOT COSMETIC. These values are typed into a dashboard by a person, and
+  "https://www.kalima.my/" is at least as natural to write as the bare origin.
+  Left alone it composes "https://www.kalima.my//products/serra-scallop", and
+  Meta answers a double slash by discarding the path — every event then reports
+  the homepage, which silently breaks URL-based custom audiences ("people who
+  viewed a product page") while the events themselves still say Processed.
+  Found exactly that way, in Test Events, after everything else looked right.
+*/
+const BASE_URL = (
+  process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_APP_URL ?? "https://www.kalima.my"
+).replace(/\/+$/, "");
 
 type OrderRow = AttributedOrder & {
   id: string;
