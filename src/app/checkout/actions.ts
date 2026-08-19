@@ -20,6 +20,7 @@ import {
 import { buildAtomeReference, configuredProviders, providerForService } from "@/lib/payments";
 import { sendOrderReceivedEmail } from "@/lib/email";
 import { allow, callerKey } from "@/lib/rate-limit";
+import { captureAttribution } from "@/lib/meta/attribution";
 import { quoteForCart } from "@/lib/shipping/rates";
 import { isKnownCountry } from "@/lib/shipping/countries";
 import { getCurrentUser } from "@/lib/auth";
@@ -353,6 +354,19 @@ export async function placeOrder(
     return { error: known.test(msg) ? msg : "Something went wrong placing your order. Please try again." };
   }
 
+  /*
+    Stamp the shopper's own request context onto the order, while we still have
+    it. Their IP, their User-Agent and the _fbp/_fbc cookies the proxy minted
+    exist only inside THIS request — the payment webhook that settles the order
+    later belongs to the gateway and carries none of them. Meta's Purchase event
+    replays what is stored here.
+
+    Post-hoc update rather than a create_order parameter, following the same
+    reasoning as the affiliate stamp above: attribution is bookkeeping layered
+    on top of the sale and must never be able to fail the sale.
+  */
+  await captureAttribution(order.order_id).catch(() => {});
+
   // Order-received email (no-op until Resend is configured).
   await sendOrderReceivedEmail(order.reference, email).catch(() => {});
 
@@ -466,6 +480,18 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
     console.error("[payments] no callback origin — NEXT_PUBLIC_SITE_URL unset in production");
     return { error: "Payment is temporarily unavailable. Please try again shortly." };
   }
+
+  /*
+    Meta's AddPaymentInfo: the shopper has chosen how to pay. Fired before the
+    bill is created rather than after, because the redirect below never returns
+    — createCheckout ends in a `redirect()` to the gateway's hosted page, and
+    anything after it does not run.
+
+    Best-effort and awaited: it writes its payload down first, so a slow Meta
+    cannot delay the shopper by more than the send's own three-second ceiling.
+  */
+  const { sendAddPaymentInfo } = await import("@/lib/meta/orders");
+  await sendAddPaymentInfo(order.id).catch(() => {});
 
   const isAtome = provider.name === "atome";
 

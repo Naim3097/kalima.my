@@ -146,7 +146,55 @@ async function route(request: NextRequest): Promise<NextResponse> {
     });
   }
 
+  attachMetaCookies(request, response);
+
   return response;
+}
+
+/*
+  Mints the two cookies Meta's Conversions API matches a shopper on.
+
+  NORMALLY THE PIXEL DOES THIS, AND THERE IS NO PIXEL. Kalima reports to Meta
+  entirely server-side, so nothing in the browser sets `_fbp` or reads `fbclid`.
+  Without these two values a server event can only be matched on hashed email
+  and phone — which means a signed-out browser is unmatchable, and a click
+  straight from an ad cannot be attributed to that ad at all. Meta's own spec
+  allows the server to set them, and this is that.
+
+  NOT httpOnly, unlike kalima_ref above. The Pixel reads `_fbp` with JavaScript;
+  if one is ever added to the GTM container and finds the cookie unreadable, it
+  will mint a second, different `_fbp`, and the browser and the server will
+  report the same person as two.
+
+  The formats are Meta's and are not ours to prettify: `fb.1.<ms>.<random>` for
+  _fbp, `fb.1.<ms>.<fbclid>` for _fbc, where 1 is the subdomain index for a
+  cookie set at the registrable domain. 90 days each, which is what the Pixel
+  uses; a longer window would claim attribution Meta will not honour.
+*/
+function attachMetaCookies(request: NextRequest, response: NextResponse): void {
+  const NINETY_DAYS = 60 * 60 * 24 * 90;
+  const options = {
+    httpOnly: false,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+    maxAge: NINETY_DAYS,
+  };
+
+  if (!request.cookies.get("_fbp")) {
+    const random = Math.floor(Math.random() * 10_000_000_000);
+    response.cookies.set("_fbp", `fb.1.${Date.now()}.${random}`, options);
+  }
+
+  /*
+    Refreshed on every arrival that carries one, not just the first. A shopper
+    who clicks a second ad should be attributed to the second ad, and Meta's
+    guidance is that the most recent click wins.
+  */
+  const fbclid = request.nextUrl.searchParams.get("fbclid");
+  if (fbclid && /^[\w.-]{1,255}$/.test(fbclid)) {
+    response.cookies.set("_fbc", `fb.1.${Date.now()}.${fbclid}`, options);
+  }
 }
 
 function redirectToLogin(request: NextRequest): NextResponse {

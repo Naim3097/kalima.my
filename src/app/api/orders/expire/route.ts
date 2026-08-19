@@ -4,6 +4,7 @@ import { getCurrentUser, isStaff } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/server";
 import { expireStalePendingOrders } from "@/lib/commerce";
 import { checkConnection } from "@/lib/shipping/config";
+import { drainDeadLetter } from "@/lib/meta/dead-letter";
 
 /*
   Cancels checkouts that were placed and never paid.
@@ -78,6 +79,7 @@ async function handle(request: Request) {
     return NextResponse.json({
       ok: true, cutoffMinutes: minutes, ...report,
       shipping: await checkShipping(),
+      capi: await retryCapi(),
     });
   } catch (err) {
     // A 500 is correct here — the caller is our own cron, and a failed sweep
@@ -136,5 +138,28 @@ async function checkShipping() {
     const detail = e instanceof Error ? e.message : String(e);
     console.error("[shipping] daily connection check errored:", detail);
     return { status: "failed" as const, detail, renewed: false };
+  }
+}
+
+/*
+  Retries conversions Meta has not acknowledged, and drops the ones that can no
+  longer be sent honestly.
+
+  A second lodger on this cron, for the same reason as the shipping check above:
+  the Hobby plan allows two jobs and both are spoken for. Daily is the floor
+  rather than the target — most failures are transient and the write-ahead means
+  the payload survives until something drains it.
+
+  Cannot fail the sweep, and cannot fail loudly either. A conversion that never
+  reaches Meta costs the shop reporting accuracy; a cancellation sweep that
+  reports failure costs it a working cron.
+*/
+async function retryCapi() {
+  try {
+    return await drainDeadLetter();
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error("[capi] dead-letter retry errored:", detail);
+    return { attempted: 0, sent: 0, expired: 0, failed: 0, error: detail };
   }
 }

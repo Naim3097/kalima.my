@@ -755,6 +755,23 @@ export async function runPaidSideEffects(order: {
   await sendPaymentConfirmedEmail(order.reference, order.email).catch(() => {});
   await sendNewOrderNotification(order.reference, order.email).catch(() => {});
   await attributeReferral(order.id).catch(() => {});
+
+  /*
+    Meta's Purchase event, and the ONLY place it fires.
+
+    It belongs here for the same reason everything else in this function does —
+    this is the paid transition, it happens once, and markOrderPaid's
+    idempotence means a redelivered webhook will not run it again. That single
+    chance is why the send writes its payload down before attempting it; see
+    src/lib/meta/dead-letter.ts.
+
+    It reads the order rather than taking anything from this function's callers,
+    because those callers do NOT share a request context: one is a gateway
+    webhook, one is the shopper's own browser hitting the return page, one is a
+    cron. See the note at the top of src/lib/meta/orders.ts.
+  */
+  const { sendPurchase } = await import("@/lib/meta/orders");
+  await sendPurchase(order.id).catch(() => {});
 }
 
 /*
