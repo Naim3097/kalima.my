@@ -3,8 +3,28 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   images: {
-    // Photoshoot imagery is served from /public today; Supabase Storage lands in Phase 2.
-    formats: ["image/avif", "image/webp"],
+    /*
+      NO VERCEL IMAGE OPTIMIZATION.
+
+      The optimizer began answering 402 OPTIMIZED_IMAGE_REQUEST_PAYMENT_REQUIRED
+      on 20 Aug 2026 — the Hobby plan's transformation quota, spent. It failed
+      in the cruellest way available: source images already transformed this
+      month kept serving from cache while any NEW upload was refused, so the
+      homepage looked perfectly fine and the checkout summary showed two broken
+      thumbnails. A shop that cannot show a shopper what they are buying at the
+      moment they pay is worse than a slow one.
+
+      So the photographs are served straight from Supabase Storage, and the
+      files there are WEBP — which is the trade this makes honest. Optimization
+      was buying format conversion and per-breakpoint resizing; we keep the
+      first by storing the converted files, and give up the second. A phone
+      therefore downloads the same file a desktop does.
+
+      `formats` is deliberately gone rather than set: it configures the
+      optimizer, and an optimizer that never runs should not appear to be
+      configured. remotePatterns stays — Next still validates src hosts.
+    */
+    unoptimized: true,
     /*
       Storage hosts allowed for next/image.
 

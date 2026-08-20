@@ -192,23 +192,39 @@ export function ImageCropper({
 
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvas is unavailable in this browser.");
-      // Flatten transparency onto white — a JPEG has no alpha to keep.
+      /* Flatten transparency onto white. WebP could carry an alpha channel,
+         but the frames these photographs sit in are opaque and a stray
+         transparent edge would show as a hole rather than as paper. */
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
 
-      // Step the quality down rather than fail the upload on an oversized file.
+      /*
+        WEBP, because nothing resizes or converts these after they leave here.
+        Vercel's image optimizer was switched off in next.config.ts when its
+        quota ran out mid-evening, so whatever this encodes is exactly what a
+        shopper downloads. The whole catalogue was converted at the same time;
+        encoding new uploads as JPEG would have quietly undone that, one
+        upload at a time.
+      */
       let blob: Blob | null = null;
       for (const quality of [0.92, 0.8, 0.65]) {
         blob = await new Promise<Blob | null>((resolve) =>
-          canvas.toBlob(resolve, "image/jpeg", quality),
+          canvas.toBlob(resolve, "image/webp", quality),
         );
         if (blob && blob.size <= MAX_OUTPUT_BYTES) break;
       }
+      /* Every browser this back office supports encodes WebP, but a canvas
+         asked for a type it does not know silently hands back a PNG — which
+         would be larger than the JPEG this replaced, not smaller. Better to
+         refuse than to quietly upload the opposite of what was asked for. */
       if (!blob) throw new Error("Could not encode the cropped image.");
+      if (blob.type !== "image/webp") {
+        throw new Error("This browser cannot save WebP images — try Chrome, Edge or Safari.");
+      }
 
-      const name = `${file.name.replace(/\.[^.]+$/, "")}.jpg`;
-      onCropped(new File([blob], name, { type: "image/jpeg" }));
+      const name = `${file.name.replace(/\.[^.]+$/, "")}.webp`;
+      onCropped(new File([blob], name, { type: "image/webp" }));
     } catch (e) {
       // Surfaced by the caller's toast; keep the dialog open so nothing is lost.
       console.error("crop failed:", e);

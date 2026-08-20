@@ -30,8 +30,16 @@ const HOST = process.env.NEXT_PUBLIC_LEGACY_IMAGE_HOST
 
 const BASE = `${HOST}/storage/v1/object/public/product-images`;
 
-/** e.g. productPhoto("ruwa-caftan", "burgundy") */
-export const productPhoto = (slug: string, colour: string) => `${BASE}/${slug}/${colour}.jpg`;
+/*
+  e.g. productPhoto("ruwa-caftan", "burgundy")
+
+  WEBP, because the bucket is WebP. The whole catalogue was converted on
+  20 Aug 2026 when Vercel's image optimizer hit its quota and started refusing
+  new transformations; with the optimizer off, the stored file is the file a
+  shopper downloads. The .jpg originals are still in the bucket beside these,
+  untouched, which is what makes that decision reversible.
+*/
+export const productPhoto = (slug: string, colour: string) => `${BASE}/${slug}/${colour}.webp`;
 
 /*
   A 4×5 solid-colour seed for next/image's blur placeholder, tinted to the

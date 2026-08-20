@@ -190,10 +190,15 @@ export function ProductImages({
       const res = await fetch(image.url);
       if (!res.ok) throw new Error(`could not be loaded (${res.status})`);
       const blob = await res.blob();
-      const base = (image.path?.split("/").pop() ?? "image").replace(/\.[^.]+$/, "");
+      /* Keep the file's real name and type. This used to relabel everything
+         .jpg, which was harmless while every stored photo was one — now that
+         the catalogue is WebP it would hand the cropper a .jpg name over WebP
+         bytes. The cropper re-encodes and renames anyway; this only has to
+         stop being a lie. */
+      const name = image.path?.split("/").pop() ?? "image";
       setRecrop({
         image,
-        file: new File([blob], `${base}.jpg`, { type: blob.type || "image/jpeg" }),
+        file: new File([blob], name, { type: blob.type || "image/jpeg" }),
       });
     } catch (e) {
       toast.error(`That image ${e instanceof Error ? e.message : "could not be loaded"}.`);
