@@ -1,5 +1,7 @@
 import "server-only";
 
+import { dialCodeFor } from "./countries";
+
 /*
   EasyParcel API client — Malaysian shipping aggregator.
 
@@ -85,10 +87,14 @@ export type QuotationOption = {
 export type BookingInput = {
   reference: string;
   serviceId: string;
-  collectionDate?: string; // YYYY-MM-DD
+  /** YYYY-MM-DD. Required by the API; defaults to today in Kuala Lumpur. */
+  collectionDate?: string;
   sender: PartyAddress;
   receiver: PartyAddress;
   totalWeightKg: number;
+  /** The same tier the rate was quoted for. Booking a different box than the
+      one priced is how a quote and an invoice drift apart. */
+  dimensions?: { width: number; height: number; length: number };
   parcelValue: number;
   content: string;
   cod?: boolean;
@@ -97,6 +103,9 @@ export type BookingInput = {
 export type PartyAddress = {
   name: string;
   phone: string;
+  /** Optional per the spec, but the tracking email feature is inert without
+      one, so booking only asks for email tracking when this is present. */
+  email?: string;
   line1: string;
   line2?: string;
   city: string;
@@ -161,6 +170,52 @@ export function formatDuration(raw: unknown): string | null {
   const value = num(d.value);
   if (value === null) return null;
   return `${value} ${unit}${value === 1 ? "" : "s"}`;
+}
+
+/*
+  A phone number as EasyParcel wants it: the dialling country and the
+  subscriber number in separate fields, the number carrying neither a trunk
+  zero nor an international prefix. Their own examples read "1126760658", not
+  "011-2676 0658" and not "+60 11-2676 0658"; shoppers type all three.
+
+  THE PREFIX IS ONLY STRIPPED FROM A NUMBER THAT ANNOUNCED ITSELF AS
+  INTERNATIONAL, with a leading + or 00. Stripping it from any number that
+  merely starts with those digits mangles the locals that legitimately do —
+  a Singapore landline is eight digits beginning 6, so "65123456" would lose
+  its first two and become someone else's number.
+
+  The country comes from the ADDRESS rather than the number. A Malaysian
+  mobile on a Singapore delivery is a data-entry mistake this cannot fix, and
+  inferring the country from the digits would turn one mistake into two.
+*/
+function phoneParts(p: PartyAddress): { code: string; number: string } {
+  const code = (p.country ?? "MY").toUpperCase();
+  const raw = (p.phone ?? "").trim();
+  const international = /^\+|^00/.test(raw);
+
+  let digits = raw.replace(/\D+/g, "");
+  if (international) {
+    if (digits.startsWith("00")) digits = digits.slice(2);
+    const dial = dialCodeFor(code);
+    if (dial && digits.startsWith(dial)) digits = digits.slice(dial.length);
+  }
+  if (digits.startsWith("0")) digits = digits.slice(1);
+
+  return { code, number: digits };
+}
+
+/*
+  Today where the parcel is actually collected. Taking the date from UTC would
+  name yesterday for every booking made before 8am Malaysian time, and a
+  collection date in the past is refused.
+*/
+function todayInMalaysia(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kuala_Lumpur",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
 }
 
 export class EasyParcelClient {
@@ -307,83 +362,197 @@ export class EasyParcelClient {
       .sort((a, b) => a.amountSen - b.amountSen);
   }
 
-  /** Books the shipment and debits the merchant wallet. */
-  async submitOrder(input: BookingInput): Promise<BookingResult> {
-    const party = (p: PartyAddress) => ({
-      name: p.name,
-      phone: p.phone,
-      address_line_1: p.line1,
-      address_line_2: p.line2 ?? "",
-      city: p.city,
-      postcode: p.postcode,
-      state: p.state,
-      country: p.country ?? "MY",
-    });
+  /*
+    Books the shipment and debits the merchant wallet.
 
-    /* PATH corrected to the spec (POST /shipment/orders). The BODY below is
-       still the one inherited from the other platform's document and has never
-       been validated against a real response — confirm it against the sandbox
-       before the first live booking. */
-    const json = await this.request<Record<string, unknown>>("/shipment/orders", {
+    WRITTEN FROM THE SPEC, NEVER YET RUN. The path, the body and the response
+    reading below all come from easyparcel/OpenAPI @ 2026-06 (the "Open API
+    Live" Postman collection and _submitorder.md), because the previous version
+    of this method was inherited from a different product's document: it posted
+    a flat object to /shipment/orders, an endpoint that does not exist. Nothing
+    broke only because no booking has ever been made. Confirm this against a
+    sandbox account before the first live one.
+
+    ONE PARCEL PER CALL. `shipment` is an array and the API will happily take
+    several, but a booking here is always one order's one box, and reading
+    data[0].shipments[0] is honest about that rather than pretending to a
+    batching this shop does not do.
+  */
+  async submitOrder(input: BookingInput): Promise<BookingResult> {
+    const party = (p: PartyAddress) => {
+      const phone = phoneParts(p);
+      return {
+        name: p.name,
+        phone_number_country_code: phone.code,
+        phone_number: phone.number,
+        ...(p.email ? { email: p.email } : {}),
+        address_1: p.line1,
+        ...(p.line2 ? { address_2: p.line2 } : {}),
+        postcode: p.postcode,
+        city: p.city,
+        subdivision_code: p.state,
+        country_code: p.country ?? "MY",
+      };
+    };
+
+    const dims = input.dimensions ?? { width: 10, height: 10, length: 10 };
+
+    const json = await this.request<Record<string, unknown>>("/shipment/submit_orders", {
       method: "POST",
       body: JSON.stringify({
-        reference: input.reference,
-        service_id: input.serviceId,
-        collection_date: input.collectionDate,
-        sender: party(input.sender),
-        receiver: party(input.receiver),
-        total_weight: input.totalWeightKg,
-        parcel_value: input.parcelValue,
-        content: input.content,
-        features: { email_tracking: true, ...(input.cod ? { cod: true } : {}) },
+        shipment: [
+          {
+            reference: input.reference,
+            service_id: input.serviceId,
+            collection_date: input.collectionDate ?? todayInMalaysia(),
+            weight: input.totalWeightKg,
+            width: dims.width,
+            height: dims.height,
+            length: dims.length,
+            /* `item` is required and describes the CONTENTS, which customs
+               reads on an international parcel. One line for the whole box:
+               the catalogue knows what is in it, but not what each piece
+               weighs once folded, and a made-up per-item split would be a
+               worse declaration than an honest single one. */
+            item: [
+              {
+                content: input.content,
+                weight: input.totalWeightKg,
+                width: dims.width,
+                height: dims.height,
+                length: dims.length,
+                currency_code: "MYR",
+                value: input.parcelValue,
+                quantity: 1,
+              },
+            ],
+            sender: party(input.sender),
+            receiver: party(input.receiver),
+            feature: {
+              email_tracking: Boolean(input.receiver.email),
+              ...(input.cod
+                ? { cod: { cod_amount: input.parcelValue, cod_currency: "MYR" } }
+                : {}),
+            },
+          },
+        ],
       }),
     });
 
-    const d = ((json?.data as Record<string, unknown>) ?? json ?? {}) as Record<string, unknown>;
-    const shipmentId = pick<string>(d, "shipment_id", "shipmentId", "order_number", "id");
-    if (!shipmentId) {
-      throw new EasyParcelError("EasyParcel returned no shipment id", undefined, json);
+    /* A 200 IS NOT A BOOKING. The response carries a per-shipment `status`,
+       and the summary message counts successes and errors together ("2
+       requests success, 0 request error"), so a refused parcel arrives inside
+       an otherwise cheerful envelope. */
+    const orders = Array.isArray(json?.data) ? (json.data as Record<string, unknown>[]) : [];
+    const booked = orders.flatMap((o) =>
+      Array.isArray(o?.shipments) ? (o.shipments as Record<string, unknown>[]) : [],
+    );
+    const first = booked[0];
+    if (!first) {
+      throw new EasyParcelError(
+        String(pick(json, "message") ?? "EasyParcel booked no shipment"),
+        undefined,
+        json,
+      );
     }
+    if (String(first.status ?? "").toLowerCase() !== "success") {
+      throw new EasyParcelError(
+        String(pick(first, "message") ?? pick(json, "message") ?? "EasyParcel refused the shipment"),
+        undefined,
+        json,
+      );
+    }
+
+    /* shipment_number, not the order number: it is what cancellation and
+       tracking are keyed on. */
+    const shipmentNumber = pick<string>(first, "shipment_number");
+    if (!shipmentNumber) {
+      throw new EasyParcelError("EasyParcel returned no shipment number", undefined, json);
+    }
+
+    const pricing = (first.pricing_breakdown ?? {}) as Record<string, unknown>;
     return {
-      shipmentId: String(shipmentId),
-      trackingNo: (pick<string>(d, "awb_number", "awb", "tracking_number", "consignment_no") ?? null) as string | null,
-      courierName: (pick<string>(d, "courier_name", "courier") ?? null) as string | null,
-      serviceName: (pick<string>(d, "service_name", "service") ?? null) as string | null,
-      priceSen: toSen(pick(d, "price", "amount", "total_price")),
+      shipmentId: String(shipmentNumber),
+      /* Null until the courier issues it — an AWB usually arrives minutes
+         later, so an empty one here is normal rather than a failure. */
+      trackingNo: (pick<string>(first, "awb_number") ?? null) as string | null,
+      courierName: (pick<string>(first, "courier") ?? null) as string | null,
+      serviceName: (pick<string>(first, "courier_service") ?? null) as string | null,
+      /* What EasyParcel actually took, features and tax included. */
+      priceSen: toSen(pick(pricing, "total_paid_amount")),
     };
   }
 
-  /* DELETE /shipment/orders/{shipment_id} — the id is in the path, not a body,
-     which is why this sends none. */
-  async cancelOrder(shipmentId: string): Promise<void> {
-    await this.request(`/shipment/orders/${encodeURIComponent(shipmentId)}`, {
-      method: "DELETE",
+  /*
+    Cancels a booked shipment.
+
+    POST with the shipment number in a `cancel_list` body — not the DELETE
+    /shipment/orders/{id} this used to send, which was another endpoint that
+    does not exist. The remark is required by the API.
+  */
+  async cancelOrder(
+    shipmentNumber: string,
+    remark = "Cancelled from the Kalima back office",
+  ): Promise<void> {
+    const json = await this.request<Record<string, unknown>>("/shipment/cancel", {
+      method: "POST",
+      body: JSON.stringify({ cancel_list: [{ shipment_number: shipmentNumber, remark }] }),
     });
+
+    /* Same trap as booking: the row carries its own status inside a 200. */
+    const results = Array.isArray(json?.data) ? (json.data as Record<string, unknown>[]) : [];
+    const first = results[0];
+    if (first && String(first.status ?? "").toLowerCase() !== "success") {
+      throw new EasyParcelError(
+        String(pick(first, "message") ?? "EasyParcel refused the cancellation"),
+        undefined,
+        json,
+      );
+    }
   }
 
-  /** Merchant wallet balance in sen — checked before booking so an empty
-      wallet produces "top up", not a raw upstream error. */
+  /*
+    Merchant wallet balance in sen — checked before booking so an empty wallet
+    produces "top up", not a raw upstream error.
+
+    GET /wallet, and the balance is data.wallet[], an ARRAY by currency. The
+    free_credit_wallet beside it is deliberately not added in: it spends under
+    rules of its own, and counting it here would clear a booking the wallet
+    cannot actually pay for.
+  */
   async getWalletBalanceSen(): Promise<number> {
-    const json = await this.request<Record<string, unknown>>("/account/wallet");
-    const d = ((json?.data as Record<string, unknown>) ?? json ?? {}) as Record<string, unknown>;
-    return toSen(pick(d, "balance", "wallet_balance", "amount"));
+    const json = await this.request<Record<string, unknown>>("/wallet");
+    const d = ((json?.data as Record<string, unknown>) ?? {}) as Record<string, unknown>;
+    const wallets = Array.isArray(d.wallet) ? (d.wallet as Record<string, unknown>[]) : [];
+    const myr = wallets.find((w) => String(w?.currency ?? "MYR").toUpperCase() === "MYR");
+    return toSen(pick(myr ?? {}, "balance"));
   }
 
+  /*
+    Tracking events for one AWB, newest first as the API returns them.
+
+    POST /shipment/tracking_status with an `awb_numbers` array — the endpoint
+    takes up to a hundred at a time, and this asks for one because the back
+    office looks at one parcel at a time.
+  */
   async getTracking(awb: string): Promise<TrackingEvent[]> {
-    /* GET /shipment/tracking with the AWB as a query parameter — it is not a
-       path segment, which is how this was previously written. */
-    const json = await this.request<Record<string, unknown>>(
-      `/shipment/tracking?awb=${encodeURIComponent(awb)}`,
-    );
-    const d = (json?.data as Record<string, unknown>) ?? {};
-    const raw = (d?.events ?? d?.tracking ?? json?.events ?? []) as unknown[];
-    return (Array.isArray(raw) ? raw : []).map((e) => {
-      const o = e as Record<string, unknown>;
-      return {
-        status: String(pick(o, "status", "current_status") ?? ""),
-        description: String(pick(o, "description", "remark", "message") ?? ""),
-        at: (pick<string>(o, "timestamp", "date", "datetime", "created_at") ?? null) as string | null,
-      };
+    const json = await this.request<Record<string, unknown>>("/shipment/tracking_status", {
+      method: "POST",
+      body: JSON.stringify({ awb_numbers: [awb] }),
     });
+
+    const d = ((json?.data as Record<string, unknown>) ?? {}) as Record<string, unknown>;
+    const results = Array.isArray(d.results) ? (d.results as Record<string, unknown>[]) : [];
+    const log = results.flatMap((r) =>
+      Array.isArray(r?.status_log) ? (r.status_log as Record<string, unknown>[]) : [],
+    );
+
+    return log.map((e) => ({
+      status: String(pick(e, "tracking_status") ?? ""),
+      /* Where it was scanned. Often null early on, which is why it is not
+         allowed to become the string "null". */
+      description: String(pick(e, "location") ?? ""),
+      at: (pick<string>(e, "event_date") ?? null) as string | null,
+    }));
   }
 }

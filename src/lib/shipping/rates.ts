@@ -59,9 +59,23 @@ export async function getRatesForOrder(reference: string): Promise<RateQuote> {
   const problem = connectionProblem(cfg);
   if (problem) return { options: [], weightGrams, unavailable: problem };
 
+  /*
+    THE DESTINATION COUNTRY IS PART OF THE ADDRESS, and leaving it out made
+    every overseas order unbookable. This read the state through stateToIso
+    unconditionally, which returns null for anything that is not a Malaysian
+    state — so a perfectly good Singapore address was refused as having "no
+    usable postcode or state", and bookShipment turns that sentence straight
+    into the error staff see. Had it got past that guard, the quotation went
+    out with no country at all and came back priced as a domestic parcel.
+
+    So: Malaysia is matched against the state list, as it must be, and
+    everywhere else sends the subdivision the shopper typed. Only the postcode
+    is genuinely required — upstream treats subdivision_code as optional.
+  */
   const addr = order.shippingAddress ?? {};
-  const receiverState = stateToIso(addr.state);
-  if (!addr.postcode || !receiverState) {
+  const country = (addr.country ?? "MY").toUpperCase();
+  const receiverState = country === "MY" ? stateToIso(addr.state) : (addr.state ?? "");
+  if (!addr.postcode || (country === "MY" && !receiverState)) {
     return {
       options: [], weightGrams,
       unavailable: "This order has no usable delivery postcode or state.",
@@ -72,10 +86,14 @@ export async function getRatesForOrder(reference: string): Promise<RateQuote> {
     const client = await easyparcelClient();
     const options = await client.getQuotations({
       receiverPostcode: addr.postcode,
-      receiverState,
+      receiverState: receiverState!,
+      receiverCountry: country,
       senderPostcode: cfg.sender.postcode!,
       senderState: stateToIso(cfg.sender.state)!,
       totalWeightKg: Math.max(weightGrams / 1000, DEFAULT_WEIGHT_KG),
+      /* The same box checkout was quoted for. Two paths pricing one parcel
+         differently is a discrepancy staff would have to explain. */
+      dimensions: parcelSizeFor(weightGrams),
       parcelValue: order.totalSen / 100,
     });
     if (!options.length) {
@@ -89,6 +107,70 @@ export async function getRatesForOrder(reference: string): Promise<RateQuote> {
       options: [], weightGrams,
       unavailable: e instanceof Error ? e.message : "Could not reach EasyParcel.",
     };
+  }
+}
+
+/*
+  ONE SENTENCE, in one place. The shopper meets it whichever way the quote
+  failed, and a wording change that reached two of the three branches would
+  read as two different problems.
+*/
+const CANNOT_QUOTE = "We can't quote delivery to that address right now.";
+
+/*
+  A failed cart quote, written where staff will actually find it.
+
+  WHY THIS EXISTS. The shopper gets CANNOT_QUOTE and a way to reach a human;
+  the real reason used to go to console.error and nowhere else, which means it
+  lived in the hosting platform's log stream and nowhere durable. On 20 Aug
+  2026 EasyParcel's Open API began answering every endpoint with HTTP 404, and
+  the only evidence anywhere in the shop was a single row the daily connection
+  check happened to write at 12:18 — every checkout that failed in between left
+  nothing behind at all. This is the trail those failures should have left.
+
+  THROTTLED to one row per fifteen minutes per distinct reason. An upstream
+  outage is one fact however many shoppers meet it, and a busy evening would
+  otherwise bury the back office in identical rows — with the one that mattered
+  buried among them. A DIFFERENT reason always writes, because a change in how
+  it is failing is the thing worth seeing.
+
+  IT CANNOT FAIL THE QUOTE. Bookkeeping about a failure must never become a
+  second failure, so every path here is swallowed. Service role with a null
+  actor, as the daily check does: nobody did this, a machine noticed it.
+*/
+const FAILURE_THROTTLE_MS = 15 * 60 * 1000;
+
+async function recordQuoteFailure(
+  detail: string,
+  context: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const db = admin();
+
+    /* Asked of THIS reason rather than of the newest row: two failure modes
+       alternating would each look new to a check that only compared against
+       whatever landed last, and would write on every attempt. */
+    const since = new Date(Date.now() - FAILURE_THROTTLE_MS).toISOString();
+    const { data: recent } = await db
+      .from("admin_audit_log")
+      .select("id")
+      .eq("action", "shipping.cart_quote_failed")
+      .eq("meta->>detail", detail)
+      .gte("created_at", since)
+      .limit(1);
+    if (recent?.length) return;
+
+    await db.from("admin_audit_log").insert({
+      actor_id: null,
+      actor_email: null,
+      action: "shipping.cart_quote_failed",
+      entity_type: "settings",
+      entity_id: "shipping",
+      summary: `Checkout could not quote delivery to ${context.country ?? "an address"} — ${detail}`,
+      meta: { detail, ...context },
+    });
+  } catch {
+    /* Deliberately ignored — see above. */
   }
 }
 
@@ -129,7 +211,13 @@ export async function quoteForCart(input: {
        and the real reason is the shop's business. They get one honest sentence
        and a way to reach a human; the detail is logged. */
     console.error("[shipping] cart quote unavailable:", problem);
-    return { unavailable: "We can't quote delivery to that address right now." };
+    await recordQuoteFailure(problem, {
+      country: input.country,
+      postcode: input.postcode,
+      subdivision: input.subdivision,
+      parcel_value_rm: input.parcelValueRm,
+    });
+    return { unavailable: CANNOT_QUOTE };
   }
 
   const weightGrams = await cartWeightGrams(input.lines);
@@ -149,8 +237,16 @@ export async function quoteForCart(input: {
       parcelValue: input.parcelValueRm,
     });
   } catch (e) {
-    console.error("[shipping] getQuotations failed:", e instanceof Error ? e.message : e);
-    return { unavailable: "We can't quote delivery to that address right now." };
+    const detail = e instanceof Error ? e.message : String(e);
+    console.error("[shipping] getQuotations failed:", detail);
+    await recordQuoteFailure(detail, {
+      country: input.country,
+      postcode: input.postcode,
+      subdivision: input.subdivision,
+      weight_grams: weightGrams,
+      parcel_value_rm: input.parcelValueRm,
+    });
+    return { unavailable: CANNOT_QUOTE };
   }
 
   if (!options.length) {
@@ -179,8 +275,17 @@ export async function quoteForCart(input: {
     },
   });
   if (error || !data) {
+    const detail = `issue_shipping_quote: ${error?.message ?? "no quote id returned"}`;
     console.error("[shipping] issue_shipping_quote failed:", error?.message);
-    return { unavailable: "We can't quote delivery to that address right now." };
+    await recordQuoteFailure(detail, {
+      country: input.country,
+      postcode: input.postcode,
+      subdivision: input.subdivision,
+      weight_grams: weightGrams,
+      parcel_value_rm: input.parcelValueRm,
+      option_count: options.length,
+    });
+    return { unavailable: CANNOT_QUOTE };
   }
 
   return { quoteId: data as string, options, weightGrams };
@@ -221,18 +326,33 @@ export function senderFrom(cfg: ShippingConfig): PartyAddress {
   };
 }
 
-/** Builds the receiver party from an order's shipping address snapshot. */
+/*
+  Builds the receiver party from an order's shipping address snapshot.
+
+  THE COUNTRY TRAVELS. It used to be left off, which let the client default it
+  to MY — booking an overseas parcel as a domestic one, at a domestic address
+  the courier could not deliver to. The snapshot has always carried it.
+
+  The subdivision follows the same rule quoting uses: an ISO code for Malaysia,
+  because that is what the state list produces and what the API documents, and
+  otherwise whatever the shopper typed. The field is optional upstream, so a
+  subdivision we cannot map is better sent as-is than blanked.
+*/
 export function receiverFrom(
   addr: Record<string, string>,
   fallbackPhone: string | null,
+  fallbackEmail?: string | null,
 ): PartyAddress {
+  const country = (addr.country ?? "MY").toUpperCase();
   return {
     name: addr.recipient ?? "Customer",
     phone: addr.phone ?? fallbackPhone ?? "",
+    email: addr.email ?? fallbackEmail ?? undefined,
     line1: addr.line1 ?? "",
     line2: addr.line2 || undefined,
     city: addr.city ?? "",
     postcode: addr.postcode ?? "",
-    state: stateToIso(addr.state) ?? "",
+    state: (country === "MY" ? stateToIso(addr.state) : addr.state) ?? "",
+    country,
   };
 }

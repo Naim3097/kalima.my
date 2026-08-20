@@ -14,38 +14,46 @@
   Malaysia is first and is the default; it is the only one priced by zone rather
   than by live rate.
 */
-export type Country = { code: string; name: string };
+/* `dial` is the international dialling prefix, no plus. EasyParcel wants the
+   dialling country and the subscriber number in separate fields at booking,
+   and a number typed as +60… has to have that prefix removed before it is
+   sent as the subscriber part. */
+export type Country = { code: string; name: string; dial: string };
 
 export const COUNTRIES: Country[] = [
-  { code: "MY", name: "Malaysia" },
-  { code: "SG", name: "Singapore" },
-  { code: "BN", name: "Brunei" },
-  { code: "ID", name: "Indonesia" },
-  { code: "TH", name: "Thailand" },
-  { code: "PH", name: "Philippines" },
-  { code: "VN", name: "Vietnam" },
-  { code: "AU", name: "Australia" },
-  { code: "NZ", name: "New Zealand" },
-  { code: "GB", name: "United Kingdom" },
-  { code: "IE", name: "Ireland" },
-  { code: "US", name: "United States" },
-  { code: "CA", name: "Canada" },
-  { code: "AE", name: "United Arab Emirates" },
-  { code: "SA", name: "Saudi Arabia" },
-  { code: "QA", name: "Qatar" },
-  { code: "KW", name: "Kuwait" },
-  { code: "BH", name: "Bahrain" },
-  { code: "OM", name: "Oman" },
-  { code: "JP", name: "Japan" },
-  { code: "KR", name: "South Korea" },
-  { code: "TW", name: "Taiwan" },
-  { code: "HK", name: "Hong Kong" },
+  { code: "MY", name: "Malaysia", dial: "60" },
+  { code: "SG", name: "Singapore", dial: "65" },
+  { code: "BN", name: "Brunei", dial: "673" },
+  { code: "ID", name: "Indonesia", dial: "62" },
+  { code: "TH", name: "Thailand", dial: "66" },
+  { code: "PH", name: "Philippines", dial: "63" },
+  { code: "VN", name: "Vietnam", dial: "84" },
+  { code: "AU", name: "Australia", dial: "61" },
+  { code: "NZ", name: "New Zealand", dial: "64" },
+  { code: "GB", name: "United Kingdom", dial: "44" },
+  { code: "IE", name: "Ireland", dial: "353" },
+  { code: "US", name: "United States", dial: "1" },
+  { code: "CA", name: "Canada", dial: "1" },
+  { code: "AE", name: "United Arab Emirates", dial: "971" },
+  { code: "SA", name: "Saudi Arabia", dial: "966" },
+  { code: "QA", name: "Qatar", dial: "974" },
+  { code: "KW", name: "Kuwait", dial: "965" },
+  { code: "BH", name: "Bahrain", dial: "973" },
+  { code: "OM", name: "Oman", dial: "968" },
+  { code: "JP", name: "Japan", dial: "81" },
+  { code: "KR", name: "South Korea", dial: "82" },
+  { code: "TW", name: "Taiwan", dial: "886" },
+  { code: "HK", name: "Hong Kong", dial: "852" },
 ];
 
 export const DEFAULT_COUNTRY = "MY";
 
 export const isKnownCountry = (code: string): boolean =>
   COUNTRIES.some((c) => c.code === code.toUpperCase());
+
+/** The dialling prefix for a country, or null when we do not ship there. */
+export const dialCodeFor = (code: string): string | null =>
+  COUNTRIES.find((c) => c.code === code.toUpperCase())?.dial ?? null;
 
 export const countryName = (code: string): string =>
   COUNTRIES.find((c) => c.code === code.toUpperCase())?.name ?? code.toUpperCase();

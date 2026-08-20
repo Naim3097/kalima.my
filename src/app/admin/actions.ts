@@ -11,6 +11,7 @@ import { getOrder } from "@/lib/admin";
 import { awardLoyaltyPoints } from "@/lib/commerce";
 import { easyparcelClient, getShippingConfig } from "@/lib/shipping/config";
 import { getRatesForOrder, receiverFrom, senderFrom } from "@/lib/shipping/rates";
+import { parcelSizeFor } from "@/lib/shipping/countries";
 import { disconnectChannel, markConnectedViaEnvironment } from "@/lib/channels/tokens";
 import { verifyMetaMessagingCredentials, verifyWhatsAppCredentials } from "@/lib/channels/meta";
 import { enqueueFullResync } from "@/lib/channels/sync";
@@ -765,8 +766,11 @@ export async function bookShipment(input: {
       serviceId: input.serviceId,
       collectionDate: input.collectionDate,
       sender: senderFrom(cfg),
-      receiver: receiverFrom(order.shippingAddress ?? {}, order.phone),
+      receiver: receiverFrom(order.shippingAddress ?? {}, order.phone, order.email),
       totalWeightKg: Math.max(weightGrams / 1000, 0.5),
+      /* The box the rate was quoted for. Booking a different one than the one
+         priced is how a quote and an invoice drift apart. */
+      dimensions: parcelSizeFor(weightGrams),
       parcelValue: order.totalSen / 100,
       content: order.items.map((i) => `${i.productName} x${i.qty}`).join(", ").slice(0, 200),
     });
