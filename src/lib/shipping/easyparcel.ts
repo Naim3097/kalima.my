@@ -149,7 +149,19 @@ function pick<T = unknown>(o: Record<string, unknown>, ...keys: string[]): T | u
   transit estimate beats a visible one made of punctuation.
 */
 export function formatDuration(raw: unknown): string | null {
-  if (typeof raw === "string") return raw.trim() || null;
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    /* The API also sends the object form AS A STRING — FedEx's transit time
+       arrives as '{"type":"days","value":"1"}' — which sailed through this
+       branch verbatim and put that punctuation on the checkout. Live proof:
+       the quote frozen at 02:33 UTC on 21 Aug stored exactly that text.
+       Anything brace-shaped is parsed and re-entered; if it will not parse,
+       it was never a transit estimate. */
+    if (text.startsWith("{")) {
+      try { return formatDuration(JSON.parse(text)); } catch { return null; }
+    }
+    return text || null;
+  }
   if (!raw || typeof raw !== "object") return null;
 
   const d = raw as Record<string, unknown>;
