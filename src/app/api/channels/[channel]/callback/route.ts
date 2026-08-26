@@ -25,10 +25,15 @@ import { CHANNEL_LABEL, isChannel, stateCookieName } from "@/lib/channels/types"
 */
 export const dynamic = "force-dynamic";
 
-function back(message: string, ok = false) {
+/* Back to the Sync page on the host the request came from — NEXT_PUBLIC_APP_URL
+   when set, otherwise the request's own origin, never a hardcoded localhost
+   (see the shipping callback for the staging bounce that motivated this). */
+function back(request: NextRequest, message: string, ok = false) {
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? "localhost:3000";
+  const proto = request.headers.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const url = new URL(
     `/admin/sync?${ok ? "connected" : "error"}=${encodeURIComponent(message)}`,
-    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+    process.env.NEXT_PUBLIC_APP_URL ?? `${proto}://${host}`,
   );
   return NextResponse.redirect(url);
 }
@@ -73,23 +78,23 @@ export async function GET(
   const a = Buffer.from(state ?? "");
   const b = Buffer.from(expected ?? "");
   if (!state || !expected || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    return back("That connection attempt could not be verified. Please try again.");
+    return back(request, "That connection attempt could not be verified. Please try again.");
   }
 
   const denied = search.get("error_description") ?? search.get("error");
-  if (denied) return back(`${label} refused the connection: ${denied}`);
+  if (denied) return back(request, `${label} refused the connection: ${denied}`);
 
   const code = search.get("code");
-  if (!code) return back(`${label} did not return an authorisation code.`);
+  if (!code) return back(request, `${label} did not return an authorisation code.`);
 
   const blocked = connectBlockedReason(channel);
-  if (blocked) return back(blocked);
+  if (blocked) return back(request, blocked);
 
   try {
     const tokens = await adapterFor(channel).exchangeCode(code);
     await storeConnection(channel, tokens, current.user.id);
   } catch (e) {
-    return back(e instanceof Error ? e.message : "Could not complete the connection.");
+    return back(request, e instanceof Error ? e.message : "Could not complete the connection.");
   }
-  return back(`${label} connected.`, true);
+  return back(request, `${label} connected.`, true);
 }

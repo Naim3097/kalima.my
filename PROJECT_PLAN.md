@@ -16,7 +16,7 @@
 > | 2 — Commerce core | ✅ **Done** — LeanX live (FPX + e-wallets) |
 > | 3 — Admin back office | ✅ **Done** |
 > | 4 — EasyParcel shipping | ✅ **Built** — awaiting API credentials to exercise live |
-> | 5 — Messaging & broadcast | 🟡 **Email done** · WhatsApp not built (Meta verification) |
+> | 5 — Messaging & broadcast | ✅ **Email and WhatsApp done** (WhatsApp needs an approved template) |
 > | 6 — Affiliate program | ✅ **Done** |
 > | 7 — Loyalty / Kalima Club | ✅ **Done** |
 > | 8 — Marketplace stock sync | 🟡 **Engine built** — Shopee/TikTok adapters await app approval |
@@ -154,7 +154,7 @@ actually landed.*
 
 | # | Client request | Feasibility | Built | Approach | Phase |
 |---|---|---|---|---|---|
-| 1 | Message / bulk message to customers | ✅ Fully feasible | 🟡 Email live; WhatsApp blocked on Meta verification | WhatsApp Business Cloud API (template broadcasts) + transactional email (Resend). Segmented audiences from our own customer DB. | 5 |
+| 1 | Message / bulk message to customers | ✅ Fully feasible | ✅ Email and WhatsApp live | WhatsApp Business Cloud API (template broadcasts) + transactional email (Resend). Segmented audiences from our own customer DB. | 5 |
 | 2 | Affiliate code | ✅ Fully feasible | ✅ Live | Native build: unique codes + referral links, click & order attribution, commission ledger, payout tracking, affiliate portal. | 6 |
 | 3 | Loyalty / membership | ✅ Fully feasible | ✅ Live | Native build: points ledger, tier system ("Kalima Club": e.g. Member/Gold/Platinum), earn on purchase, redeem at checkout, birthday rewards. | 7 |
 | 4 | Link postage to EasyParcel | ✅ Fully feasible | 🟡 Built; needs API credentials | EasyParcel Individual/Marketplace API: live rate quotes at checkout, one-click consignment booking from admin, AWB label PDF, tracking webhooks → auto customer notification. | 4 |
@@ -183,7 +183,7 @@ actually landed.*
 | Backend | **Supabase** | Postgres + Row Level Security, Auth, Storage (product images). **[changed]** No Edge Functions: all server work runs in Next route handlers and server actions on Vercel, which keeps one language and one deploy. `pg_cron` unused so far. |
 | Payments | **LeanX** — FPX + e-wallets **[changed — resolved from the Stripe/toyyibPay/Billplz open question]** | Silent Bill flow, HMAC-SHA256 webhook verification, webhook-driven confirmation. See `LEANX_SAAS_INTEGRATION_GUIDE.md`. |
 | Email | Resend (transactional + campaigns) | Order confirmations, payment receipts, marketing broadcasts. |
-| WhatsApp | Meta WhatsApp Business Cloud API | **Not built** — blocked on Meta Business verification. Campaign tables are channel-agnostic and ready for it. |
+| WhatsApp | Meta WhatsApp Business Cloud API | **Built** (20 Aug 2026) — template broadcasts off the same segment engine, phone-keyed audience, `STOP` opt-out. Needs `META_WHATSAPP_WABA_ID` and at least one Meta-approved template. |
 | Shipping | EasyParcel (OAuth) | Rates, booking, AWB, tracking webhook. **[changed]** Admin booking tool, **not** a checkout courier picker — see Phase 4. |
 | Marketplaces | Shopee Open Platform v2, TikTok Shop Open Platform | Not built (Phase 8). |
 | Hosting | Vercel + Supabase Cloud (`gylsymfonxyegdlfodvk`, Singapore) | `kalima.my` apex + `/admin` from the same app. Single Supabase project — no staging/prod split yet. |
@@ -265,8 +265,9 @@ commission, `unique(order_id)`), `affiliate_payouts`
   `src/lib/messaging/audience.ts`
 - `shipping_zones`, `shipment_tracking_events` — flat rate from settings; tracking status is a
   column, not an event log
-- `message_templates`, `message_logs` — arrive with WhatsApp; `campaign_recipients` is the
-  delivery log today
+- `message_logs` — never built; `campaign_recipients` (broadcasts) and `messages` (inbox) are the
+  delivery log. `message_templates` arrived as **`whatsapp_templates`**, a write-locked cache of
+  Meta's registry rather than a table we author into — Meta owns approval, so Meta owns the row
 - Phase 8: `channel_connections`, `channel_listings`, `channel_orders`, `sync_jobs` / `sync_logs`
 - Phase 9: `conversations`, `messages`, `inbox_assignments`
 - `content_blocks`, `store_locations` — deferred CMS passes
@@ -295,7 +296,7 @@ commission, `unique(order_id)`), `affiliate_payouts`
 > | `/admin/orders` · `/admin/products` · `/admin/customers` · `/admin/discounts` | Ops tables, product editor, ledger-backed stock, CSV import/export, LTV, discount management | ✅ live |
 > | `/admin/orders/[ref]/packing-slip` · `/admin/orders/packing-slips` | Single + bulk printable packing slips | ✅ live |
 > | `/admin/cms` · `/admin/settings` · `/admin/staff` · `/admin/audit` | Announcements/hero/pages, store + shipping + tax settings, roles, append-only audit trail | ✅ live |
-> | `/admin/campaigns` | **① Bulk messaging** — segments, composer, send, delivery report | 🟡 **email live**, WhatsApp not built |
+> | `/admin/campaigns` | **① Bulk messaging** — segments, composer, send, delivery report | ✅ **email and WhatsApp live** |
 > | `/admin/affiliates` | **② Affiliate program** — approve/suspend, rates, discount code, payouts | ✅ live |
 > | `/admin/loyalty` | **③ Loyalty** — outstanding liability, earn/redeem rules, tiers | ✅ live |
 > | `/admin/shipping` | **④ EasyParcel** — connection status, pickup address, rates, booking, AWB | ✅ built, needs credentials |
@@ -399,23 +400,48 @@ commission, `unique(order_id)`), `affiliate_payouts`
 
 **Exit criteria:** ⛔ **not yet met** — needs a real parcel booked, labelled and tracked to delivery, which requires the client's EasyParcel account. Everything up to that boundary is verified: settings save with audit entries, the webhook rejects no-secret / wrong-secret / same-length-wrong-value with 401 (constant-time compare confirmed), accepts the correct secret via header, alternate header and query fallback, and a full push sequence rewrote the AWB, ignored an unknown status and moved paid → completed on delivery.
 
+### Phase 4b — Courier choice for Malaysian orders (EasyStore-style checkout)
+**Status: 🟡 built 26 Aug 2026 — migration on staging; needs EasyParcel connected on staging to exercise, then production**
+
+> Reverses the Phase 4 scope decision at the client's request: Malaysian shoppers now pick a courier
+> at checkout from live EasyParcel **pickup** rates and pay that courier's price at cost, exactly as
+> overseas already did. The zone rate is not deleted — it is a **mode**.
+
+- [x] `store_settings.domestic_shipping_mode` = `zone` | `courier` (migration `20260826030000`). Admin › Shipping › "What customers pay" has the switch; saving `courier` is refused unless EasyParcel is connected, so a checkout can never be left unable to price itself
+- [x] `price_order` sends Malaysia through the frozen-quote path in courier mode (`shipping_by_courier` in the result); the free-shipping code and spend threshold still win. Zone mode is byte-for-byte the old behaviour. `shop_public_settings()` exposes the mode so the checkout knows whether to show the list
+- [x] Checkout: courier list appears automatically once a Malaysian postcode (5 digits) + state are filled in, debounced 600 ms, cheapest first, re-quoted on address/cart change; "Place order" is blocked until one is picked. **Pickup services only** on both the checkout and the admin picker — the shop never uses drop-off
+- [x] Admin booking picker pre-selects the service the customer paid for (chip "Customer's choice") and warns when that service is no longer offered for the parcel. Booking polls EasyParcel three times for the AWB before returning, so most bookings land with the AWB and label already
+- [x] **J&T only for Malaysia** (client decision 26 Aug): `store_settings.domestic_allowed_couriers` (migration `20260826040000`, default `{J&T}`), editable in Admin › Shipping as a comma-separated list, matched case-insensitively against courier/service names; blank = all pickup couriers. With one option the checkout pre-selects it. Overseas is not filtered. Verified on staging: Selangor address → J&T Express (Pick Up) RM6.49, auto-selected
+- [x] **Overseas limited to Ninja Van, Aramex, UPS, DHL** (client decision 26 Aug): `store_settings.international_allowed_couriers` (migration `20260826050000`), same matching and admin field as the domestic list
+- [x] One-click booking: an order with no parcel shows "Book with EasyParcel" directly; it creates the pending parcel and opens the picker (`createPendingParcel`). Services with a minimum parcel count ("DHLeC (Pick Up with min 3 parcel(s))") are filtered out — one order is one parcel
+- [x] OAuth callbacks (EasyParcel and Meta channels) redirect back to the host the request came from; the hardcoded `localhost:3000` fallback sent a successful staging connection to a dead page
+- [x] **Live on staging, 26 Aug:** EasyParcel connected; order KLM-10272-31F69A placed with live Selangor pickup rates (Pos MELPlus RM5.90 … cheapest first), Best Express RM6.53 frozen and charged; admin picker pre-selects it. **Stopped before Confirm booking** — a real booking schedules a courier pickup at the warehouse
+- [ ] ⛔ Book one real parcel end-to-end (AWB → label → tracking push → completed), then apply the migration to production **by hand** (not `db push` — see the ledger note) and flip the mode there
+- [ ] Two catalogue weights still 0 g: Tiaraa Top (all variants) and one Maya Caftan variant — they quote at the 0.5 kg default until filled in
+- [ ] Not built: shipped-notification email/WhatsApp on booking; bulk booking; per-courier hide list
+
 ---
 
 ### Phase 5 — Customer Messaging & Bulk Broadcast
-**Status: 🟡 email done · WhatsApp blocked on Meta Business verification**
+**Status: ✅ email and WhatsApp done**
 **Duration: ~1–2 weeks** — *client feature #1* · *commit `9dd4198`*
 
-> **Email works today. WhatsApp is the other half and is blocked** on the client's Meta Business
-> verification plus per-template approval — a multi-week external dependency. The `campaigns` and
-> `campaign_recipients` tables are therefore **channel-agnostic** (`campaign_channel` already
-> carries `whatsapp`), so WhatsApp slots in without reshaping anything.
+> **Both channels work.** Meta Business verification cleared on 5 August 2026 and the WhatsApp
+> broadcast arm landed on 20 August. The `campaigns` and `campaign_recipients` tables were built
+> **channel-agnostic** from the start (`campaign_channel` already carried `whatsapp`), and that paid
+> off exactly as intended — WhatsApp slotted in without reshaping either table.
+>
+> What still gates a *send* is per-template approval, which is Meta's to give and arrives per
+> template rather than once. See [INSTRUCTION.md §2.8](./INSTRUCTION.md).
 
-- [ ] **WhatsApp Business Cloud API** setup — ⛔ **client action, outstanding** (§8)
-- [ ] **Template management** — ⛔ not built (depends on the above)
+- [x] **WhatsApp Business Cloud API** setup — verification cleared 5 Aug 2026; live on the test number
+- [x] **Template management** — synced from Meta rather than authored here, because Meta owns approval. `whatsapp_templates` is a write-locked cache; **Sync templates** in `/admin/inbox` refreshes it and prunes templates deleted upstream. Media-header templates are filtered out of the picker rather than offered and rejected. ⛔ *Authoring/submission stays in Meta Business Manager, deliberately*
+- [x] **WhatsApp broadcasts** — template + positional bindings instead of a body, audience resolved by **phone** against `profiles.marketing_consent`, deduped per number. Sequential with a larger pause than the email path: tripping WhatsApp's rate limit marks the number's quality rating down, which is slow to undo
+- [x] **WhatsApp opt-out** — no unsubscribe link exists in a chat, so `STOP` / `berhenti` / `unsubscribe` is read out of the inbound webhook into `whatsapp_opt_outs`, keyed by phone because most senders have no account. Matched only as a **whole message** — *"don't stop making these in navy"* must not unsubscribe anyone. An opt-out also clears `marketing_consent`, so it stops the email list too
 - [x] **Audience segments** — ⛔ *tags dropped in favour of behavioural filters*: buyers-only, minimum lifetime spend, active-within-N-days, inactive-for-N-days. Consent status is not a filter — see PDPA below
 - [x] **Campaign composer** — subject + body, pick segment, live audience count, send
 - [x] **Send pipeline** — sends are **sequential with a pause**, not parallel: a broadcast that trips Resend's rate limit half way through is worse than a slower one. The campaign is claimed `draft → sending` before the first message so a double click cannot mail the list twice. Every message writes a `campaign_recipients` row, so the delivery report is the log rather than a guess. ⛔ *Read receipts not available on the email path*
-- [ ] **Transactional WhatsApp** — ⛔ not built
+- [ ] **Transactional WhatsApp** (order confirmations, shipping updates) — ⛔ not built. The send path exists; what is missing is the hook from order/shipment events and a template per event
 - [x] **Email campaigns** — Resend broadcast off the same segment engine, fed by the footer "Join Kalima Club" list. *This also fixed a live untruth: that form showed a success message and persisted nothing — it told people they had joined a list that did not exist.*
 - [x] **PDPA compliance** — treated as **the floor, not a filter option**. `resolveAudience` always excludes anyone without explicit consent and anyone who has unsubscribed, and there is deliberately **no switch to override it** — compliance should not be one careless checkbox away. Consent is timestamped with its source; unsubscribing is *recorded*, not deleted, so a later import cannot resurrect someone who said no. Every marketing email carries a per-subscriber random unsubscribe token (so a link cannot be forged from someone else's address) plus `List-Unsubscribe` headers. Marketing mail uses a separate shell from the transactional templates: this one must carry an unsubscribe link and a receipt must not. The subscriber table has **no read policy** for `anon` or `authenticated` — an open select would hand every customer email to a scraper
 
@@ -533,13 +559,15 @@ fail closed, and the CSV export honours the safety buffer exactly.
 **Status: 🟡 engine built and verified — channel adapters await Meta/Shopee/TikTok approval**
 **Duration: ~2–3 weeks** — *client feature #6, the client's headline priority* · scope per feasibility matrix (§3)
 
-> **Everything that does not depend on a vendor's API contract is built and live.** The schema,
-> ingestion route, reply-window enforcement, customer linking, notes, canned replies and the
-> three-pane admin all work against the real database. No channel is connected, so the honest
-> state of the screen today is an empty inbox that says which approval unlocks which channel.
+> **Everything that does not depend on a vendor's API contract is built and live — and WhatsApp,
+> Instagram and Facebook are now connected.** The schema, ingestion route, reply-window
+> enforcement, customer linking, notes, canned replies and the three-pane admin all work against
+> the real database, with live traffic on them since 5 August 2026.
 >
-> ⚠️ **None of the approvals have been applied for.** WhatsApp is the shortest path: it shares
-> the Meta Business verification Phase 5 broadcasts already need, so one application opens both.
+> ⚠️ **Shopee and TikTok remain unapplied for**, and Instagram/Facebook still need Meta App Review
+> before they can message the *public*. WhatsApp was the shortest path exactly as predicted: it
+> shared the Meta Business verification Phase 5 broadcasts already needed, and one application
+> opened both.
 >
 > "Edge Functions" below means Next route handlers (§4.1).
 
@@ -563,17 +591,38 @@ fail closed, and the CSV export honours the safety buffer exactly.
       hour ago can show an open composer for a window that has since closed. Outside it the
       free-text box is disabled and states the reason. Per-channel hours are data, not a hardcoded
       number: 24h Meta, 48h TikTok Business, none on Shopee.
+- [x] **Templates** (WhatsApp) — the other side of the same rule. Outside the window Meta accepts
+      only a pre-approved template, so the composer gains a Template tab with **no free-text box**:
+      the wording was approved as a whole and only the `{{n}}` slots are editable, with a live
+      preview that leaves an unfilled slot visibly `{{n}}` rather than blank. Approval status is
+      re-read from the cache on every send, never trusted from the client — a composer rendered ten
+      minutes ago may be offering a template Meta has since paused. Every template send is audited
+      with its name, unlike a free reply, because it is billed and policy-governed.
+      ⛔ *Media-header templates are filtered out; supplying the media needs the Storage work above.*
+- [x] **Opt-out** — `STOP`/`berhenti`/`unsubscribe` read out of the inbound webhook into
+      `whatsapp_opt_outs`, keyed by phone because most senders have no account. Whole-message match
+      only: *"don't stop making these in navy"* must not unsubscribe anyone.
+      ⛔ *A plainly-worded "please stop sending me these" is not caught and needs a human — see
+      [INSTRUCTION.md §2.9](./INSTRUCTION.md).*
 - [x] **Team features** — assignment, open/snoozed/closed, internal notes and canned replies.
       A note is a message DIRECTION, not a flag, so it cannot reach a customer through any code
       path; five starting replies are seeded and editable.
 - [ ] **Meta App Review** — ⛔ **outstanding**, for `instagram_business_manage_messages` and
       `pages_messaging` (2–4 weeks). WhatsApp does not need it and comes first.
 
-**Exit criteria:** ⛔ **not yet met** — needs a real message from a test buyer, which requires the
-approvals. Everything up to that boundary is verified: inbound recording links a customer by phone
-and by email, a redelivered message id changes nothing, an outbound reply does not extend the reply
-window, a note does not advance the thread, both webhook entry points fail closed, and the admin
-renders an open window, a closed window and a no-window channel correctly from seeded threads.
+**Exit criteria:** ✅ **met for WhatsApp** — a real message from a Malaysian phone appeared in
+`conversations` about four seconds after sending, on 5 August 2026. Still ⛔ for Shopee and TikTok,
+which need their approvals.
+
+Verified below that boundary: inbound recording links a customer by phone and by email, a
+redelivered message id changes nothing, an outbound reply does not extend the reply window, a note
+does not advance the thread, both webhook entry points fail closed, and the admin renders an open
+window, a closed window and a no-window channel correctly.
+
+⚠️ **Two links have still never been proven end to end**, and neither needs code or an approval —
+only a phone: that an admin reply *arrives*, and that an internal note *does not*. See
+[INSTRUCTION.md §2.7](./INSTRUCTION.md) steps 5–6. The second is the dangerous one: a note that
+leaks looks identical to a note that worked, until a customer replies to it.
 
 ---
 
@@ -606,7 +655,7 @@ renders an open window, a closed window and a no-window channel correctly from s
 | 2 | Commerce core | 2–3 wk | Wk 7 | ✅ done |
 | 3 | Admin dashboard | 2–3 wk | Wk 10 | ✅ done |
 | 4 | EasyParcel | 1 wk | Wk 11 | ✅ built — blocked on client credentials |
-| 5 | Messaging/broadcast | 1–2 wk | Wk 13 | 🟡 email done · WhatsApp blocked on Meta |
+| 5 | Messaging/broadcast | 1–2 wk | Wk 13 | ✅ email and WhatsApp done |
 | 6 | Affiliate | 1–2 wk | Wk 15 | ✅ done |
 | 7 | Loyalty/membership | 1–2 wk | Wk 17 | ✅ done |
 | 8 | Shopee + TikTok sync | 2–3 wk | Wk 20 | 🟡 engine built — apps still not applied for |
@@ -645,7 +694,7 @@ almost entirely waiting on the items below.
 | SSM business registration docs | Phase 2 | ✅ done | Used for gateway KYC |
 | Payment gateway account | Phase 2 | ✅ **done — LeanX live** | Resolved from the Stripe/toyyibPay/Billplz question. FPX + e-wallets working end to end. |
 | EasyParcel account + API key + credit top-up | Phase 4 | ⛔ **outstanding — highest priority** | The integration is code-complete and cannot be exercised without it. Instant-ish to obtain. |
-| Meta Business Manager (verified) + WhatsApp number | Phase 5 | ⛔ **outstanding** | Blocks the WhatsApp half of Phase 5. Verification 1–3 weeks, then per-template approval — **start now**. Number must not be attached to a personal WhatsApp. |
+| Meta Business Manager (verified) + WhatsApp number | Phase 5 | ✅ **verified 5 Aug 2026** | Live on the free test number. Remaining: add the production number (one variable — [INSTRUCTION.md §2.7a](./INSTRUCTION.md)) and get one template approved per message you want to broadcast. |
 | Shopee seller account + Open Platform app approval | Phase 8 | ⛔ **outstanding — overdue** | Was scheduled for Phase 3; approval 1–4 wks |
 | TikTok Shop seller account + Partner Center app approval | Phase 8 | ⛔ **outstanding — overdue** | Was scheduled for Phase 3; approval 1–4 wks |
 | Instagram professional account linked to Facebook Page | Phase 9 | ⛔ outstanding | Needed for IG DM + Messenger API + Meta App Review |

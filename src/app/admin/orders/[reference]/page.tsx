@@ -88,6 +88,15 @@ export default async function AdminOrderDetailPage({
         reference={order.reference}
         shipments={shipments}
         suggestedWeightGrams={weightGrams}
+        customerChoice={
+          order.shippingServiceId
+            ? {
+                serviceId: order.shippingServiceId,
+                courier: order.shippingCourier,
+                serviceName: order.shippingServiceName,
+              }
+            : null
+        }
       />
 
       <RefundPanel

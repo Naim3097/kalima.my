@@ -118,9 +118,21 @@ export type PartyAddress = {
 export type BookingResult = {
   shipmentId: string;
   trackingNo: string | null;
+  /** The AWB label PDF. Empty at booking for most couriers; arrives minutes
+      later and is fetched again through getShipmentDetails. */
+  labelUrl: string | null;
+  trackingUrl: string | null;
   courierName: string | null;
   serviceName: string | null;
   priceSen: number;
+};
+
+export type ShipmentDetails = {
+  awbNumber: string | null;
+  labelUrl: string | null;
+  trackingUrl: string | null;
+  /** EasyParcel's own wording, e.g. "Schedule In Arrangement". */
+  status: string | null;
 };
 
 export type TrackingEvent = { status: string; description: string; at: string | null };
@@ -483,15 +495,49 @@ export class EasyParcelClient {
     }
 
     const pricing = (first.pricing_breakdown ?? {}) as Record<string, unknown>;
+    /* awb_url is "" rather than null while the courier has not issued it, and
+       `pick` treats both as absent. awb_urls_by_format offers A4/A5/A6; A4 is
+       what a laser printer at the packing table wants. */
+    const labels = (first.awb_urls_by_format ?? {}) as Record<string, unknown>;
     return {
       shipmentId: String(shipmentNumber),
       /* Null until the courier issues it — an AWB usually arrives minutes
          later, so an empty one here is normal rather than a failure. */
       trackingNo: (pick<string>(first, "awb_number") ?? null) as string | null,
+      labelUrl:
+        (pick<string>(first, "awb_url") ?? pick<string>(labels, "A4", "A6", "A5") ?? null) as
+          | string
+          | null,
+      trackingUrl: (pick<string>(first, "tracking_url") ?? null) as string | null,
       courierName: (pick<string>(first, "courier") ?? null) as string | null,
       serviceName: (pick<string>(first, "courier_service") ?? null) as string | null,
       /* What EasyParcel actually took, features and tax included. */
       priceSen: toSen(pick(pricing, "total_paid_amount")),
+    };
+  }
+
+  /*
+    One shipment, as EasyParcel sees it now — the second half of AWB
+    generation. Most couriers issue the AWB minutes AFTER submit_orders
+    returns, so booking stores nulls and this call collects the number, the
+    label PDF and the tracking link once they exist.
+
+    POST /shipment/details with the ES-XXXX-XXXXX shipment number from
+    booking. The response nests them under data[0].shipment_details.
+  */
+  async getShipmentDetails(shipmentNumber: string): Promise<ShipmentDetails> {
+    const json = await this.request<Record<string, unknown>>("/shipment/details", {
+      method: "POST",
+      body: JSON.stringify({ shipment_number: shipmentNumber }),
+    });
+
+    const rows = Array.isArray(json?.data) ? (json.data as Record<string, unknown>[]) : [];
+    const details = ((rows[0]?.shipment_details ?? {}) as Record<string, unknown>);
+    return {
+      awbNumber: (pick<string>(details, "awb_number") ?? null) as string | null,
+      labelUrl: (pick<string>(details, "awb_url") ?? null) as string | null,
+      trackingUrl: (pick<string>(details, "tracking_url") ?? null) as string | null,
+      status: (pick<string>(details, "shipment_status") ?? null) as string | null,
     };
   }
 

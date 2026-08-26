@@ -239,8 +239,15 @@ export const getFirstOrderDiscountSen = cache(async (): Promise<number> => {
   standard rate.
 */
 export const getShippingPricing = cache(
-  async (): Promise<{ westRm: number; eastRm: number; freeShippingAbove: number }> => {
-    const fallback = { westRm: 10, eastRm: 15, freeShippingAbove: 0 };
+  async (): Promise<{
+    westRm: number;
+    eastRm: number;
+    freeShippingAbove: number;
+    /* True when a Malaysian address is priced by the courier the shopper
+       picks, so the form knows to show the list. False is the zone rate. */
+    domesticCourier: boolean;
+  }> => {
+    const fallback = { westRm: 10, eastRm: 15, freeShippingAbove: 0, domesticCourier: false };
 
     const supabase = createPublicClient();
     if (!supabase) return fallback;
@@ -255,11 +262,13 @@ export const getShippingPricing = cache(
       shipping_west_sen?: number;
       shipping_east_sen?: number;
       free_shipping_threshold_sen?: number;
+      domestic_shipping_mode?: string;
     };
     return {
       westRm: (s.shipping_west_sen ?? 1000) / 100,
       eastRm: (s.shipping_east_sen ?? 1500) / 100,
       freeShippingAbove: (s.free_shipping_threshold_sen ?? 0) / 100,
+      domesticCourier: s.domestic_shipping_mode === "courier",
     };
   },
 );

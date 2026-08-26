@@ -5,8 +5,10 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   bookShipment,
+  createPendingParcel,
   deleteShipment,
   fetchCourierRates,
+  refreshShipmentAwb,
   saveShipment,
   type CourierRate,
 } from "@/app/admin/actions";
@@ -46,10 +48,15 @@ export function ShipmentPanel({
   reference,
   shipments,
   suggestedWeightGrams,
+  customerChoice = null,
 }: {
   reference: string;
   shipments: Shipment[];
   suggestedWeightGrams: number;
+  /* The courier service the customer picked and paid for at checkout, when
+     delivery was priced by courier. Booking anything else is a decision, so
+     the picker defaults to it and says so. */
+  customerChoice?: { serviceId: string; courier: string | null; serviceName: string | null } | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -124,7 +131,7 @@ export function ShipmentPanel({
 
   /* ---- EasyParcel booking ---- */
 
-  function loadRates(s: Shipment) {
+  function loadRates(s: Pick<Shipment, "id">) {
     setBookingFor(s.id);
     setRates(null);
     setRatesError(null);
@@ -133,9 +140,25 @@ export function ShipmentPanel({
       if ("error" in res) setRatesError(res.error);
       else {
         setRates(res.rates);
-        // Cheapest is the usual choice, so pre-select it.
-        setChosenService(res.rates[0]?.serviceId ?? "");
+        /* The customer's paid-for service when it is still offered; otherwise
+           the cheapest, which is the usual choice. */
+        const paidFor = customerChoice && res.rates.find((r) => r.serviceId === customerChoice.serviceId);
+        setChosenService(paidFor?.serviceId ?? res.rates[0]?.serviceId ?? "");
       }
+    });
+  }
+
+  /* No parcel yet: make one and go straight to the courier picker. The row
+     appears on refresh and the picker is already open for it. */
+  function quickBook() {
+    startTransition(async () => {
+      const res = await createPendingParcel(reference);
+      if ("error" in res || !res.shipmentId) {
+        toast.error("error" in res ? res.error : "Could not prepare the parcel.");
+        return;
+      }
+      router.refresh();
+      loadRates({ id: res.shipmentId });
     });
   }
 
@@ -145,9 +168,25 @@ export function ShipmentPanel({
       const res = await bookShipment({ reference, shipmentId, serviceId: chosenService });
       if ("error" in res) toast.error(res.error);
       else {
-        toast.success(res.trackingNo ? `Booked — AWB ${res.trackingNo}` : "Parcel booked.");
+        toast.success(
+          res.trackingNo
+            ? `Booked — AWB ${res.trackingNo}`
+            : "Parcel booked. The courier issues the AWB in a few minutes — fetch it below.",
+        );
         setBookingFor(null);
         setRates(null);
+        router.refresh();
+      }
+    });
+  }
+
+  /* The courier issues the AWB shortly after booking; this pulls it in. */
+  function fetchAwb(s: Shipment) {
+    startTransition(async () => {
+      const res = await refreshShipmentAwb({ reference, shipmentId: s.id });
+      if ("error" in res) toast.error(res.error);
+      else {
+        toast.success(res.trackingNo ? `AWB ${res.trackingNo} is ready.` : "AWB updated.");
         router.refresh();
       }
     });
@@ -169,9 +208,19 @@ export function ShipmentPanel({
       {shipments.length === 0 && !open && (
         <CardBody>
           <p className="text-[13px] tracking-wide text-navy-400">
-            No parcel recorded yet. Add one with its consignment number and the customer
-            gets a tracking link on their order.
+            No parcel recorded yet.
+            {customerChoice?.courier
+              ? ` The customer chose and paid for ${customerChoice.courier} at checkout.`
+              : ""}
           </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button type="button" variant="kalima" size="editorial" disabled={pending} onClick={quickBook}>
+              {pending ? "Preparing…" : "Book with EasyParcel"}
+            </Button>
+            <span className="text-[12px] tracking-wide text-navy-400">
+              or use Add parcel to record one sent by hand with its consignment number.
+            </span>
+          </div>
         </CardBody>
       )}
 
@@ -209,9 +258,23 @@ export function ShipmentPanel({
                         rel="noopener noreferrer"
                         className="label-caps text-[11px] text-navy-400 hover:text-navy"
                       >
-                        Label ↗
+                        AWB ↗
                       </a>
                     )}
+                    {/* Booked with EasyParcel but the courier has not issued the
+                        label yet — usually a minute or two after booking. */}
+                    {s.provider === "easyparcel" &&
+                      !s.labelUrl &&
+                      ["booked", "in_transit"].includes(s.status) && (
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={() => fetchAwb(s)}
+                          className="label-caps text-[11px] text-navy-400 hover:text-navy"
+                        >
+                          Fetch AWB
+                        </button>
+                      )}
                     <button
                       type="button"
                       onClick={() => startEdit(s)}
@@ -266,6 +329,13 @@ export function ShipmentPanel({
                       <div className="space-y-3">
                         <p className="text-[11px] tracking-wide text-navy-400">
                           Kalima&apos;s cost, charged to the EasyParcel wallet — cheapest first.
+                          {customerChoice && !rates.some((r) => r.serviceId === customerChoice.serviceId) && (
+                            <span className="block text-amber-800">
+                              The customer paid for {customerChoice.courier ?? "a courier"}
+                              {customerChoice.serviceName ? ` (${customerChoice.serviceName})` : ""}, which is
+                              not offered for this parcel right now.
+                            </span>
+                          )}
                         </p>
                         <ul className="space-y-1.5">
                           {rates.map((r) => (
@@ -281,6 +351,9 @@ export function ShipmentPanel({
                                   />
                                   <span>{r.courierName}</span>
                                   <span className="text-navy-400">{r.serviceName}</span>
+                                  {customerChoice?.serviceId === r.serviceId && (
+                                    <Chip className="bg-emerald-100 text-emerald-900">Customer&apos;s choice</Chip>
+                                  )}
                                 </span>
                                 <span className="tabular-nums">{formatRM(r.amountSen / 100)}</span>
                               </label>

@@ -10,12 +10,13 @@ import { parseCsvRecords } from "@/lib/csv";
 import { getOrder } from "@/lib/admin";
 import { awardLoyaltyPoints } from "@/lib/commerce";
 import { easyparcelClient, getShippingConfig } from "@/lib/shipping/config";
-import { getRatesForOrder, receiverFrom, senderFrom } from "@/lib/shipping/rates";
+import { connectionProblem, getRatesForOrder, receiverFrom, senderFrom } from "@/lib/shipping/rates";
 import { parcelSizeFor } from "@/lib/shipping/countries";
 import { disconnectChannel, markConnectedViaEnvironment } from "@/lib/channels/tokens";
 import { verifyMetaMessagingCredentials, verifyWhatsAppCredentials } from "@/lib/channels/meta";
 import { enqueueFullResync } from "@/lib/channels/sync";
-import { addNote, sendReply } from "@/lib/channels/inbox";
+import { addNote, sendReply, sendTemplateMessage } from "@/lib/channels/inbox";
+import type { TemplateBinding } from "@/lib/messaging/whatsapp";
 import {
   CHANNEL_LABEL,
   channelDoes,
@@ -271,6 +272,13 @@ export async function saveShippingPricing(input: {
   shippingWestSen: number;
   shippingEastSen: number;
   freeShippingThresholdSen: number;
+  /* 'courier' shows Malaysian shoppers live EasyParcel pickup rates and
+     charges the one they pick; 'zone' charges the two rates above. */
+  domesticMode: "zone" | "courier";
+  /* Comma-separated courier names offered to Malaysian shoppers; blank = all. */
+  domesticAllowedCouriers: string;
+  /* Same for overseas shoppers; blank = all. */
+  internationalAllowedCouriers: string;
 }): Promise<ActionResult> {
   let db;
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
@@ -278,6 +286,18 @@ export async function saveShippingPricing(input: {
   const west = Math.round(Number(input.shippingWestSen));
   const east = Math.round(Number(input.shippingEastSen));
   const threshold = Math.round(Number(input.freeShippingThresholdSen));
+  const mode = input.domesticMode === "courier" ? "courier" : "zone";
+  const parseList = (raw: string) => raw.split(",").map((s) => s.trim()).filter(Boolean).slice(0, 20);
+  const allowed = parseList(input.domesticAllowedCouriers);
+  const allowedIntl = parseList(input.internationalAllowedCouriers);
+
+  /* Courier mode with nothing to quote from would leave every Malaysian
+     checkout unable to price itself. Refuse the switch rather than the sale. */
+  if (mode === "courier") {
+    const cfg = await getShippingConfig();
+    const problem = connectionProblem(cfg);
+    if (problem) return { error: `Courier pricing needs EasyParcel: ${problem}` };
+  }
 
   if (!Number.isFinite(west) || west < 0) return { error: "Enter a Semenanjung rate of RM0 or more." };
   if (!Number.isFinite(east) || east < 0) return { error: "Enter a Sabah & Sarawak rate of RM0 or more." };
@@ -292,16 +312,26 @@ export async function saveShippingPricing(input: {
        stale column is a trap for whoever reads this table next. */
     flat_shipping_sen: west,
     free_shipping_threshold_sen: threshold,
+    domestic_shipping_mode: mode,
+    domestic_allowed_couriers: allowed,
+    international_allowed_couriers: allowedIntl,
   }).eq("id", 1);
   if (error) return { error: error.message };
 
   await logAudit(db, {
     action: "shipping.pricing_updated", entityType: "settings", entityId: "shipping",
     summary:
-      `Shipping — Semenanjung RM${(west / 100).toFixed(2)}, ` +
-      `Sabah & Sarawak RM${(east / 100).toFixed(2)}` +
+      (mode === "courier"
+        ? `Shipping — Malaysia pays the courier the customer picks` +
+          (allowed.length ? ` (${allowed.join(", ")} only)` : "")
+        : `Shipping — Semenanjung RM${(west / 100).toFixed(2)}, ` +
+          `Sabah & Sarawak RM${(east / 100).toFixed(2)}`) +
       (threshold > 0 ? `, free above RM${(threshold / 100).toFixed(2)}` : ""),
-    meta: { shippingWestSen: west, shippingEastSen: east, freeShippingThresholdSen: threshold },
+    meta: {
+      shippingWestSen: west, shippingEastSen: east,
+      freeShippingThresholdSen: threshold, domesticMode: mode,
+      domesticAllowedCouriers: allowed, internationalAllowedCouriers: allowedIntl,
+    },
   });
 
   revalidatePath("/admin/shipping");
@@ -523,19 +553,84 @@ export async function previewAudience(
 
 export async function saveCampaign(input: {
   id?: string; name: string; subject: string; body: string; segment: SegmentInput;
+  /* Defaulted, so every existing caller keeps meaning "email" without change. */
+  channel?: "email" | "whatsapp";
+  templateName?: string;
+  templateLanguage?: string;
+  templateVariables?: TemplateBinding[];
 }): Promise<ActionResult & { id?: string }> {
   let db;
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
 
   if (!input.name.trim()) return { error: "Give the campaign a name." };
-  if (!input.body.trim()) return { error: "The message body can't be empty." };
+
+  const channel = input.channel ?? "email";
+
+  /*
+    The two channels validate differently because they ARE different.
+
+    An email campaign is text we wrote and can check. A WhatsApp campaign is a
+    reference to text Meta approved — there is no body to validate, and
+    demanding one would mean staff typing a message that is never sent, which is
+    worse than no field at all. What must be checked instead is that the
+    template exists, is still approved, and takes exactly as many values as the
+    campaign binds.
+  */
+  if (channel === "email" && !input.body.trim()) {
+    return { error: "The message body can't be empty." };
+  }
+
+  let templateName: string | null = null;
+  let templateLanguage: string | null = null;
+  let templateVariables: TemplateBinding[] = [];
+
+  if (channel === "whatsapp") {
+    if (!input.templateName || !input.templateLanguage) {
+      return { error: "Choose an approved template for a WhatsApp broadcast." };
+    }
+
+    const { getTemplate } = await import("@/lib/channels/whatsapp-templates");
+    const template = await getTemplate(input.templateName, input.templateLanguage);
+    if (!template) {
+      return { error: "That template is not in the synced list. Press Sync templates and try again." };
+    }
+    if (template.status !== "APPROVED") {
+      return { error: `Meta has this template as ${template.status}, not APPROVED.` };
+    }
+
+    templateVariables = input.templateVariables ?? [];
+    if (templateVariables.length !== template.bodyVariables) {
+      return {
+        error: `This template takes ${template.bodyVariables} value${
+          template.bodyVariables === 1 ? "" : "s"
+        }, and ${templateVariables.length} ${
+          templateVariables.length === 1 ? "was" : "were"
+        } supplied.`,
+      };
+    }
+    if (
+      templateVariables.some(
+        (b) => b.source === "literal" && !b.value.trim(),
+      )
+    ) {
+      return { error: "A fixed value in the template is blank." };
+    }
+
+    templateName = template.name;
+    templateLanguage = template.language;
+  }
 
   const row = {
     name: input.name.trim(),
     subject: input.subject.trim() || input.name.trim(),
-    body: input.body,
+    /* NOT NULL on the column, and unused on WhatsApp. The campaign name is the
+       honest filler: it is what the admin list already shows for this row. */
+    body: channel === "whatsapp" ? (input.body || input.name.trim()) : input.body,
     segment: input.segment,
-    channel: "email" as const,
+    channel,
+    template_name: templateName,
+    template_language: templateLanguage,
+    template_variables: templateVariables,
   };
 
   const { data, error } = input.id
@@ -566,8 +661,23 @@ export async function sendCampaignNow(
   let db;
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
 
-  const { sendCampaign } = await import("@/lib/messaging/send");
-  const result = await sendCampaign(campaignId);
+  /*
+    Which pipeline runs is decided by the ROW, not by the caller. A client that
+    could name the channel could ask for the email pipeline on a WhatsApp
+    campaign, which would resolve an email audience and mail people who were
+    never in this broadcast's audience at all.
+  */
+  const { data: row } = await db
+    .from("campaigns")
+    .select("channel")
+    .eq("id", campaignId)
+    .maybeSingle();
+  if (!row) return { error: "That campaign no longer exists." };
+
+  const result =
+    row.channel === "whatsapp"
+      ? await (await import("@/lib/messaging/whatsapp")).sendWhatsAppCampaign(campaignId)
+      : await (await import("@/lib/messaging/send")).sendCampaign(campaignId);
   if ("error" in result) return { error: result.error };
 
   await logAudit(db, {
@@ -666,6 +776,53 @@ export async function saveShipment(input: {
   revalidatePath(`/admin/orders/${input.reference}`);
   revalidatePath("/account");
   return { ok: true };
+}
+
+/*
+  A pending parcel for an order that has none, so booking is one click.
+
+  Booking through EasyParcel needs a `pending` shipment row to claim; the
+  general Add-parcel form defaults to `booked` because it exists for parcels
+  dropped at a counter with a consignment number in hand. Making staff open
+  that form, flip the status and save before they could even see the rates
+  was three steps too many for the common case — and the customer has often
+  already chosen and paid for the courier.
+*/
+export async function createPendingParcel(
+  reference: string,
+): Promise<ActionResult & { shipmentId?: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: order, error: readErr } = await db
+    .from("orders").select("id").eq("reference", reference).maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!order) return { error: "Order not found." };
+
+  const { getOrderWeightGrams } = await import("@/lib/admin");
+  const weightGrams = await getOrderWeightGrams(reference);
+
+  const { data: row, error } = await db
+    .from("shipments")
+    .insert({
+      order_id: order.id as string,
+      provider: "manual",
+      status: "pending",
+      weight_grams: weightGrams,
+      cost_sen: 0,
+    })
+    .select("id")
+    .single();
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "shipment.created", entityType: "order", entityId: reference,
+    summary: `Parcel prepared for EasyParcel booking on ${reference} (pending)`,
+    meta: { shipmentId: row.id, weightGrams },
+  });
+
+  revalidatePath(`/admin/orders/${reference}`);
+  return { ok: true, shipmentId: row.id as string };
 }
 
 export type CourierRate = {
@@ -775,11 +932,34 @@ export async function bookShipment(input: {
       content: order.items.map((i) => `${i.productName} x${i.qty}`).join(", ").slice(0, 200),
     });
 
+    /*
+      Most couriers issue the AWB a few seconds after submit_orders returns,
+      so a short wait here turns "booked, fetch the AWB later" into "booked —
+      AWB xxx" for the common case. Three polls, four seconds apart, then give
+      up quietly: the Fetch AWB button and the webhook cover the slow ones.
+    */
+    let trackingNo = result.trackingNo;
+    let trackingUrl = result.trackingUrl;
+    let labelUrl = result.labelUrl;
+    for (let attempt = 0; attempt < 3 && !(trackingNo && labelUrl); attempt++) {
+      await new Promise((r) => setTimeout(r, 4000));
+      try {
+        const details = await client.getShipmentDetails(result.shipmentId);
+        trackingNo = details.awbNumber ?? trackingNo;
+        trackingUrl = details.trackingUrl ?? trackingUrl;
+        labelUrl = details.labelUrl ?? labelUrl;
+      } catch {
+        /* A read that fails must not undo a booking that succeeded. */
+      }
+    }
+
     await db.from("shipments").update({
       provider: "easyparcel",
       provider_ref: result.shipmentId,
       courier: result.courierName ?? chosen.courierName,
-      tracking_no: result.trackingNo,
+      tracking_no: trackingNo,
+      tracking_url: trackingUrl,
+      label_url: labelUrl,
       cost_sen: result.priceSen || chosen.amountSen,
       weight_grams: weightGrams,
       status: "booked",
@@ -796,7 +976,7 @@ export async function bookShipment(input: {
       entityId: input.reference,
       summary:
         `Booked ${result.courierName ?? chosen.courierName} for ${input.reference}` +
-        `${result.trackingNo ? ` — AWB ${result.trackingNo}` : ""}` +
+        `${trackingNo ? ` — AWB ${trackingNo}` : ""}` +
         ` (${((result.priceSen || chosen.amountSen) / 100).toFixed(2)} MYR)`,
       meta: { shipmentId: result.shipmentId, serviceId: input.serviceId, costSen: result.priceSen },
     });
@@ -804,11 +984,80 @@ export async function bookShipment(input: {
     revalidatePath(`/admin/orders/${input.reference}`);
     revalidatePath("/admin/orders");
     revalidatePath("/account");
-    return { ok: true, trackingNo: result.trackingNo ?? undefined };
+    return { ok: true, trackingNo: trackingNo ?? undefined };
   } catch (e) {
     return await release(
       e instanceof Error ? e.message : "EasyParcel booking failed — the parcel was not booked.",
     );
+  }
+}
+
+/*
+  Fetches the AWB for a parcel already booked with EasyParcel.
+
+  submit_orders returns before most couriers have issued the airway bill, so a
+  fresh booking often has no AWB number and no label. EasyStore hides this
+  behind its "generate AWB" button; this is the same move — ask EasyParcel for
+  the shipment's current details and keep whatever has been issued since.
+
+  Free and idempotent: it reads state, spends nothing, and can be clicked
+  again until the label appears. The AWB-update webhook writes the same
+  columns unprompted; this button exists for the packing desk that will not
+  wait for a push.
+*/
+export async function refreshShipmentAwb(input: {
+  reference: string;
+  shipmentId: string;
+}): Promise<ActionResult & { trackingNo?: string; labelUrl?: string }> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: shipment, error: readErr } = await db
+    .from("shipments")
+    .select("id, provider, provider_ref, tracking_no, label_url")
+    .eq("id", input.shipmentId)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!shipment) return { error: "Shipment not found." };
+  if (shipment.provider !== "easyparcel" || !shipment.provider_ref) {
+    return { error: "This parcel was not booked through EasyParcel." };
+  }
+
+  try {
+    const client = await easyparcelClient();
+    const details = await client.getShipmentDetails(shipment.provider_ref as string);
+
+    if (!details.awbNumber && !details.labelUrl) {
+      return { error: "EasyParcel has not issued the AWB yet — try again in a minute." };
+    }
+
+    /* Only write what was issued; never blank a column the courier filled
+       earlier because a later read came back thinner. */
+    const patch: Record<string, unknown> = {};
+    if (details.awbNumber) patch.tracking_no = details.awbNumber;
+    if (details.labelUrl) patch.label_url = details.labelUrl;
+    if (details.trackingUrl) patch.tracking_url = details.trackingUrl;
+    const { error } = await db.from("shipments").update(patch).eq("id", input.shipmentId);
+    if (error) return { error: error.message };
+
+    await logAudit(db, {
+      action: "shipment.awb_fetched",
+      entityType: "order",
+      entityId: input.reference,
+      summary: `AWB fetched for ${input.reference}` +
+        `${details.awbNumber ? ` — ${details.awbNumber}` : ""}`,
+      meta: { shipmentId: input.shipmentId, providerRef: shipment.provider_ref },
+    });
+
+    revalidatePath(`/admin/orders/${input.reference}`);
+    revalidatePath("/account");
+    return {
+      ok: true,
+      trackingNo: details.awbNumber ?? undefined,
+      labelUrl: details.labelUrl ?? undefined,
+    };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not reach EasyParcel." };
   }
 }
 
@@ -3038,6 +3287,124 @@ export async function addInboxNote(
 
   revalidatePath("/admin/inbox");
   return { ok: true };
+}
+
+/*
+  Sends an approved WhatsApp template into a conversation.
+
+  A separate action from sendInboxReply rather than a mode flag on it, because
+  the two are different acts with different consequences: a reply is free and
+  only possible inside the window, a template is billed by Meta, is governed by
+  per-category messaging policy, and works when the window is shut. Collapsing
+  them into one endpoint with a branch would mean a client that could send a
+  template by omitting a field.
+
+  Policy — approval status, variable counts, which channel — lives in
+  lib/channels/inbox.ts, next to the free-text rules it has to stay consistent
+  with. This layer does authorisation, audit and revalidation.
+*/
+export async function sendInboxTemplate(input: {
+  conversationId: string;
+  templateName: string;
+  templateLanguage: string;
+  variables: string[];
+  headerVariables?: string[];
+}): Promise<ActionResult> {
+  let db;
+  let current;
+  try {
+    db = await assertStaff();
+    current = await getCurrentUser();
+  } catch {
+    return { error: "Not authorized." };
+  }
+  if (!current) return { error: "Not authorized." };
+
+  const res = await sendTemplateMessage({ ...input, staffId: current.user.id });
+  if ("error" in res) return { error: res.error };
+
+  /*
+    Audited, unlike a free-text reply. A template send is a billable, policy
+    governed message to someone who may not have written to us in days — when a
+    customer asks why they received it, this row is the answer.
+  */
+  await logAudit(db, {
+    action: "inbox.template_sent",
+    entityType: "conversation",
+    entityId: input.conversationId,
+    summary: `Template "${input.templateName}" sent`,
+    meta: { template: input.templateName, language: input.templateLanguage },
+  });
+
+  revalidatePath("/admin/inbox");
+  return { ok: true };
+}
+
+/*
+  Pulls Meta's template registry into the local cache.
+
+  Manual rather than scheduled, deliberately: approval takes minutes to days and
+  arrives without warning, so the useful moment to refresh is when someone is
+  looking at the screen wondering whether it came through. A cron would either
+  poll constantly or still be stale exactly when it mattered.
+*/
+export async function syncWhatsAppTemplatesNow(): Promise<
+  ActionResult & { report?: { total: number; approved: number; removed: number } }
+> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { syncWhatsAppTemplates, templatesBlockedReason } = await import(
+    "@/lib/channels/whatsapp-templates"
+  );
+
+  const blocked = templatesBlockedReason();
+  if (blocked) return { error: blocked };
+
+  try {
+    const report = await syncWhatsAppTemplates();
+    await logAudit(db, {
+      action: "whatsapp.templates_synced",
+      entityType: "channel",
+      entityId: "whatsapp",
+      summary: `${report.total} template${report.total === 1 ? "" : "s"} synced, ${report.approved} approved${
+        report.removed ? `, ${report.removed} removed` : ""
+      }`,
+      meta: { ...report },
+    });
+    revalidatePath("/admin/inbox");
+    revalidatePath("/admin/campaigns");
+    return { ok: true, report };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not sync templates." };
+  }
+}
+
+/*
+  WhatsApp audience size and a rendered sample, for the broadcast composer.
+
+  The twin of previewAudience, and separate for the same reason the pipelines
+  are: it counts a different population by a different key, and it renders the
+  template rather than a body we hold.
+*/
+export async function previewWhatsAppBroadcast(input: {
+  templateName: string;
+  templateLanguage: string;
+  bindings: TemplateBinding[];
+  segment: SegmentInput;
+}): Promise<{ count: number; samples: { phone: string; body: string }[] } | { error: string }> {
+  try { await assertStaff(); } catch { return { error: "Not authorized." }; }
+  try {
+    const { previewWhatsAppCampaign } = await import("@/lib/messaging/whatsapp");
+    return await previewWhatsAppCampaign({
+      templateName: input.templateName,
+      templateLanguage: input.templateLanguage,
+      bindings: input.bindings,
+      segment: input.segment,
+    });
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Could not preview the broadcast." };
+  }
 }
 
 /*

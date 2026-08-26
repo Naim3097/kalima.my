@@ -22,6 +22,7 @@ import { sendOrderReceivedEmail } from "@/lib/email";
 import { allow, callerKey } from "@/lib/rate-limit";
 import { captureAttribution } from "@/lib/meta/attribution";
 import { quoteForCart } from "@/lib/shipping/rates";
+import { getShippingConfig } from "@/lib/shipping/config";
 import { isKnownCountry } from "@/lib/shipping/countries";
 import { getCurrentUser } from "@/lib/auth";
 
@@ -120,9 +121,9 @@ export async function quoteCart(
   Returns a quote id and a list. NOT a price the caller can quote back — the
   amounts are frozen server-side and read from there when the order is priced.
 
-  Malaysia is refused outright rather than quoted: its price is a zone rate, and
-  producing a courier list for it would offer a choice the checkout does not
-  honour.
+  Malaysia is quoted only when the shop is in 'courier' mode. In 'zone' mode
+  its price is a flat rate, and producing a courier list would offer a choice
+  the checkout does not honour — so it is refused rather than quoted.
 */
 export async function quoteShippingOptions(
   cart: CartRef[],
@@ -137,9 +138,16 @@ export async function quoteShippingOptions(
   if (cart.length === 0) return { error: "Your bag is empty." };
   if (cart.length > MAX_CART_LINES) return { error: "That bag is too large." };
 
-  const country = address.country.trim().toUpperCase();
-  if (!country || country === "MY") {
-    return { error: "Malaysian delivery is charged at a flat rate — no courier to choose." };
+  const country = (address.country.trim() || "MY").toUpperCase();
+  if (country === "MY") {
+    const cfg = await getShippingConfig();
+    if (cfg.domesticMode !== "courier") {
+      return { error: "Malaysian delivery is charged at a flat rate — no courier to choose." };
+    }
+    if (!/^\d{5}$/.test(address.postcode.trim())) {
+      return { error: "Enter a valid 5-digit postcode to quote delivery." };
+    }
+    if (!MY_STATES.has(address.state)) return { error: "Please choose a state." };
   }
   if (!isKnownCountry(country)) return { error: "We do not ship to that country yet." };
   if (!address.postcode.trim()) return { error: "A postcode is needed to quote delivery." };
@@ -284,9 +292,12 @@ export async function placeOrder(
   if (overseas && !form.state.trim()) {
     return { error: "Enter the state, province or region." };
   }
-  /* create_order refuses an overseas order with no quote anyway; this says so
-     in words a shopper can act on instead of surfacing a raised exception. */
-  if (overseas && (!form.quoteId || !form.serviceId)) {
+  /* create_order refuses a courier-priced order with no quote anyway; this
+     says so in words a shopper can act on instead of surfacing a raised
+     exception. Overseas is always courier-priced; Malaysia is in 'courier'
+     mode. */
+  const byCourier = overseas || (await getShippingConfig()).domesticMode === "courier";
+  if (byCourier && (!form.quoteId || !form.serviceId)) {
     return { error: "Choose a delivery service before placing your order." };
   }
 

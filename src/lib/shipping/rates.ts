@@ -25,6 +25,38 @@ import type { PartyAddress, QuotationOption } from "./easyparcel";
   here just help whoever is packing choose between couriers.
 */
 
+/*
+  Which quoted services the shop actually offers.
+
+  PICKUP ONLY: EasyParcel quotes most couriers twice — collected from the
+  sender's door, or dropped at a counter — and the shop only ever hands parcels
+  to a collecting courier. And ONE PARCEL: some pickup services carry a
+  minimum ("DHLeC (Pick Up with min 3 parcel(s))") that a single order cannot
+  meet; the API states that only in the service name, so it is read from there.
+  Booking one would be refused or surcharged after the customer had paid.
+*/
+function offeredForOneParcel(o: QuotationOption): boolean {
+  return o.isPickup && !/\bmin\s*\d+\s*parcel/i.test(o.serviceName);
+}
+
+/*
+  The courier allowlist from settings — one list for Malaysia, another for
+  everywhere else, because the two are different sets of couriers.
+
+  A match on either the courier name or the service name, case-insensitive,
+  so the setting can say "J&T" or "Ninja" rather than the registered company
+  name. An empty list offers everything that survived offeredForOneParcel.
+*/
+function allowedForDestination(cfg: ShippingConfig, country: string) {
+  const list = country === "MY" ? cfg.domesticAllowedCouriers : cfg.internationalAllowedCouriers;
+  const wanted = list.map((w) => w.toLowerCase());
+  if (wanted.length === 0) return () => true;
+  return (o: QuotationOption) => {
+    const hay = `${o.courierName} ${o.serviceName}`.toLowerCase();
+    return wanted.some((w) => hay.includes(w));
+  };
+}
+
 /** A parcel with no catalog weight still has to be priced somehow. */
 const DEFAULT_WEIGHT_KG = 0.5;
 
@@ -84,7 +116,7 @@ export async function getRatesForOrder(reference: string): Promise<RateQuote> {
 
   try {
     const client = await easyparcelClient();
-    const options = await client.getQuotations({
+    let options = await client.getQuotations({
       receiverPostcode: addr.postcode,
       receiverState: receiverState!,
       receiverCountry: country,
@@ -96,6 +128,9 @@ export async function getRatesForOrder(reference: string): Promise<RateQuote> {
       dimensions: parcelSizeFor(weightGrams),
       parcelValue: order.totalSen / 100,
     });
+    /* Pickup only, as at checkout — the shop hands parcels to a collecting
+       courier, and the customer's chosen service must be in this list. */
+    options = options.filter(offeredForOneParcel).filter(allowedForDestination(cfg, country));
     if (!options.length) {
       return { options: [], weightGrams, unavailable: "No courier serves this route right now." };
     }
@@ -183,9 +218,14 @@ async function recordQuoteFailure(
   side (issue_shipping_quote) and the checkout carries only an id — see the
   shipping_quotes migration for why the browser is never handed an amount.
 
-  Malaysia never reaches this. Its price is a zone rate the database already
-  knows, and asking a Malaysian shopper to choose a courier would be a worse
-  checkout for no gain.
+  Malaysia reaches this only in 'courier' mode (Admin › Shipping). In 'zone'
+  mode its price is a rate the database already knows and the checkout never
+  asks. The caller decides; this function quotes whatever address it is given.
+
+  PICKUP SERVICES ONLY. EasyParcel offers most couriers twice — collected from
+  the sender's door, or dropped at a counter — and the shop only ever hands
+  parcels to a collecting courier. Offering a drop-off rate would price a
+  service nobody here performs.
 */
 export type CartQuote = {
   quoteId: string;
@@ -220,6 +260,15 @@ export async function quoteForCart(input: {
     return { unavailable: CANNOT_QUOTE };
   }
 
+  /* EasyParcel prices Malaysia on the ISO subdivision code, and a wrong one
+     silently misprices West vs East — so the state name the shopper picked is
+     mapped here, once, and an unrecognised one is refused rather than sent. */
+  const receiverState =
+    input.country === "MY" ? stateToIso(input.subdivision) : input.subdivision;
+  if (input.country === "MY" && !receiverState) {
+    return { unavailable: "Please choose a state to quote delivery." };
+  }
+
   const weightGrams = await cartWeightGrams(input.lines);
   const totalWeightKg = Math.max(weightGrams / 1000, DEFAULT_WEIGHT_KG);
 
@@ -228,7 +277,7 @@ export async function quoteForCart(input: {
     const client = await easyparcelClient();
     options = await client.getQuotations({
       receiverPostcode: input.postcode,
-      receiverState: input.subdivision,
+      receiverState: receiverState!,
       receiverCountry: input.country,
       senderPostcode: cfg.sender.postcode!,
       senderState: stateToIso(cfg.sender.state)!,
@@ -249,6 +298,7 @@ export async function quoteForCart(input: {
     return { unavailable: CANNOT_QUOTE };
   }
 
+  options = options.filter(offeredForOneParcel).filter(allowedForDestination(cfg, input.country));
   if (!options.length) {
     return { unavailable: "No courier we work with delivers to that address." };
   }

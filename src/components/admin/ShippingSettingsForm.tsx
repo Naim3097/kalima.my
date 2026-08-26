@@ -66,6 +66,10 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
   const [freeRm, setFreeRm] = useState(
     settings.freeShippingThresholdSen > 0 ? (settings.freeShippingThresholdSen / 100).toFixed(2) : "",
   );
+  const [domesticMode, setDomesticMode] = useState<"zone" | "courier">(settings.domesticMode);
+  const byCourier = domesticMode === "courier";
+  const [allowedCouriers, setAllowedCouriers] = useState(settings.domesticAllowedCouriers.join(", "));
+  const [intlCouriers, setIntlCouriers] = useState(settings.internationalAllowedCouriers.join(", "));
 
   function save() {
     startTransition(async () => {
@@ -88,6 +92,9 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
         shippingWestSen: Math.round(Number(westRm || 0) * 100),
         shippingEastSen: Math.round(Number(eastRm || 0) * 100),
         freeShippingThresholdSen: Math.round(Number(freeRm || 0) * 100),
+        domesticMode,
+        domesticAllowedCouriers: allowedCouriers,
+        internationalAllowedCouriers: intlCouriers,
       });
       if ("error" in res) toast.error(res.error);
       else {
@@ -114,10 +121,76 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
         <CardHeader title="What customers pay" />
         <CardBody>
         <p className="mb-4 text-[13px] tracking-wide text-navy-400">
-          Malaysian orders pay by zone. Overseas orders pay the courier the customer picks at
-          checkout, so there is nothing to set for them here.
+          Overseas orders always pay the courier the customer picks at checkout. Choose how
+          Malaysian orders are charged.
         </p>
-        <div className="grid gap-4 sm:grid-cols-2">
+
+        {/* The switch between the two ways a Malaysian parcel is priced. Radio
+            rather than checkbox because both states are a policy, not an
+            on/off — and the zone fields below only matter in one of them. */}
+        <div className="mb-5 space-y-2">
+          <label className={`flex cursor-pointer items-start gap-3 rounded border px-3 py-2.5 ${!byCourier ? "border-navy bg-white" : "border-navy-100 hover:border-navy-400"}`}>
+            <input type="radio" name="domestic-mode" className="mt-0.5 accent-navy"
+              checked={!byCourier} onChange={() => setDomesticMode("zone")} />
+            <span className="text-[13px]">
+              <span className="text-navy">Flat zone rates</span>
+              <span className="block text-[12px] text-navy-400">
+                One price for Semenanjung, one for Sabah &amp; Sarawak. Kalima picks the courier when booking.
+              </span>
+            </span>
+          </label>
+          <label className={`flex cursor-pointer items-start gap-3 rounded border px-3 py-2.5 ${byCourier ? "border-navy bg-white" : "border-navy-100 hover:border-navy-400"}`}>
+            <input type="radio" name="domestic-mode" className="mt-0.5 accent-navy"
+              checked={byCourier} onChange={() => setDomesticMode("courier")} />
+            <span className="text-[13px]">
+              <span className="text-navy">Customer picks a courier (EasyParcel)</span>
+              <span className="block text-[12px] text-navy-400">
+                Live pickup rates are shown at checkout and the customer pays the one they choose,
+                at cost. Needs EasyParcel connected below.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        <div className="mb-5 grid gap-4 sm:grid-cols-2">
+          {byCourier && (
+            <div className="space-y-2">
+              <Label htmlFor="ship-couriers" className="label-caps text-navy-400">
+                Couriers offered in Malaysia
+              </Label>
+              <Input
+                id="ship-couriers"
+                value={allowedCouriers}
+                onChange={(e) => setAllowedCouriers(e.target.value)}
+                placeholder="J&T"
+              />
+              {/* Matched against the courier's name as EasyParcel quotes it, so
+                  "J&T" is enough. One name means the shopper sees one rate and
+                  it is picked for them. */}
+              <p className="text-[12px] tracking-wide text-navy-400">
+                Comma-separated, e.g. <span className="text-navy">J&amp;T, Pos Laju</span>. Blank
+                offers every pickup courier EasyParcel quotes.
+              </p>
+            </div>
+          )}
+          <div className="space-y-2">
+            <Label htmlFor="ship-couriers-intl" className="label-caps text-navy-400">
+              Couriers offered overseas
+            </Label>
+            <Input
+              id="ship-couriers-intl"
+              value={intlCouriers}
+              onChange={(e) => setIntlCouriers(e.target.value)}
+              placeholder="Ninja, Aramex, UPS, DHL"
+            />
+            <p className="text-[12px] tracking-wide text-navy-400">
+              Same rule. <span className="text-navy">Ninja</span> matches both the company and the
+              &ldquo;Ninjavan&rdquo; service name.
+            </p>
+          </div>
+        </div>
+
+        <div className={`grid gap-4 sm:grid-cols-2 ${byCourier ? "opacity-50" : ""}`}>
           <div className="space-y-2">
             <Label htmlFor="ship-west" className="label-caps text-navy-400">
               Semenanjung (RM)
@@ -178,9 +251,11 @@ export function ShippingSettingsForm({ settings }: { settings: SenderSettings })
         {/* Says the rule back in plain words, because "0" and "empty" are the
             same instruction here and neither looks like one. */}
         <p className="mt-4 text-[13px] tracking-wide text-navy">
-          {Number(freeRm) > 0
-            ? `Malaysian orders of RM${Number(freeRm).toFixed(2)} or more ship free. Below that, RM${Number(westRm || 0).toFixed(2)} to Semenanjung and RM${Number(eastRm || 0).toFixed(2)} to Sabah & Sarawak.`
-            : `RM${Number(westRm || 0).toFixed(2)} to Semenanjung, RM${Number(eastRm || 0).toFixed(2)} to Sabah & Sarawak. Overseas pays the chosen courier.`}
+          {byCourier
+            ? `Malaysian orders pay the EasyParcel pickup courier the customer picks${Number(freeRm) > 0 ? `, free from RM${Number(freeRm).toFixed(2)}` : ""}. The zone rates above are kept for switching back.`
+            : Number(freeRm) > 0
+              ? `Malaysian orders of RM${Number(freeRm).toFixed(2)} or more ship free. Below that, RM${Number(westRm || 0).toFixed(2)} to Semenanjung and RM${Number(eastRm || 0).toFixed(2)} to Sabah & Sarawak.`
+              : `RM${Number(westRm || 0).toFixed(2)} to Semenanjung, RM${Number(eastRm || 0).toFixed(2)} to Sabah & Sarawak. Overseas pays the chosen courier.`}
         </p>
         <p className="mt-1 text-[12px] tracking-wide text-navy-400">
           A free-shipping discount code still applies whatever this says.

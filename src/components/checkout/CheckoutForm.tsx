@@ -61,6 +61,9 @@ export type ShippingPricing = {
   westRm: number;
   eastRm: number;
   freeShippingAbove: number;
+  /* Malaysia priced by the courier the shopper picks (live EasyParcel pickup
+     rates) rather than by zone. Overseas is always priced that way. */
+  domesticCourier: boolean;
 };
 
 type Props = {
@@ -76,7 +79,10 @@ export default function CheckoutForm({
   defaultName = "",
   defaultPhone = "",
   loyalty = null,
-  shipping: pricing = { westRm: FALLBACK_WEST_SHIPPING, eastRm: FALLBACK_EAST_SHIPPING, freeShippingAbove: 0 },
+  shipping: pricing = {
+    westRm: FALLBACK_WEST_SHIPPING, eastRm: FALLBACK_EAST_SHIPPING,
+    freeShippingAbove: 0, domesticCourier: false,
+  },
 }: Props) {
   const mounted = useMounted();
   const { items } = useCart();
@@ -120,6 +126,9 @@ export default function CheckoutForm({
     this; this only saves the round trip.
   */
   const overseas = form.country !== "MY";
+  /* Whether delivery is a courier the shopper picks (always overseas; Malaysia
+     when the shop says so) or a zone rate the summary already knows. */
+  const byCourier = overseas || pricing.domesticCourier;
 
   if (!overseas && !/^01\d{8,9}$/.test(form.phone.replace(/\D/g, ""))) {
     problems.phone = "Malaysian mobile, e.g. 012 345 6789.";
@@ -195,8 +204,29 @@ export default function CheckoutForm({
   /* An address good enough to quote against. Below this the courier call would
      only fail, and asking EasyParcel on every keystroke spends the shop's
      quota. */
-  const addressQuotable =
-    overseas && form.postcode.trim().length >= 3 && form.city.trim().length > 0;
+  const addressQuotable = byCourier && (
+    overseas
+      ? form.postcode.trim().length >= 3 && form.city.trim().length > 0
+      /* A Malaysian rate needs only the postcode and state — both of which the
+         shop validates exactly, so a quote is never sent for a half-typed one. */
+      : /^\d{5}$/.test(form.postcode.trim()) && MY_STATES.includes(form.state)
+  );
+
+  /*
+    Quoted as the address is typed, not on a button, because a Malaysian
+    shopper expects the list to simply appear — and the debounce keeps a
+    postcode typed digit by digit from becoming five EasyParcel calls.
+  */
+  const quotableKey = JSON.stringify({
+    ok: addressQuotable, country: form.country, postcode: form.postcode.trim(), state: form.state,
+    cart: cartRefs,
+  });
+  useEffect(() => {
+    if (!addressQuotable) return;
+    const timer = setTimeout(() => { void getDeliveryOptions(); }, 600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the serialised inputs above
+  }, [quotableKey]);
 
   async function getDeliveryOptions() {
     setFetchingRates(true);
@@ -220,6 +250,10 @@ export default function CheckoutForm({
     }
     setCourierOptions(res.options);
     setShipQuoteId(res.quoteId);
+    /* One option is not a choice. Pre-selecting it means the total is final
+       the moment the address is, which is what a Malaysian shopper on the
+       single-courier setting expects to see. */
+    if (res.options.length === 1) setChosenService(res.options[0].serviceId);
   }
 
   /*
@@ -375,7 +409,7 @@ export default function CheckoutForm({
     /* Overseas, the courier IS the price — there is nothing to charge until one
        is chosen. The server refuses this too; saying so here saves a round trip
        and points at the section rather than at the button. */
-    if (overseas && !chosenService) {
+    if (byCourier && !chosenService) {
       document.getElementById("co-postcode")?.scrollIntoView({ behavior: "smooth", block: "center" });
       setError("Please choose a delivery service before placing your order.");
       return;
@@ -384,8 +418,9 @@ export default function CheckoutForm({
     startPlace(async () => {
       const result = await placeOrder(cartRefs, {
         ...form,
-        shippingMethod: overseas
-          ? courierOptions.find((o) => o.serviceId === chosenService)?.courier ?? "International"
+        shippingMethod: byCourier
+          ? courierOptions.find((o) => o.serviceId === chosenService)?.courier
+            ?? (overseas ? "International" : "Courier")
           : freeShipping
             ? "Standard (free)"
             : "Standard",
@@ -530,15 +565,18 @@ export default function CheckoutForm({
                 )}
               </div>
             </div>
-            {overseas ? (
+            {byCourier ? (
               <div className="mt-4 border border-navy/15 bg-cream-50 px-4 py-4">
                 <p className="label-caps !text-[11px] text-navy-400">Delivery service</p>
 
                 {courierOptions.length === 0 ? (
                   <>
                     <p className="mt-2 text-[13px] leading-relaxed text-navy-400">
-                      Rates are quoted live for your address. Fill in the city and postcode, then
-                      choose a courier.
+                      {fetchingRates
+                        ? "Getting courier rates for your address…"
+                        : overseas
+                          ? "Rates are quoted live for your address. Fill in the city and postcode, then choose a courier."
+                          : "Courier rates are quoted live once your postcode and state are filled in."}
                     </p>
                     <Button
                       type="button"
@@ -609,10 +647,12 @@ export default function CheckoutForm({
                   </div>
                 )}
 
-                <p className="mt-3 text-[12px] tracking-wide text-navy-300">
-                  Import duties and taxes, where the destination charges them, are the
-                  customer&apos;s responsibility.
-                </p>
+                {overseas && (
+                  <p className="mt-3 text-[12px] tracking-wide text-navy-300">
+                    Import duties and taxes, where the destination charges them, are the
+                    customer&apos;s responsibility.
+                  </p>
+                )}
               </div>
             ) : (
               <p className="mt-3 text-[12px] tracking-wide text-navy-300">

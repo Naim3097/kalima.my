@@ -29,14 +29,38 @@ const STATUS_MAP: Record<string, string> = {
   pending: "pending",
   booked: "booked",
   processing: "booked",
+  "to be collected": "booked",
+  "schedule in arrangement": "booked",
+  collected: "in_transit",
+  "drop off": "in_transit",
   in_transit: "in_transit",
   "in transit": "in_transit",
+  "delivery in transit": "in_transit",
   out_for_delivery: "in_transit",
   delivered: "delivered",
   completed: "delivered",
   returned: "returned",
   cancelled: "cancelled",
   canceled: "cancelled",
+  cancel: "cancelled",
+};
+
+/*
+  The numeric shipment_status_code from the same push, mapped from the table
+  the spec publishes. The words beside a code vary by courier ("Parcel been
+  collected at ABC"), so when a code is present it outranks the prose.
+  8 (On Hold) is deliberately absent: our enum has no equivalent, and guessing
+  one would move a parcel that has not moved.
+*/
+const STATUS_CODE_MAP: Record<number, string> = {
+  0: "cancelled",
+  2: "booked",
+  3: "in_transit",
+  4: "in_transit",
+  5: "delivered",
+  6: "returned",
+  7: "booked",
+  11: "in_transit",
 };
 
 function authorised(req: Request): boolean {
@@ -77,9 +101,22 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const data = ((body.data as Record<string, unknown>) ?? body) ?? {};
 
-    const shipmentRef = String(data.shipment_id ?? data.shipmentId ?? data.order_number ?? "");
+    /*
+      The 2026-06 payloads key everything on shipment_number (ES-XXXX-XXXXX),
+      flat in the body — the wrapped shipment_id shapes are kept for whatever
+      an older subscription still delivers.
+    */
+    const shipmentRef = String(
+      data.shipment_number ?? data.shipment_id ?? data.shipmentId ?? data.order_number ?? "",
+    );
     const awb = (data.awb_number ?? data.awb ?? data.tracking_number ?? null) as string | null;
-    const raw = String(data.current_status ?? data.status ?? "").toLowerCase().trim();
+    /* shipment.awb.update carries these; a status push carries neither. */
+    const labelUrl = (data.awb_url ?? null) as string | null;
+    const trackingUrl = (data.tracking_url ?? null) as string | null;
+    const raw = String(data.shipment_status ?? data.current_status ?? data.status ?? "")
+      .toLowerCase()
+      .trim();
+    const code = Number(data.shipment_status_code ?? data.latest_shipment_status_code ?? NaN);
     if (!shipmentRef) return NextResponse.json({ received: true, note: "no shipment id" });
 
     const { data: shipment } = await db
@@ -90,10 +127,12 @@ export async function POST(request: Request) {
       .maybeSingle();
     if (!shipment) return NextResponse.json({ received: true, note: "shipment not found" });
 
-    const mapped = STATUS_MAP[raw];
+    const mapped = STATUS_CODE_MAP[code] ?? STATUS_MAP[raw];
     const patch: Record<string, unknown> = {};
     if (mapped) patch.status = mapped;
     if (awb) patch.tracking_no = awb;
+    if (labelUrl) patch.label_url = labelUrl;
+    if (trackingUrl) patch.tracking_url = trackingUrl;
     if (mapped === "delivered") patch.delivered_at = new Date().toISOString();
 
     if (Object.keys(patch).length) {

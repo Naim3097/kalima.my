@@ -21,10 +21,20 @@ export function easyparcelConfigured(): boolean {
   return Boolean(CLIENT_ID && CLIENT_SECRET && REDIRECT_URI);
 }
 
+/** How a Malaysian address is priced at checkout: the zone rate, or a courier
+    the shopper picks from live EasyParcel rates. Overseas is always courier. */
+export type DomesticShippingMode = "zone" | "courier";
+
 export type ShippingConfig = {
   enabled: boolean;
   connected: boolean;
   fallbackEnabled: boolean;
+  domesticMode: DomesticShippingMode;
+  /** Couriers Malaysian shoppers may pick, matched case-insensitively against
+      courier and service names. Empty = every pickup courier. */
+  domesticAllowedCouriers: string[];
+  /** Same rule for overseas addresses. Empty = every pickup courier. */
+  internationalAllowedCouriers: string[];
   flatShippingSen: number;
   freeShippingThresholdSen: number;
   sender: {
@@ -44,7 +54,7 @@ export async function getShippingConfig(): Promise<ShippingConfig> {
   const { data, error } = await admin()
     .from("store_settings")
     .select(
-      "easyparcel_enabled, easyparcel_access_token, easyparcel_refresh_token, shipping_fallback_enabled, flat_shipping_sen, free_shipping_threshold_sen, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state",
+      "easyparcel_enabled, easyparcel_access_token, easyparcel_refresh_token, shipping_fallback_enabled, domestic_shipping_mode, domestic_allowed_couriers, international_allowed_couriers, flat_shipping_sen, free_shipping_threshold_sen, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state",
     )
     .eq("id", 1)
     .single();
@@ -54,6 +64,13 @@ export async function getShippingConfig(): Promise<ShippingConfig> {
     enabled: Boolean(data.easyparcel_enabled),
     connected: Boolean(data.easyparcel_access_token && data.easyparcel_refresh_token),
     fallbackEnabled: Boolean(data.shipping_fallback_enabled),
+    domesticMode: data.domestic_shipping_mode === "courier" ? "courier" : "zone",
+    domesticAllowedCouriers: Array.isArray(data.domestic_allowed_couriers)
+      ? (data.domestic_allowed_couriers as string[]).map((s) => s.trim()).filter(Boolean)
+      : [],
+    internationalAllowedCouriers: Array.isArray(data.international_allowed_couriers)
+      ? (data.international_allowed_couriers as string[]).map((s) => s.trim()).filter(Boolean)
+      : [],
     flatShippingSen: data.flat_shipping_sen as number,
     freeShippingThresholdSen: data.free_shipping_threshold_sen as number,
     sender: {

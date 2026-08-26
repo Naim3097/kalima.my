@@ -175,6 +175,9 @@ export type OrderDetail = {
   subtotalSen: number; discountSen: number; shippingSen: number; taxSen: number; totalSen: number;
   discountCode: string | null; shippingMethod: string | null;
   shippingAddress: Record<string, string> | null;
+  shippingServiceId: string | null;
+  shippingServiceName: string | null;
+  shippingCourier: string | null;
   createdAt: string; paidAt: string | null;
   refundedSen: number; refundedAt: string | null;
   items: { productName: string; colorName: string; size: string; sku: string; qty: number; unitSen: number; lineSen: number }[];
@@ -197,6 +200,11 @@ export async function getOrder(reference: string): Promise<OrderDetail | null> {
     subtotalSen: o.subtotal_sen, discountSen: o.discount_sen, shippingSen: o.shipping_sen,
     taxSen: o.tax_sen ?? 0, totalSen: o.total_sen,
     discountCode: o.discount_code, shippingMethod: o.shipping_method, shippingAddress: o.shipping_address,
+    /* The courier service the customer chose and paid for at checkout, when
+       delivery was priced by courier. Null for a zone-rate order. */
+    shippingServiceId: (o.shipping_service_id as string | null) ?? null,
+    shippingServiceName: (o.shipping_service_name as string | null) ?? null,
+    shippingCourier: (o.shipping_courier as string | null) ?? null,
     createdAt: o.created_at, paidAt: o.paid_at,
     refundedSen: o.refunded_sen ?? 0, refundedAt: o.refunded_at ?? null,
     items: (o.order_items ?? []).map((i: Record<string, unknown>) => ({
@@ -983,6 +991,9 @@ export async function getOrdersForPacking(opts: {
       taxSen: o.tax_sen ?? 0, totalSen: o.total_sen,
       discountCode: o.discount_code, shippingMethod: o.shipping_method,
       shippingAddress: o.shipping_address,
+      shippingServiceId: (o.shipping_service_id as string | null) ?? null,
+      shippingServiceName: (o.shipping_service_name as string | null) ?? null,
+      shippingCourier: (o.shipping_courier as string | null) ?? null,
       createdAt: o.created_at, paidAt: o.paid_at,
       refundedSen: o.refunded_sen ?? 0, refundedAt: o.refunded_at ?? null,
       items: (o.order_items ?? []).map((i: Record<string, unknown>) => ({
@@ -1075,6 +1086,13 @@ export type SenderSettings = {
      connection made before we started recording it. */
   connectionExpires: string | null;
   fallbackEnabled: boolean;
+  /* 'zone': Malaysia pays the two rates above. 'courier': Malaysia picks a
+     courier at checkout from live EasyParcel rates, as overseas always does. */
+  domesticMode: "zone" | "courier";
+  /* Couriers offered to Malaysian shoppers in courier mode; empty = all. */
+  domesticAllowedCouriers: string[];
+  /* Same for overseas shoppers; empty = all. */
+  internationalAllowedCouriers: string[];
   senderName: string | null;
   senderPhone: string | null;
   senderLine1: string | null;
@@ -1087,7 +1105,7 @@ export type SenderSettings = {
 export async function getSenderSettings(): Promise<SenderSettings> {
   const { data, error } = await db()
     .from("store_settings")
-    .select("easyparcel_enabled, easyparcel_access_token, easyparcel_refresh_expires, shipping_fallback_enabled, flat_shipping_sen, shipping_west_sen, shipping_east_sen, free_shipping_threshold_sen, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state")
+    .select("easyparcel_enabled, easyparcel_access_token, easyparcel_refresh_expires, shipping_fallback_enabled, domestic_shipping_mode, domestic_allowed_couriers, international_allowed_couriers, flat_shipping_sen, shipping_west_sen, shipping_east_sen, free_shipping_threshold_sen, sender_name, sender_phone, sender_line1, sender_line2, sender_city, sender_postcode, sender_state")
     .eq("id", 1)
     .single();
   if (error) throw new Error(`getSenderSettings failed: ${error.message}`);
@@ -1096,6 +1114,13 @@ export async function getSenderSettings(): Promise<SenderSettings> {
     connected: Boolean(data.easyparcel_access_token),
     connectionExpires: (data.easyparcel_refresh_expires as string | null) ?? null,
     fallbackEnabled: Boolean(data.shipping_fallback_enabled),
+    domesticMode: data.domestic_shipping_mode === "courier" ? "courier" : "zone",
+    domesticAllowedCouriers: Array.isArray(data.domestic_allowed_couriers)
+      ? (data.domestic_allowed_couriers as string[])
+      : [],
+    internationalAllowedCouriers: Array.isArray(data.international_allowed_couriers)
+      ? (data.international_allowed_couriers as string[])
+      : [],
     shippingWestSen: data.shipping_west_sen ?? 1000,
     shippingEastSen: data.shipping_east_sen ?? 1500,
     flatShippingSen: data.flat_shipping_sen ?? 0,
@@ -1111,6 +1136,10 @@ export async function getSenderSettings(): Promise<SenderSettings> {
 
 export type CampaignRow = {
   id: string; name: string; channel: string; subject: string | null; body: string;
+  /* WhatsApp only — the approved template this broadcast sends. Null on email,
+     where the body IS the message. Listed so the campaigns table can show what
+     will go out without a second query per row. */
+  templateName: string | null;
   segment: Record<string, unknown>; status: string;
   totalCount: number; sentCount: number; failedCount: number;
   sentAt: string | null; createdAt: string;
@@ -1125,6 +1154,7 @@ export async function listCampaigns(): Promise<CampaignRow[]> {
   if (error) throw new Error(`listCampaigns failed: ${error.message}`);
   return (data ?? []).map((c) => ({
     id: c.id, name: c.name, channel: c.channel, subject: c.subject, body: c.body,
+    templateName: c.template_name ?? null,
     segment: (c.segment ?? {}) as Record<string, unknown>, status: c.status,
     totalCount: c.total_count, sentCount: c.sent_count, failedCount: c.failed_count,
     sentAt: c.sent_at, createdAt: c.created_at,
