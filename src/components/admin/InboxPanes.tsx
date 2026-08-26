@@ -3,7 +3,13 @@
 import { useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { formatRM } from "@/lib/format";
-import { addInboxNote, sendInboxReply, updateConversation } from "@/app/admin/actions";
+import {
+  addInboxNote,
+  sendInboxReply,
+  sendInboxTemplate,
+  updateConversation,
+} from "@/app/admin/actions";
+import { renderTemplateBody } from "@/lib/channels/template-render";
 
 /*
   Unified inbox — channel filter, thread list, conversation and composer.
@@ -54,6 +60,26 @@ type Customer = {
 
 type Detail = { messages: Message[]; customer: Customer | null } | null;
 
+/*
+  The subset of a synced template the composer needs. Approval status is absent
+  on purpose: the page only ever passes APPROVED ones (listSendableTemplates),
+  and carrying a status here would invite a client-side check that the server
+  re-does anyway — with the row, which is the only copy that can be trusted.
+*/
+type Template = {
+  name: string;
+  language: string;
+  category: string | null;
+  bodyText: string | null;
+  headerText: string | null;
+  bodyVariables: number;
+  headerVariables: number;
+};
+
+/* A template is identified by name AND language — a name alone is ambiguous
+   once a second translation exists. */
+const templateKey = (t: Template) => `${t.name}|${t.language}`;
+
 const CHANNEL_COLOR: Record<string, string> = {
   shopee: "#ee4d2d",
   tiktok: "#161823",
@@ -75,15 +101,24 @@ export default function InboxPanes({
   detail,
   activeId,
   cannedReplies,
+  templates,
+  templatesBlocked,
 }: {
   threads: Thread[];
   detail: Detail;
   activeId: string | null;
   cannedReplies: { id: string; title: string; body: string }[];
+  templates: Template[];
+  templatesBlocked: string | null;
 }) {
   const [filter, setFilter] = useState<string>("all");
   const [draft, setDraft] = useState("");
-  const [mode, setMode] = useState<"reply" | "note">("reply");
+  const [mode, setMode] = useState<"reply" | "note" | "template">("reply");
+  const [templateId, setTemplateId] = useState("");
+  /* Keyed by template, so switching templates and switching back does not lose
+     what was already typed — and so two templates cannot share a stale value
+     that happens to sit at the same index. */
+  const [values, setValues] = useState<Record<string, string[]>>({});
   const [pending, start] = useTransition();
 
   const list = useMemo(
@@ -93,8 +128,54 @@ export default function InboxPanes({
   const active = threads.find((t) => t.id === activeId) ?? null;
   const channels = useMemo(() => Array.from(new Set(threads.map((t) => t.channel))), [threads]);
 
+  /*
+    Templates are a WhatsApp construct, so the mode only exists on WhatsApp
+    threads. Offering it elsewhere would be an option whose only outcome is the
+    server refusing it.
+  */
+  const canTemplate = active?.channel === "whatsapp";
+  const selected = templates.find((t) => templateKey(t) === templateId) ?? null;
+  const selectedValues = selected ? (values[templateKey(selected)] ?? []) : [];
+
+  function setValue(index: number, value: string) {
+    if (!selected) return;
+    const key = templateKey(selected);
+    setValues((prev) => {
+      const next = [...(prev[key] ?? [])];
+      next[index] = value;
+      return { ...prev, [key]: next };
+    });
+  }
+
   function submit() {
     if (!active) return;
+
+    if (mode === "template") {
+      if (!selected) return;
+      const filled = Array.from(
+        { length: selected.bodyVariables },
+        (_, i) => selectedValues[i] ?? "",
+      );
+      start(async () => {
+        const res = await sendInboxTemplate({
+          conversationId: active.id,
+          templateName: selected.name,
+          templateLanguage: selected.language,
+          variables: filled,
+        });
+        if ("error" in res) toast.error(res.error);
+        else {
+          toast.success("Template sent.");
+          /* Cleared so the next send is a deliberate act. A template that stays
+             filled in is one stray click from being sent to the next thread
+             someone opens. */
+          setValues((prev) => ({ ...prev, [templateKey(selected)]: [] }));
+          setTemplateId("");
+        }
+      });
+      return;
+    }
+
     const body = draft.trim();
     if (!body) return;
     start(async () => {
@@ -277,17 +358,19 @@ export default function InboxPanes({
 
               <div className="border-t border-navy/10 p-3">
                 <div className="mb-2 flex items-center gap-2">
-                  {(["reply", "note"] as const).map((m) => (
-                    <button
-                      key={m}
-                      onClick={() => setMode(m)}
-                      className={`label-caps cursor-pointer border px-2 py-1 text-[9px] transition-colors ${
-                        mode === m ? "border-navy bg-navy text-white" : "border-navy/25 text-navy-400"
-                      }`}
-                    >
-                      {m === "reply" ? "Reply" : "Internal note"}
-                    </button>
-                  ))}
+                  {(["reply", "note", "template"] as const)
+                    .filter((m) => m !== "template" || canTemplate)
+                    .map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => setMode(m)}
+                        className={`label-caps cursor-pointer border px-2 py-1 text-[9px] transition-colors ${
+                          mode === m ? "border-navy bg-navy text-white" : "border-navy/25 text-navy-400"
+                        }`}
+                      >
+                        {m === "reply" ? "Reply" : m === "note" ? "Internal note" : "Template"}
+                      </button>
+                    ))}
                   {cannedReplies.length > 0 && mode === "reply" && active.window.open && (
                     <select
                       value=""
@@ -308,11 +391,104 @@ export default function InboxPanes({
                 </div>
 
                 {/* Courtesy, not enforcement — the server decides again on send. */}
-                {mode === "reply" && !active.window.open ? (
+                {mode === "template" ? (
+                  /*
+                    The template composer.
+
+                    Note what it does NOT have: a free-text box. The wording is
+                    Meta's, approved as a whole, and the only editable parts are
+                    the {{n}} slots. A textarea here would invite staff to edit
+                    a sentence that cannot be edited, and the rejection would
+                    arrive after the send was already recorded.
+                  */
+                  <div className="space-y-2">
+                    {templatesBlocked ? (
+                      <p className="border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] leading-relaxed text-amber-900">
+                        {templatesBlocked}
+                      </p>
+                    ) : templates.length === 0 ? (
+                      <p className="border border-navy/15 bg-cream-50 px-3 py-2.5 text-[12px] leading-relaxed text-navy-400">
+                        No approved templates yet. Templates are written and submitted in Meta
+                        Business Manager; once Meta approves one, press{" "}
+                        <span className="text-navy">Sync templates</span> below and it appears here.
+                      </p>
+                    ) : (
+                      <>
+                        <select
+                          value={templateId}
+                          onChange={(e) => setTemplateId(e.target.value)}
+                          className="w-full cursor-pointer border border-navy/20 bg-white px-2 py-1.5 text-[12px] text-navy"
+                        >
+                          <option value="">Choose an approved template…</option>
+                          {templates.map((t) => (
+                            <option key={templateKey(t)} value={templateKey(t)}>
+                              {t.name} · {t.language}
+                              {t.category ? ` · ${t.category.toLowerCase()}` : ""}
+                            </option>
+                          ))}
+                        </select>
+
+                        {selected && (
+                          <>
+                            {selected.headerText && (
+                              <p className="text-[11px] font-medium text-navy-400">
+                                {selected.headerText}
+                              </p>
+                            )}
+
+                            {Array.from({ length: selected.bodyVariables }, (_, i) => (
+                              <label key={i} className="flex items-center gap-2">
+                                <span className="label-caps w-8 shrink-0 !text-[9px] text-navy-400">
+                                  {`{{${i + 1}}}`}
+                                </span>
+                                <input
+                                  value={selectedValues[i] ?? ""}
+                                  onChange={(e) => setValue(i, e.target.value)}
+                                  className="flex-1 border border-navy/20 px-2 py-1 text-[12px] text-navy"
+                                />
+                              </label>
+                            ))}
+
+                            {/*
+                              Live preview. Unfilled slots stay visible as
+                              {{n}} rather than collapsing to nothing, so a
+                              missed field is obvious before the send rather
+                              than in the customer's chat afterwards.
+                            */}
+                            <p className="whitespace-pre-wrap border border-navy/15 bg-cream-50 px-3 py-2 text-[12px] leading-relaxed text-navy">
+                              {renderTemplateBody(selected.bodyText, selectedValues)}
+                            </p>
+
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-[10px] text-navy-300">
+                                Meta bills each template message.
+                              </p>
+                              <button
+                                onClick={submit}
+                                disabled={
+                                  pending ||
+                                  Array.from(
+                                    { length: selected.bodyVariables },
+                                    (_, i) => selectedValues[i],
+                                  ).some((v) => !v?.trim())
+                                }
+                                className="label-caps cursor-pointer border border-navy bg-navy px-4 py-2 text-[10px] text-white disabled:opacity-40"
+                              >
+                                {pending ? "…" : "Send template"}
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : mode === "reply" && !active.window.open ? (
                   <p className="border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-900">
                     {active.window.reason}
                     <span className="mt-1 block text-amber-800/80">
-                      An internal note can still be added.
+                      {canTemplate
+                        ? "An approved template can still be sent, and an internal note added."
+                        : "An internal note can still be added."}
                     </span>
                   </p>
                 ) : (

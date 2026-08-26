@@ -4,6 +4,12 @@ import { createAdminClient } from "@/lib/supabase/server";
 import { adapterFor } from "./registry";
 import { replyWindow, type ReplyWindow } from "./reply-window";
 import {
+  getTemplate,
+  renderTemplateBody,
+  sendWhatsAppTemplate,
+  templatesBlockedReason,
+} from "./whatsapp-templates";
+import {
   CHANNEL_LABEL,
   REPLY_WINDOW_HOURS,
   channelDoes,
@@ -265,6 +271,141 @@ export async function sendReply(input: {
       externalThreadId: c.external_thread_id as string,
       externalUserId: (c.external_user_id as string | null) ?? null,
       body,
+    });
+    await admin()
+      .from("messages")
+      .update({ delivery: "sent", external_message_id: externalMessageId })
+      .eq("id", messageId);
+    return { ok: true, messageId };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "send failed";
+    await admin()
+      .from("messages")
+      .update({ delivery: "failed", delivery_error: message.slice(0, 500) })
+      .eq("id", messageId);
+    return { error: `Could not deliver: ${message}` };
+  }
+}
+
+/*
+  Sends an approved template.
+
+  THE OTHER HALF OF sendReply, and the mirror image of its policy. sendReply
+  refuses when the window is CLOSED; this one works either side of it, because
+  a template is what Meta accepts when free text is no longer allowed — and
+  also, at a price, when it still is.
+
+  It is not restricted to a closed window on purpose. Staff reopening a
+  conversation the customer started three days ago and staff sending an order
+  update inside the window are the same action with the same compliance
+  properties, and a rule that permitted one and not the other would only push
+  someone to wait for the window to close.
+
+  WHATSAPP ONLY, checked here rather than assumed. Templates are a WhatsApp
+  construct; Instagram and Facebook solve the same problem with message tags and
+  a different payload entirely. See the note on sendWhatsAppTemplate.
+
+  THE TEMPLATE IS RE-READ FROM THE CACHE, never trusted from the caller. The
+  client sends a name; approval status, language and variable count all come
+  from the row. A composer rendered ten minutes ago may be offering a template
+  Meta paused since, and the failure mode of trusting it is a send that is
+  billed, rejected, and recorded in the thread as though it went out.
+*/
+export async function sendTemplateMessage(input: {
+  conversationId: string;
+  templateName: string;
+  templateLanguage: string;
+  /** Positional values for the body's {{1}}, {{2}}, … */
+  variables: string[];
+  /** Positional values for a TEXT header's {{1}}, … */
+  headerVariables?: string[];
+  staffId: string;
+}): Promise<SendResult> {
+  const { data: c, error } = await admin()
+    .from("conversations")
+    .select("id, channel, external_thread_id, external_user_id")
+    .eq("id", input.conversationId)
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!c) return { error: "That conversation no longer exists." };
+
+  const channel = c.channel as Channel;
+  if (channel !== "whatsapp") {
+    return {
+      error: `Templates are a WhatsApp feature — ${CHANNEL_LABEL[channel]} does not accept them.`,
+    };
+  }
+
+  const blocked = templatesBlockedReason();
+  if (blocked) return { error: blocked };
+
+  const template = await getTemplate(input.templateName, input.templateLanguage);
+  if (!template) {
+    return { error: "That template is no longer in the synced list. Press Sync templates and try again." };
+  }
+  if (template.status !== "APPROVED") {
+    return {
+      error:
+        `Meta has this template as ${template.status}, not APPROVED, so it cannot be sent.` +
+        (template.rejectedReason ? ` Reason given: ${template.rejectedReason}.` : ""),
+    };
+  }
+
+  /*
+    Exact match on both counts, not "at least".
+
+    Meta rejects too FEW and too MANY parameters with the same unhelpful error,
+    and the rejection arrives after the message is already recorded as pending.
+    Checking here turns that into a sentence a staff member can act on, naming
+    the number the template actually wants.
+  */
+  const body = input.variables.map((v) => v.trim());
+  const header = (input.headerVariables ?? []).map((v) => v.trim());
+  if (body.length !== template.bodyVariables) {
+    return {
+      error: `This template takes ${template.bodyVariables} value${
+        template.bodyVariables === 1 ? "" : "s"
+      }, and ${body.length} ${body.length === 1 ? "was" : "were"} supplied.`,
+    };
+  }
+  if (header.length !== template.headerVariables) {
+    return {
+      error: `This template's header takes ${template.headerVariables} value${
+        template.headerVariables === 1 ? "" : "s"
+      }, and ${header.length} ${header.length === 1 ? "was" : "were"} supplied.`,
+    };
+  }
+  if (body.some((v) => !v) || header.some((v) => !v)) {
+    return { error: "Every value in the template needs filling in." };
+  }
+
+  /*
+    What the thread will show. Meta renders the real message from the template it
+    holds; this is our copy of what the customer sees, so the conversation reads
+    as a conversation rather than as a template name and a shrug.
+  */
+  const preview = renderTemplateBody(template.bodyText, body) || `[template: ${template.name}]`;
+
+  const { data: recorded, error: recordErr } = await admin().rpc("record_outbound_message", {
+    p_conversation_id: input.conversationId,
+    p_direction: "outbound",
+    p_body: preview,
+    p_sent_by: input.staffId,
+    p_delivery: "pending",
+    p_template_name: template.name,
+  });
+  if (recordErr) return { error: recordErr.message };
+  const messageId = (recorded as { message_id: string }).message_id;
+
+  try {
+    const { externalMessageId } = await sendWhatsAppTemplate({
+      /* external_thread_id is the customer's wa_id — digits, no '+'. That is
+         exactly what Meta wants as `to`, so it is passed through unchanged. */
+      to: c.external_thread_id as string,
+      name: template.name,
+      language: template.language,
+      bodyValues: body,
+      headerValues: header,
     });
     await admin()
       .from("messages")

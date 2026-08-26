@@ -76,6 +76,24 @@ export const GRAPH = `https://graph.facebook.com/${GRAPH_VERSION}`;
 export const metaInstagramId = () => INSTAGRAM_ID;
 export const metaPageToken = () => PAGE_TOKEN;
 
+/*
+  Read by ./whatsapp-templates, which sends against the SAME phone number and
+  the same token as an ordinary reply — a template is a different message type,
+  not a different credential.
+
+  Exported at all for the same reason GRAPH is: ONE definition of the
+  credential, so a second copy cannot drift from this one. Re-reading
+  process.env in the templates module would be that second copy.
+
+  Functions rather than re-exported constants to match metaInstagramId and
+  metaPageToken directly above, and to keep the values read-only at the module
+  boundary. They buy no freshness — the constants are read once at module load,
+  exactly like every other credential in this file, which is why adding an
+  environment variable needs a redeploy rather than a restart.
+*/
+export const whatsappPhoneId = () => WHATSAPP_PHONE_ID;
+export const whatsappToken = () => WHATSAPP_TOKEN;
+
 const ENV_KEYS = ["META_APP_ID", "META_APP_SECRET", "META_REDIRECT_URI"] as const;
 
 /** See the note on shopee.ts:credentialsPresent — same distinction. */

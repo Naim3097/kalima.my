@@ -140,11 +140,11 @@ colour × size **variant matrix**, which `mapProduct()` collapses back into the 
 | Admin back office | `src/app/admin/`, `src/lib/admin.ts` | 3 | ✅ live |
 | **EasyParcel** (rates, booking, AWB, tracking) | `src/lib/shipping/` → `/api/shipping/*` | 4 | ✅ built — needs API credentials |
 | Email broadcasts + PDPA consent | `src/lib/messaging/`, `/admin/campaigns` | 5 | ✅ live |
-| WhatsApp Cloud API | same tables (`campaign_channel` enum has `whatsapp`) | 5 | ⛔ not built — blocked on Meta Business verification |
+| WhatsApp broadcasts (templates) | `src/lib/messaging/whatsapp.ts`, `src/lib/channels/whatsapp-templates.ts` | 5 | ✅ built — needs `META_WHATSAPP_WABA_ID` and an approved template |
 | Affiliate engine | `src/lib/affiliate.ts`, `/affiliate` + `/admin/affiliates` | 6 | ✅ live |
 | Loyalty ("Kalima Club") | `src/lib/loyalty.ts`, `/kalima-club` + `/admin/loyalty` | 7 | ✅ live |
 | Marketplace stock sync | `src/lib/channels/`, `/admin/sync` | 8 | 🟡 engine live; Shopee/TikTok adapters await platform approval |
-| Unified inbox — **WhatsApp** | `src/lib/channels/meta.ts`, `/admin/inbox` | 9 | ✅ adapter built — needs credentials only |
+| Unified inbox — **WhatsApp** | `src/lib/channels/meta.ts`, `/admin/inbox` | 9 | ✅ live since 5 Aug 2026 — replies, templates, opt-out |
 | Unified inbox — IG / FB / Shopee / TikTok | `src/lib/channels/` | 9 | 🟡 engine live; adapters await platform approval |
 
 **There is no demo data left.** `src/data/demo.ts`, the `/api/admin/[resource]` fixture endpoint and

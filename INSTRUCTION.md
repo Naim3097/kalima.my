@@ -17,7 +17,8 @@ Nothing else in the codebase changes when a channel comes online.
 > full route was exercised with a signed payload end to end into the database.
 >
 > **What is left for WhatsApp is credentials, not code.** Work through §0 and §2.1–2.2, set the
-> five `META_*` variables, press **Connect WhatsApp** in the admin, and it is live. Instagram,
+> five `META_*` variables, press **Connect WhatsApp** in the admin, and it is live. Templates and
+> broadcasts (§2.8) add one optional variable, `META_WHATSAPP_WABA_ID`, and nothing else. Instagram,
 > Facebook, Shopee and TikTok still need their adapters written.
 
 > **Read this first.** This guide is accurate about *Kalima's* side, because that is in this repo.
@@ -271,6 +272,17 @@ META_WHATSAPP_PHONE_ID=     # the sending number's id
 META_WHATSAPP_TOKEN=        # permanent System User access token
 ```
 
+One more is needed for **templates and broadcasts** only, and is deliberately optional:
+
+```bash
+META_WHATSAPP_WABA_ID=      # the WhatsApp Business ACCOUNT id — not the phone number's
+```
+
+It is *not* part of the adapter's `configured()` check. Leaving it unset costs you templates and
+WhatsApp broadcasts and nothing else — replies, webhooks and the inbox keep working, and the admin
+names the missing variable rather than reporting the channel disconnected. Adding it to
+`configured()` would have taken a live channel down to ship a feature nothing else depends on.
+
 Instagram and Facebook add three more, sharing `META_APP_SECRET` and `META_VERIFY_TOKEN` with
 WhatsApp — see §3 and §4:
 
@@ -373,8 +385,9 @@ Implemented. `POST {phone_number_id}/messages` with `messaging_product: whatsapp
 a deploy. Meta's own error message is surfaced verbatim, because *"more than 24 hours have passed"*
 is worth showing a staff member rather than flattening to "send failed".
 
-- **The 24-hour rule** is enforced before the call is made. Outside it only pre-approved **template**
-  messages are accepted, and templates are not built.
+- **The 24-hour rule** is enforced before the call is made, server-side, from the stored
+  `last_inbound_at` — never from a client's view of it. Outside the window only pre-approved
+  **template** messages are accepted, and those are built: see §2.8.
 - The returned `wamid` is stored on the message row, which is what makes delivery receipts
   attributable later.
 
@@ -419,6 +432,113 @@ message from a Malaysian phone appeared in `conversations` about four seconds af
 was confirmed incidentally — the Test payload's 2017 timestamp put it far outside the window, and
 the composer disabled itself with the reason while still allowing an internal note. Steps 5 and 6
 are not yet exercised.
+
+**Steps 5 and 6 need a phone in someone's hand and nothing else** — no code, no credentials, no
+approval. Both are two minutes of work and they are the only two links in the chain that have never
+been proven end to end. Do them before the production number goes on:
+
+- **Step 5 — the reply arrives.** Message the number from your phone, open `/admin/inbox`, reply,
+  and watch your own phone. A green toast means Meta accepted it, *not* that it was delivered; only
+  the handset proves that. If the toast is green and nothing arrives, the token can see the number
+  but is not authorised to send from it — check the System User's asset assignment, not the code.
+- **Step 6 — the note never sends.** Switch the composer to **Internal note**, add one, and confirm
+  it appears in the thread with the amber "Internal note" label **and does not appear on your
+  phone**. This is the one failure that is invisible from the admin side: a note that leaks is
+  indistinguishable from a note that worked, until a customer replies to it.
+
+Then the two that were never on the original list, because the features did not exist:
+
+- **Step 8 — a template sends.** §2.8. Wait out the 24-hour window (or set `last_inbound_at` back),
+  then send an approved template and confirm it arrives.
+- **Step 9 — "STOP" opts out.** Reply `STOP` from your phone, then check
+  `select * from whatsapp_opt_outs` and confirm your number is there with `resubscribed_at` null.
+  Delete the row afterwards, or you have quietly removed your own number from every broadcast.
+
+### 2.7a Going live on the production number
+
+Verification cleared on 5 August 2026, so this is unblocked and is a **dashboard-and-one-variable**
+job — there is no code change and no redeploy of anything but the environment.
+
+1. **WhatsApp → API Setup → Add phone number.** The number must not be attached to *any* WhatsApp
+   account, including WhatsApp Business on someone's phone. If it is, uninstall and delete the
+   account first, then give the number a few days to clear before retrying — a failed attempt puts a
+   cooldown on it.
+2. Complete the SMS or voice verification Meta sends to that number.
+3. Copy its **Phone Number ID** — a *new* id, not the test number's.
+4. Set `META_WHATSAPP_PHONE_ID` to it in Vercel and redeploy. The value is read at module load, so a
+   redeploy is required; changing the variable alone does nothing to the running deployment.
+5. Press **Re-verify** on the WhatsApp row in `/admin/inbox` and confirm the card now shows the real
+   number's `verified_name`.
+6. Send yourself one message from the new number (steps 5 and 6 above, again). The webhook
+   subscription, the App Secret, the verify token and every other variable carry over untouched —
+   the phone id is genuinely the only thing that changes.
+
+⚠️ **Existing conversations do not migrate.** Threads in `conversations` are keyed by the customer's
+`wa_id`, not by our number, so they survive the switch — but any customer who was mid-conversation
+with the *test* number is now talking to a number nobody is watching. There should be none of these
+in practice; confirm with `select distinct external_thread_id from conversations where channel =
+'whatsapp'` before switching, and message those people from the new number if there are any.
+
+### 2.8 Message templates
+
+**The only way to message outside the 24-hour window**, and the only way to start a conversation.
+Built as of 20 August 2026.
+
+**Meta owns the approval, so Meta owns the template.** Templates are written and submitted in Meta
+Business Manager — there is deliberately no authoring form in the admin, because a submit button
+here would be a worse version of a screen the client already has, wrapped around an outcome Kalima
+cannot influence. What the admin does instead is *sync* the registry and send against it.
+
+The flow:
+
+1. Write and submit the template at **Meta Business Manager → WhatsApp Manager → Message templates**.
+2. Wait for Meta. Minutes to days, with no notification.
+3. Press **Sync templates** on the WhatsApp row in `/admin/inbox`. The toast reports how many came
+   back and how many are approved.
+4. Approved templates now appear in the inbox composer's **Template** tab and in the WhatsApp
+   broadcast composer.
+
+`whatsapp_templates` is a **cache, never a source of truth** — it is write-locked to the service
+role for exactly that reason, since editing a row would change what the admin offers without
+changing what Meta accepts. A sync also **deletes** rows Meta no longer returns; a template deleted
+upstream but left in the cache is an option that can only fail.
+
+**Sending one.** The composer's Template tab has no free-text box. The wording was approved as a
+whole and cannot be edited; the only editable parts are the `{{1}}`, `{{2}}` slots, and a live
+preview shows the filled result with any missed slot still visibly `{{n}}`. Every template send is
+written to the audit log with the template name — unlike a free reply, because a template is billed
+by Meta, governed by per-category policy, and is the message a customer complaint will be about.
+
+⚠️ **Parameter counts are positional and the length is the HIGHEST index, not the number of
+placeholders.** `Hi {{1}}, order {{2}} shipped, {{1}}` takes **two** parameters. Sending three is
+rejected with an error about parameter counts that reads as though the template is wrong.
+
+**Not supported yet, and refused rather than half-sent:** templates with a media header (IMAGE,
+VIDEO, DOCUMENT) and, in broadcasts only, templates with a variable in the header. Both are filtered
+out of the composer rather than offered and rejected at the API.
+
+### 2.9 Opting out
+
+WhatsApp has no unsubscribe link — a broadcast lands in a chat window and the only reply channel is
+the chat. So the opt-out is read out of ordinary inbound traffic, in the messages webhook, and
+recorded in `whatsapp_opt_outs` keyed by **phone** rather than by customer (most people who message
+the number have no account).
+
+A stop keyword matches only when it is the **whole message** — `stop`, `unsubscribe`, `unsub`,
+`berhenti`, `henti`, `stop promo`, `no promo`, case-insensitive, trailing `.`/`!` stripped. Never as
+a substring: *"don't stop making these in navy"* is a compliment and *"berhenti sekejap, nak tanya"*
+is someone asking us to wait, and a substring match unsubscribes both.
+
+An opt-out also clears `profiles.marketing_consent`, so it stops the **email** list too — someone
+who says stop has told us they do not want marketing, and reading that as "stop the WhatsApp, the
+emails are fine" is a distinction we invented and they did not. The reverse does not hold: an email
+unsubscribe is aimed at that list specifically.
+
+⚠️ **A plainly-worded request is NOT caught.** *"Please stop sending me these"* is a real opt-out and
+this does not match it, by design — anything looser starts unsubscribing customers who used the word
+in passing. Those arrive in the inbox as ordinary messages and a human has to act on them. There is
+no admin control for opting someone out by hand yet; today it is an `insert into whatsapp_opt_outs`.
+That is the first thing to add if it happens more than occasionally.
 
 ---
 
@@ -688,10 +808,16 @@ Be aware of these before promising them:
 - **Media mirrored to Storage** — attachment URLs are stored as sent. Platform CDN URLs expire, so
   an old attachment becomes a dead link. Needs a wired adapter first, to know what auth their CDN
   requires.
-- **WhatsApp message templates** — the only way to message outside the 24-hour window. Each template
-  needs its own Meta approval.
-- **Outbound-first conversations** — the inbox is for replying. Starting a conversation is what
-  templates and Phase 5 broadcasts are for.
+- **Template authoring** — templates are written and submitted in Meta Business Manager, not here,
+  and the admin syncs the result. See §2.8 for why that is the right split rather than a gap.
+- **Media-header templates** — a template whose header is an image, video or document needs a media
+  parameter the composer cannot supply, so those are filtered out of the picker. Sending one needs
+  the media upload path, which needs the Storage mirroring above.
+- **Manual opt-out** — a customer who writes *"please stop sending me these"* rather than `STOP` has
+  to be opted out with a SQL insert. See the warning in §2.9.
+- **Per-recipient broadcast throttling** — the WhatsApp broadcast pipeline sends sequentially at a
+  fixed ~4/second. It does not read Meta's messaging limit tier, so a large list on a new number can
+  still hit the daily cap; the failures are recorded per recipient and the campaign reports them.
 
 ---
 

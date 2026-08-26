@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Card, CardHeader } from "@/components/admin/ui";
 import InboxPanes from "@/components/admin/InboxPanes";
 import ConnectChannel from "@/components/admin/ConnectChannel";
+import SyncTemplates from "@/components/admin/SyncTemplates";
+import TemplateList from "@/components/admin/TemplateList";
 import { getCannedReplies, getThread, listThreads, markRead } from "@/lib/channels/inbox";
 import { getChannelCards } from "@/lib/channels/admin";
 import {
@@ -12,6 +14,12 @@ import {
   isMetaMessagingChannel,
 } from "@/lib/channels/types";
 import { connectBlockedReason } from "@/lib/channels/registry";
+import {
+  listSendableTemplates,
+  listWhatsAppTemplates,
+  templatesBlockedReason,
+  type WhatsAppTemplate,
+} from "@/lib/channels/whatsapp-templates";
 
 /*
   Unified Inbox — driven by the live database.
@@ -34,6 +42,42 @@ export const metadata: Metadata = {
 
 const MESSAGING_CHANNELS = CHANNELS.filter((c) => channelDoes(c, "messaging"));
 
+/*
+  Templates, loaded so a failure cannot take the inbox with it.
+
+  Every other read on this page is load-bearing: without threads there is no
+  inbox. Templates are additive — they add one composer mode to one channel —
+  so a missing table (the window between this deploying and its migration being
+  applied) or a database hiccup must degrade to "templates unavailable" rather
+  than to a 500 that stops staff answering customers.
+
+  The reason is carried through to the composer, so the degradation is stated
+  rather than presented as "this WhatsApp number has no templates".
+*/
+async function loadTemplates(): Promise<{
+  /* Sendable only — what the composer may offer. */
+  list: WhatsAppTemplate[];
+  /* Everything synced, approved or not. The unapproved ones are the whole
+     point of the panel: without them, a template Meta refused is invisible. */
+  all: WhatsAppTemplate[];
+  blocked: string | null;
+}> {
+  const blocked = templatesBlockedReason();
+  if (blocked) return { list: [], all: [], blocked };
+  try {
+    const [list, all] = await Promise.all([listSendableTemplates(), listWhatsAppTemplates()]);
+    return { list, all, blocked: null };
+  } catch (e) {
+    return {
+      list: [],
+      all: [],
+      blocked: `Templates could not be loaded: ${
+        e instanceof Error ? e.message : "unknown error"
+      }`,
+    };
+  }
+}
+
 export default async function AdminInboxPage({
   searchParams,
 }: {
@@ -41,11 +85,12 @@ export default async function AdminInboxPage({
 }) {
   const { c } = await searchParams;
 
-  const [allThreads, cannedReplies, cards] = await Promise.all([
+  const [allThreads, cannedReplies, cards, templates] = await Promise.all([
     listThreads(),
     getCannedReplies(),
     /* Messaging channels, not the stock default — see getChannelCards. */
     getChannelCards(MESSAGING_CHANNELS),
+    loadTemplates(),
   ]);
 
   const activeId = c ?? allThreads[0]?.id ?? null;
@@ -93,6 +138,8 @@ export default async function AdminInboxPage({
         detail={detail ? { messages: detail.messages, customer: detail.customer } : null}
         activeId={activeId}
         cannedReplies={cannedReplies}
+        templates={templates.list}
+        templatesBlocked={templates.blocked}
       />
 
       <Card>
@@ -132,11 +179,45 @@ export default async function AdminInboxPage({
                       connected={status === "connected"}
                     />
                   )}
+                  {/*
+                    WhatsApp only: templates are a WhatsApp construct, and this
+                    is the row someone is already looking at when they wonder
+                    whether Meta has approved one yet.
+
+                    Shown only once the channel is actually connected — before
+                    that the blocker is the connection, and a second button
+                    offering to sync a registry we cannot reach would just be a
+                    second way to see the same error.
+                  */}
+                  {channel === "whatsapp" && !blocked && status === "connected" && (
+                    <SyncTemplates count={templates.list.length} />
+                  )}
+                  {channel === "whatsapp" && !blocked && templates.blocked && (
+                    <p className="text-right text-[11px] leading-relaxed text-amber-700">
+                      {templates.blocked}
+                    </p>
+                  )}
                 </div>
               </li>
             );
           })}
         </ul>
+        {/*
+          Template status, shown only once WhatsApp is connected — before that
+          the blocker is the connection, and an empty template panel would just
+          be a second place reporting the same thing.
+        */}
+        {templates.all.length > 0 && (
+          <div className="border-t border-navy/10 px-5 py-4">
+            <p className="label-caps mb-1 text-[10px] text-navy-400">WhatsApp templates</p>
+            <p className="mb-2 text-[12px] leading-relaxed text-navy-400">
+              Written and submitted in Meta Business Manager; synced here. Only approved ones
+              appear in the composer.
+            </p>
+            <TemplateList templates={templates.all} />
+          </div>
+        )}
+
         <p className="border-t border-navy/10 px-5 py-3 text-[12px] leading-relaxed text-navy-400">
           TikTok <em>personal/creator</em> DMs have no public API on any platform and stay in the
           TikTok app. That does not apply to Kalima, whose TikTok is a Business account — both

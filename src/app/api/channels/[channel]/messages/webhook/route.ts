@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { adapterFor } from "@/lib/channels/registry";
 import { isChannel, channelDoes, type InboundMessage } from "@/lib/channels/types";
+import { isOptOutMessage, recordOptOut } from "@/lib/channels/whatsapp-templates";
 
 /*
   Inbound message webhooks — the ingestion half of the unified inbox.
@@ -127,6 +128,29 @@ export async function POST(
       };
       if (r.recorded) recorded += 1;
       else duplicates += 1;
+
+      /*
+        "STOP" is how a WhatsApp opt-out arrives.
+
+        There is no unsubscribe link to click — a broadcast template lands in a
+        chat window, and the only reply channel is the chat itself. So the
+        opt-out has to be read out of ordinary inbound traffic, here, at the one
+        point every inbound message passes through.
+
+        Deliberately NOT suppressed for a duplicate delivery: a redelivered
+        "STOP" recording an opt-out that is already recorded is harmless (the
+        RPC is idempotent), whereas skipping it would mean a customer's only
+        instruction to stop is lost because Meta happened to retry the message
+        that carried it.
+
+        WhatsApp only. Instagram and Facebook have no broadcast path in this
+        product, so there is nothing there for a stop keyword to switch off, and
+        acting on one would silently drop a customer off the email list for
+        typing "stop" mid-conversation.
+      */
+      if (channel === "whatsapp" && m.contactPhone && isOptOutMessage(m.body)) {
+        await recordOptOut(m.contactPhone, m.body);
+      }
 
       /*
         Fill in the sender's name, for platforms that omit it from the payload.
