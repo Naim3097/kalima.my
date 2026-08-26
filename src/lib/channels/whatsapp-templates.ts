@@ -241,7 +241,10 @@ export async function syncWhatsAppTemplates(): Promise<TemplateSyncReport> {
         body_variables: fields.bodyVariables,
         header_variables: fields.headerVariables,
         buttons: fields.buttons,
-        rejected_reason: t.rejected_reason ?? null,
+        /* Meta sends the literal string "NONE" on an approved template; a
+           reason that says there is no reason is not a reason. */
+        rejected_reason:
+          t.rejected_reason && t.rejected_reason.toUpperCase() !== "NONE" ? t.rejected_reason : null,
         quality_score:
           typeof t.quality_score === "string"
             ? t.quality_score
