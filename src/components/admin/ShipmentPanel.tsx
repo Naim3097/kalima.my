@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   bookShipment,
+  cancelEasyparcelBooking,
   createPendingParcel,
   deleteShipment,
   fetchCourierRates,
@@ -180,6 +181,25 @@ export function ShipmentPanel({
     });
   }
 
+  /* Two clicks, not a browser confirm(): the first arms, the second cancels.
+     A modal dialog would block the page for anything driving it. */
+  const [cancelArmed, setCancelArmed] = useState<string | null>(null);
+  function cancelBooking(s: Shipment) {
+    if (cancelArmed !== s.id) {
+      setCancelArmed(s.id);
+      return;
+    }
+    startTransition(async () => {
+      const res = await cancelEasyparcelBooking({ reference, shipmentId: s.id });
+      setCancelArmed(null);
+      if ("error" in res) toast.error(res.error);
+      else {
+        toast.success("Booking cancelled — EasyParcel credits the wallet once the courier confirms.");
+        router.refresh();
+      }
+    });
+  }
+
   /* The courier issues the AWB shortly after booking; this pulls it in. */
   function fetchAwb(s: Shipment) {
     startTransition(async () => {
@@ -273,6 +293,22 @@ export function ShipmentPanel({
                           className="label-caps text-[11px] text-navy-400 hover:text-navy"
                         >
                           Fetch AWB
+                        </button>
+                      )}
+                    {/* Undo a booking before the courier collects — the wallet
+                        is credited. Two clicks so a stray tap cannot do it. */}
+                    {s.provider === "easyparcel" &&
+                      ["booked", "in_transit"].includes(s.status) && (
+                        <button
+                          type="button"
+                          disabled={pending}
+                          onClick={() => cancelBooking(s)}
+                          onBlur={() => setCancelArmed(null)}
+                          className={`label-caps text-[11px] ${
+                            cancelArmed === s.id ? "text-red-700" : "text-navy-400 hover:text-navy"
+                          }`}
+                        >
+                          {cancelArmed === s.id ? "Really cancel booking?" : "Cancel booking"}
                         </button>
                       )}
                     <button

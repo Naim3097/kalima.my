@@ -1061,6 +1061,76 @@ export async function refreshShipmentAwb(input: {
   }
 }
 
+/*
+  Cancels a parcel booked with EasyParcel, before the courier collects it.
+
+  EasyParcel credits a cancelled booking back to the wallet as long as the
+  parcel has not been picked up, which makes this the cheap way to test a
+  real booking: book, see the AWB and label arrive, cancel. It is also the
+  honest way out when a customer cancels after the label is printed.
+
+  The row is kept, marked cancelled, so the audit trail shows a booking was
+  made and undone — deleting it would erase the shipment number EasyParcel
+  refunded against. A fulfilled order whose only live parcel this was goes
+  back to paid, because nothing is on its way any more.
+*/
+export async function cancelEasyparcelBooking(input: {
+  reference: string;
+  shipmentId: string;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: shipment, error: readErr } = await db
+    .from("shipments")
+    .select("id, order_id, provider, provider_ref, status, tracking_no")
+    .eq("id", input.shipmentId)
+    .maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!shipment) return { error: "Shipment not found." };
+  if (shipment.provider !== "easyparcel" || !shipment.provider_ref) {
+    return { error: "This parcel was not booked through EasyParcel." };
+  }
+  if (!["booked", "in_transit"].includes(shipment.status as string)) {
+    return { error: `A ${String(shipment.status).replace("_", " ")} parcel cannot be cancelled.` };
+  }
+
+  try {
+    const client = await easyparcelClient();
+    await client.cancelOrder(shipment.provider_ref as string);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "EasyParcel refused the cancellation." };
+  }
+
+  const { error } = await db.from("shipments")
+    .update({ status: "cancelled", shipped_at: null })
+    .eq("id", input.shipmentId);
+  if (error) return { error: error.message };
+
+  /* Only step the order back when no other parcel is still on its way. */
+  const { data: live } = await db.from("shipments")
+    .select("id")
+    .eq("order_id", shipment.order_id as string)
+    .in("status", ["booked", "in_transit", "delivered"])
+    .limit(1);
+  if (!live?.length) {
+    await db.from("orders").update({ status: "paid" })
+      .eq("reference", input.reference).eq("status", "fulfilled");
+  }
+
+  await logAudit(db, {
+    action: "shipment.cancelled", entityType: "order", entityId: input.reference,
+    summary: `EasyParcel booking cancelled for ${input.reference}` +
+      `${shipment.tracking_no ? ` — AWB ${shipment.tracking_no}` : ""}`,
+    meta: { shipmentId: input.shipmentId, providerRef: shipment.provider_ref },
+  });
+
+  revalidatePath(`/admin/orders/${input.reference}`);
+  revalidatePath("/admin/orders");
+  revalidatePath("/account");
+  return { ok: true };
+}
+
 export async function deleteShipment(id: string, reference: string): Promise<ActionResult> {
   let db;
   try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
