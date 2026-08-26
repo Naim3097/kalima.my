@@ -7,6 +7,7 @@ import {
   providerByName,
 } from "@/lib/payments";
 import { atomeConfigured, atomeSelfCheck } from "@/lib/payments/atome";
+import { stripeConfigured, stripeMode, stripeSelfCheck } from "@/lib/payments/stripe";
 import { getCurrentUser, isStaff } from "@/lib/auth";
 
 /*
@@ -71,6 +72,9 @@ export async function GET(request: Request) {
     const atomeCheck = atomeConfigured()
       ? await atomeSelfCheck(probeOrigin ? `${probeOrigin}/api/payments/atome/webhook` : undefined)
       : { ok: false, detail: "not configured" };
+    /* Reads the Stripe account — proves the key and says whether charges are
+       enabled, which is the thing a freshly verified account can still lack. */
+    const stripeCheck = stripeConfigured() ? await stripeSelfCheck() : { ok: false, detail: "not configured" };
 
     try {
       const { fpx, ewallet } = await provider.listPaymentServices();
@@ -78,13 +82,14 @@ export async function GET(request: Request) {
         fpx: { count: fpx.length, services: fpx },
         ewallet: { count: ewallet.length, services: ewallet },
         atome: atomeCheck,
+        stripe: stripeCheck,
         note:
           fpx.length + ewallet.length === 0
             ? "Empty. Usually a Payment Channels setting on the collection, not a code fault."
             : undefined,
       });
     } catch (e) {
-      return NextResponse.json({ error: (e as Error).message, atome: atomeCheck }, { status: 502 });
+      return NextResponse.json({ error: (e as Error).message, atome: atomeCheck, stripe: stripeCheck }, { status: 502 });
     }
   }
 
@@ -116,12 +121,21 @@ export async function GET(request: Request) {
       LEANX_WEBHOOK_SECRET: Boolean(process.env.LEANX_WEBHOOK_SECRET),
       ATOME_USERNAME: Boolean(process.env.ATOME_USERNAME),
       ATOME_PASSWORD: Boolean(process.env.ATOME_PASSWORD),
+      STRIPE_SECRET_KEY: Boolean(process.env.STRIPE_SECRET_KEY),
+      STRIPE_WEBHOOK_SECRET: Boolean(process.env.STRIPE_WEBHOOK_SECRET),
       /*
         No callback-secret row, because Atome issues no such secret: the
         X-Signature key is Base64(ATOME_PASSWORD). The password line above is
         therefore also the answer to "are callbacks signature-checked?" — see
         callbackSigning below, which says so in words.
       */
+    },
+    stripe: {
+      /* "test" keys take no real money; "live" does. Read this before trusting
+         a green checkout on staging. */
+      mode: stripeMode(),
+      callbackUrl: origin ? `${origin}/api/payments/stripe/webhook` : null,
+      callbackSigning: process.env.STRIPE_WEBHOOK_SECRET ? "enforced — Stripe-Signature HMAC-SHA256" : "unconfigured",
     },
     atome: {
       env: atomeEnv,

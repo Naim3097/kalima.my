@@ -54,6 +54,7 @@ export default async function ChoosePaymentPage() {
           fpx={services.fpx}
           ewallet={services.ewallet}
           bnpl={services.bnpl}
+          card={services.card}
           totalSen={order.total_sen}
         />
       </div>

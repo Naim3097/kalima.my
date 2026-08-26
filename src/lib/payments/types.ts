@@ -14,7 +14,7 @@
   - the amount is decided server-side from the order, never from the client
 */
 
-export type PaymentServiceKind = "fpx" | "ewallet" | "bnpl";
+export type PaymentServiceKind = "fpx" | "ewallet" | "bnpl" | "card";
 
 export type PaymentService = {
   id: string; // LeanX payment_service_id, or the provider's own option id

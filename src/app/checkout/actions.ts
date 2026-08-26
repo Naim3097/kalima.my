@@ -505,6 +505,7 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
   await sendAddPaymentInfo(order.id).catch(() => {});
 
   const isAtome = provider.name === "atome";
+  const isStripe = provider.name === "stripe";
 
   /*
     Atome takes OUR reference as its payment id (its create call is idempotent on
@@ -514,7 +515,12 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
   */
   const serviceOrReference = isAtome
     ? buildAtomeReference(order.reference, await countPaymentAttempts(order.id, "atome"))
-    : paymentServiceId;
+    : isStripe
+      /* Stripe's create is made idempotent on this value, so it must be unique
+         per ATTEMPT for the same reason as Atome's: a retry after an expired
+         session needs a fresh session, not the dead one handed back. */
+      ? `${order.reference}-${await countPaymentAttempts(order.id, "stripe")}`
+      : paymentServiceId;
 
   let session;
   try {
@@ -556,7 +562,9 @@ export async function startPayment(paymentServiceId: string): Promise<PlaceOrder
       cancelUrl: `${origin}/checkout/pay`,
       callbackUrl: isAtome
         ? `${origin}/api/payments/atome/webhook`
-        : `${origin}/api/payments/webhook`,
+        : isStripe
+          ? `${origin}/api/payments/stripe/webhook`
+          : `${origin}/api/payments/webhook`,
     });
   } catch (e) {
     /*

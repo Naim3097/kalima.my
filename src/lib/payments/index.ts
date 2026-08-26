@@ -3,6 +3,7 @@ import "server-only";
 import type { PaymentProvider, PaymentService } from "./types";
 import { leanx, leanxConfigured } from "./leanx";
 import { atome, atomeConfigured, ATOME_MIN_SEN } from "./atome";
+import { stripe, stripeConfigured } from "./stripe";
 
 /*
   Payment provider registry.
@@ -21,6 +22,7 @@ import { atome, atomeConfigured, ATOME_MIN_SEN } from "./atome";
 const ALL: { provider: PaymentProvider; configured: () => boolean }[] = [
   { provider: leanx, configured: leanxConfigured },
   { provider: atome, configured: atomeConfigured },
+  { provider: stripe, configured: stripeConfigured },
 ];
 
 /** Every gateway that currently has credentials. */
@@ -78,6 +80,7 @@ export async function listAllPaymentServices(totalSen: number): Promise<{
   fpx: PaymentService[];
   ewallet: PaymentService[];
   bnpl: PaymentService[];
+  card: PaymentService[];
 }> {
   const fresh = serviceCache && Date.now() - serviceCache.at < SERVICE_TTL_MS;
   const results = fresh
@@ -107,6 +110,7 @@ export async function listAllPaymentServices(totalSen: number): Promise<{
     fpx: flat.filter((s) => s.kind === "fpx"),
     ewallet: flat.filter((s) => s.kind === "ewallet"),
     bnpl: flat.filter((s) => s.kind === "bnpl" && totalSen >= ATOME_MIN_SEN),
+    card: flat.filter((s) => s.kind === "card"),
   };
 }
 
@@ -121,6 +125,7 @@ export async function listAllPaymentServices(totalSen: number): Promise<{
 */
 export function providerForService(serviceId: string): PaymentProvider | null {
   if (serviceId === "atome") return providerByName("atome");
+  if (serviceId === "stripe-card") return providerByName("stripe");
   return providerByName("leanx");
 }
 

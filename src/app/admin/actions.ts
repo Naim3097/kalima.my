@@ -189,6 +189,26 @@ export async function refundOrder(input: {
     return { error: "Refund can't exceed the order total." };
   }
 
+  /*
+    A card payment is refunded THROUGH Stripe first, because Stripe can — LeanX
+    has no refund API, so for FPX this action only records what was moved by
+    hand. If Stripe refuses, nothing is recorded: a refund the books show and
+    the customer never received is the worse of the two mistakes.
+  */
+  const { data: paid } = await db
+    .from("payments").select("provider, provider_ref")
+    .eq("order_id", order.id as string).eq("status", "paid").maybeSingle();
+  let stripeRefundId: string | null = null;
+  if (paid?.provider === "stripe" && paid.provider_ref) {
+    try {
+      const { stripeRefund } = await import("@/lib/payments/stripe");
+      const full = input.amountSen === (order.total_sen as number);
+      stripeRefundId = (await stripeRefund(paid.provider_ref as string, full ? undefined : input.amountSen)).refundId;
+    } catch (e) {
+      return { error: `Stripe refused the refund: ${e instanceof Error ? e.message : "unknown error"}` };
+    }
+  }
+
   const { data, error } = await db.rpc("refund_order", {
     p_order_id: order.id as string,
     p_amount_sen: input.amountSen,
@@ -211,7 +231,7 @@ export async function refundOrder(input: {
       : `Order ${input.reference} refunded ${(input.amountSen / 100).toFixed(2)} MYR` +
         `${input.restock ? " (stock returned)" : " (stock not returned)"}` +
         `${input.reason.trim() ? ` — ${input.reason.trim()}` : ""}`,
-    meta: { amountSen: input.amountSen, restock: input.restock, reason: input.reason, result: result.status },
+    meta: { amountSen: input.amountSen, restock: input.restock, reason: input.reason, result: result.status, stripeRefundId },
   });
 
   revalidatePath("/admin/orders");

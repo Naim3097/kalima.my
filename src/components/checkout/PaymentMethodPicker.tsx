@@ -18,11 +18,13 @@ export default function PaymentMethodPicker({
   fpx,
   ewallet,
   bnpl,
+  card = [],
   totalSen,
 }: {
   fpx: PaymentService[];
   ewallet: PaymentService[];
   bnpl: PaymentService[];
+  card?: PaymentService[];
   totalSen: number;
 }) {
   const [selected, setSelected] = useState<string>("");
@@ -66,7 +68,7 @@ export default function PaymentMethodPicker({
       </div>
     ) : null;
 
-  const empty = fpx.length === 0 && ewallet.length === 0 && bnpl.length === 0;
+  const empty = fpx.length === 0 && ewallet.length === 0 && bnpl.length === 0 && card.length === 0;
 
   /*
     The instalment split, shown so the shopper sees the per-payment figure before
@@ -88,6 +90,7 @@ export default function PaymentMethodPicker({
       ) : (
         <>
           <Group title="Online Banking (FPX)" services={fpx} />
+          <Group title="Card" services={card} />
           <Group title="E-Wallet" services={ewallet} />
           <Group title="Buy Now, Pay Later" services={bnpl} />
           {bnpl.length > 0 && (

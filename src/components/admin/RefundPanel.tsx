@@ -88,9 +88,11 @@ export function RefundPanel({
 
       <CardBody>
       <p className="text-[13px] tracking-wide text-navy-400">
-        <strong className="text-navy">Move the money in LeanX first.</strong> LeanX has no
-        refund API, so this records the refund on our side — it returns the goods to stock
-        and updates the order. It does not transfer any funds.
+        <strong className="text-navy">FPX, e-wallet and Atome: move the money first.</strong> LeanX
+        and Atome have no refund API here, so for those orders this only records the refund — it
+        returns the goods to stock and updates the order. <strong className="text-navy">Card orders
+        (Stripe) are refunded for real:</strong> the amount is sent to Stripe before anything is
+        recorded, and the customer sees it on their statement in 5–10 days.
       </p>
 
       {open && (
