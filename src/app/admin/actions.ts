@@ -781,6 +781,14 @@ export async function saveShipment(input: {
     await db.from("orders").update({ status: "fulfilled" }).eq("id", order.id as string);
   }
 
+  /* A hand-recorded parcel tells the customer too — same automations, same
+     once-only claim, so editing the row later cannot message them twice. */
+  if (shipped) {
+    const { notifyOrderEvent } = await import("@/lib/messaging/whatsapp-automations");
+    await notifyOrderEvent("order_shipped", order.id as string);
+    if (input.status === "delivered") await notifyOrderEvent("order_delivered", order.id as string);
+  }
+
   await logAudit(db, {
     action: input.id ? "shipment.updated" : "shipment.created",
     entityType: "order",
@@ -990,6 +998,13 @@ export async function bookShipment(input: {
       await db.from("orders").update({ status: "fulfilled" }).eq("reference", input.reference);
     }
 
+    /* Tell the customer, if the "parcel on its way" automation is on. */
+    {
+      const { data: o } = await db.from("orders").select("id").eq("reference", input.reference).maybeSingle();
+      const { notifyOrderEvent } = await import("@/lib/messaging/whatsapp-automations");
+      if (o?.id) await notifyOrderEvent("order_shipped", o.id as string);
+    }
+
     await logAudit(db, {
       action: "shipment.booked",
       entityType: "order",
@@ -1148,6 +1163,61 @@ export async function cancelEasyparcelBooking(input: {
   revalidatePath(`/admin/orders/${input.reference}`);
   revalidatePath("/admin/orders");
   revalidatePath("/account");
+  return { ok: true };
+}
+
+/*
+  Which approved template fires for an order event, and whether it fires at all.
+
+  Validated against the synced registry: the template must exist, be APPROVED,
+  have a fixed text header (or none), and take no more values than the event
+  publishes — the values are positional, so a template wanting a sixth value
+  would be sent five and rejected by Meta on every order.
+*/
+export async function saveWhatsAppAutomation(input: {
+  event: string;
+  templateName: string;
+  templateLanguage: string;
+  enabled: boolean;
+}): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { AUTOMATION_EVENTS } = await import("@/lib/messaging/whatsapp-automations");
+  const spec = AUTOMATION_EVENTS.find((e) => e.event === input.event);
+  if (!spec) return { error: "Unknown automation." };
+
+  const name = input.templateName.trim();
+  const language = input.templateLanguage.trim();
+  if (input.enabled && (!name || !language)) return { error: "Pick a template before switching this on." };
+
+  if (name) {
+    const { getTemplate } = await import("@/lib/channels/whatsapp-templates");
+    const t = await getTemplate(name, language);
+    if (!t) return { error: "That template is not in the synced list. Press Sync templates first." };
+    if (input.enabled && t.status !== "APPROVED") return { error: `Meta has this template as ${t.status}, not APPROVED.` };
+    if (t.headerVariables > 0 || (t.headerFormat && t.headerFormat !== "TEXT")) {
+      return { error: "Automations need a template with no header, or a fixed-text header." };
+    }
+    if (t.bodyVariables > spec.values.length) {
+      return { error: `This template takes ${t.bodyVariables} values but "${spec.label}" can supply only ${spec.values.length}.` };
+    }
+  }
+
+  const { error } = await db.from("whatsapp_automations").update({
+    template_name: name || null,
+    template_language: name ? language || null : null,
+    enabled: input.enabled && Boolean(name),
+  }).eq("event", spec.event);
+  if (error) return { error: error.message };
+
+  await logAudit(db, {
+    action: "whatsapp.automation_updated", entityType: "settings", entityId: spec.event,
+    summary: `WhatsApp "${spec.label}" ${input.enabled && name ? `on — template ${name}` : "off"}`,
+    meta: { event: spec.event, templateName: name || null, enabled: input.enabled && Boolean(name) },
+  });
+
+  revalidatePath("/admin/inbox");
   return { ok: true };
 }
 

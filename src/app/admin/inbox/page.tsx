@@ -4,6 +4,8 @@ import InboxPanes from "@/components/admin/InboxPanes";
 import ConnectChannel from "@/components/admin/ConnectChannel";
 import SyncTemplates from "@/components/admin/SyncTemplates";
 import TemplateList from "@/components/admin/TemplateList";
+import AutomaticMessages from "@/components/admin/AutomaticMessages";
+import { AUTOMATION_EVENTS, getAutomations, type AutomationSetting } from "@/lib/messaging/whatsapp-automations";
 import { getCannedReplies, getThread, listThreads, markRead } from "@/lib/channels/inbox";
 import { getChannelCards } from "@/lib/channels/admin";
 import {
@@ -85,12 +87,14 @@ export default async function AdminInboxPage({
 }) {
   const { c } = await searchParams;
 
-  const [allThreads, cannedReplies, cards, templates] = await Promise.all([
+  const [allThreads, cannedReplies, cards, templates, automations] = await Promise.all([
     listThreads(),
     getCannedReplies(),
     /* Messaging channels, not the stock default — see getChannelCards. */
     getChannelCards(MESSAGING_CHANNELS),
     loadTemplates(),
+    /* Additive, like templates: a missing table must not take the inbox down. */
+    getAutomations().catch((): AutomationSetting[] => []),
   ]);
 
   const activeId = c ?? allThreads[0]?.id ?? null;
@@ -215,6 +219,23 @@ export default async function AdminInboxPage({
               appear in the composer.
             </p>
             <TemplateList templates={templates.all} />
+          </div>
+        )}
+        {/*
+          Transactional sends — which approved template fires when an order is
+          paid, shipped, delivered. Shown whenever WhatsApp is connected, even
+          with no templates yet, because the value list beside each event is
+          what someone needs to see BEFORE writing the template at Meta.
+        */}
+        {connectedByChannel.get("whatsapp") === "connected" && !templates.blocked && automations.length > 0 && (
+          <div className="border-t border-navy/10 px-5 py-4">
+            <p className="label-caps mb-1 text-[10px] text-navy-400">Automatic messages</p>
+            <p className="mb-2 text-[12px] leading-relaxed text-navy-400">
+              Order updates sent on WhatsApp without anyone pressing send. Write the template at
+              Meta using the numbered values listed for the event, sync, then pick it here. A
+              customer who has replied STOP is never messaged.
+            </p>
+            <AutomaticMessages events={AUTOMATION_EVENTS} settings={automations} templates={templates.all} />
           </div>
         )}
 

@@ -754,6 +754,9 @@ export async function runPaidSideEffects(order: {
   // Never let a mail failure undo a settlement — the money is already in.
   await sendPaymentConfirmedEmail(order.reference, order.email).catch(() => {});
   await sendNewOrderNotification(order.reference, order.email).catch(() => {});
+  /* WhatsApp "payment confirmed", when staff have enabled it. Cannot throw. */
+  const { notifyOrderEvent } = await import("@/lib/messaging/whatsapp-automations");
+  await notifyOrderEvent("order_paid", order.id);
   await attributeReferral(order.id).catch(() => {});
 
   /*

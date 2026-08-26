@@ -139,6 +139,18 @@ export async function POST(request: Request) {
       await db.from("shipments").update(patch).eq("id", shipment.id as string);
     }
 
+    /*
+      Customer notifications. The claim inside sendAutomation makes these safe
+      to fire on every push: "shipped" goes once however many in-transit
+      updates arrive, and a parcel booked from the admin (which already
+      notified) is not announced again here.
+    */
+    if (mapped === "booked" || mapped === "in_transit" || mapped === "delivered") {
+      const { notifyOrderEvent } = await import("@/lib/messaging/whatsapp-automations");
+      await notifyOrderEvent("order_shipped", shipment.order_id as string);
+      if (mapped === "delivered") await notifyOrderEvent("order_delivered", shipment.order_id as string);
+    }
+
     // A delivered parcel completes the order — but never downgrade one that has
     // already been refunded or cancelled.
     if (mapped === "delivered") {
