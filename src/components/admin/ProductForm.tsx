@@ -185,6 +185,11 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
                 <SelectItem value="accessories">Accessories</SelectItem>
               </SelectContent>
             </Select>
+            {/* The dropdown IS the assignment — there is no separate collection
+                picker, and asking for one is how this hint came to exist. */}
+            <p className="text-[11px] tracking-wide text-navy-400">
+              Decides which shop page lists it: Women, Men or Accessories.
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="pf-price" className="label-caps text-navy-400">

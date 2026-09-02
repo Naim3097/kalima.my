@@ -7,9 +7,9 @@ begin;
 truncate table products, collections restart identity cascade;
 
 -- Collections
-insert into collections (slug, title, description, is_smart, sort_order) values ('women', 'Women', 'Abaya, kurung, dresses and modest essentials.', false, 0);
-insert into collections (slug, title, description, is_smart, sort_order) values ('men', 'Men', 'Kurta, Baju Melayu and refined staples.', false, 1);
-insert into collections (slug, title, description, is_smart, sort_order) values ('accessories', 'Accessories', 'Shawls, inners and finishing touches.', false, 2);
+insert into collections (slug, title, description, is_smart, sort_order) values ('women', 'Women', 'Abaya, kurung, dresses and modest essentials.', true, 0);
+insert into collections (slug, title, description, is_smart, sort_order) values ('men', 'Men', 'Kurta, Baju Melayu and refined staples.', true, 1);
+insert into collections (slug, title, description, is_smart, sort_order) values ('accessories', 'Accessories', 'Shawls, inners and finishing touches.', true, 2);
 insert into collections (slug, title, description, is_smart, sort_order) values ('best-sellers', 'Best Sellers', 'The pieces our community loves most.', true, 3);
 insert into collections (slug, title, description, is_smart, sort_order) values ('new-arrivals', 'New Arrivals', 'Fresh from the Kalima atelier.', true, 4);
 insert into collections (slug, title, description, is_smart, sort_order) values ('maya', 'Maya Collection', 'Luxury chiffon. Effortless elegance. Crafted with premium fabric.', false, 5);
@@ -77,23 +77,8 @@ insert into product_images (product_id, url, alt, color_name, position) values
   ((select id from products where slug = 'ruwa-kaftan'), '/products/ruwa-kaftan-lilac.jpg', 'Ruwa Kaftan — Lilac', 'Lilac', 2),
   ((select id from products where slug = 'ruwa-kaftan'), '/products/ruwa-kaftan-blue.jpg', 'Ruwa Kaftan — Powder Blue', 'Powder Blue', 3);
 
--- Curated collection membership (smart collections derive from flags instead)
-insert into collection_products (collection_id, product_id, sort_order) values
-  ((select id from collections where slug = 'women'), (select id from products where slug = 'maya-luna'), 0),
-  ((select id from collections where slug = 'women'), (select id from products where slug = 'maya-chiffon'), 1),
-  ((select id from collections where slug = 'women'), (select id from products where slug = 'amanda-sparkle'), 2),
-  ((select id from collections where slug = 'women'), (select id from products where slug = 'bella-dress'), 3),
-  ((select id from collections where slug = 'women'), (select id from products where slug = 'sofea-dress'), 4),
-  ((select id from collections where slug = 'women'), (select id from products where slug = 'ruwa-kaftan'), 5),
-  ((select id from collections where slug = 'women'), (select id from products where slug = 'cardigan-premium'), 6),
-  ((select id from collections where slug = 'women'), (select id from products where slug = 'raya-kurung-seri'), 7),
-  ((select id from collections where slug = 'women'), (select id from products where slug = 'luna-palazzo'), 8);
-insert into collection_products (collection_id, product_id, sort_order) values
-  ((select id from collections where slug = 'men'), (select id from products where slug = 'kurta-rifqi'), 0),
-  ((select id from collections where slug = 'men'), (select id from products where slug = 'baju-melayu-teluk-belanga'), 1);
-insert into collection_products (collection_id, product_id, sort_order) values
-  ((select id from collections where slug = 'accessories'), (select id from products where slug = 'stretchable-rayon-inner'), 0),
-  ((select id from collections where slug = 'accessories'), (select id from products where slug = 'maya-satin-shawl'), 1);
+-- Curated collection membership. Smart collections derive from product fields
+-- instead: women/men/accessories from category, the rest from flags or price.
 insert into collection_products (collection_id, product_id, sort_order) values
   ((select id from collections where slug = 'maya'), (select id from products where slug = 'maya-chiffon'), 0),
   ((select id from collections where slug = 'maya'), (select id from products where slug = 'sofea-dress'), 1),

@@ -351,7 +351,7 @@ export const HERO_SLIDES = [
     eyebrow: "New Arrivals",
     title: "Timeless Modest Luxury",
     body: "Designed in Malaysia. Cut from premium satin, chiffon and cotton.",
-    primary: { label: "New Collection", to: "/collections/new-arrivals" },
+    primary: { label: "New Arrivals", to: "/collections/new-arrivals" },
     secondary: { label: "Shop Collections", to: "/collections/women" },
     image:
       "https://gylsymfonxyegdlfodvk.supabase.co/storage/v1/object/public/product-images/ruwa-caftan/kelly-green.jpg",

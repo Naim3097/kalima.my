@@ -320,12 +320,19 @@ export const fetchCollection = cache(
     };
 
     /*
-      Smart collections are derived from product flags rather than membership
+      Smart collections are derived from product fields rather than membership
       rows, so they stay correct without anyone maintaining a list.
     */
     if (collection.is_smart) {
       const all = await fetchProducts();
       /*
+        `women`, `men` and `accessories` follow the Category dropdown on the
+        product form. They used to be curated lists, which meant a product
+        created in the admin was invisible on the page its category tile points
+        to until someone inserted a membership row by hand — and nobody could,
+        because the admin has no collection editor. Three published products
+        had sat in that state on production. The dropdown is now the assignment.
+
         `sale` is derived from the discount itself rather than a flag, so it
         needs nobody to maintain it: a piece joins when it is given a sale price
         and leaves when that price is cleared. It is also sorted here — deepest
@@ -333,15 +340,17 @@ export const fetchCollection = cache(
         the shared grid's default would otherwise fall back to catalogue order.
       */
       const products =
-        slug === "best-sellers"
-          ? all.filter((p) => p.bestSeller)
-          : slug === "new-arrivals"
-            ? all.filter((p) => p.newArrival)
-            : slug === "sale"
-              ? all
-                  .filter((p) => p.salePrice != null)
-                  .sort((a, b) => discountPercent(b) - discountPercent(a))
-              : [];
+        slug === "women" || slug === "men" || slug === "accessories"
+          ? all.filter((p) => p.category === slug)
+          : slug === "best-sellers"
+            ? all.filter((p) => p.bestSeller)
+            : slug === "new-arrivals"
+              ? all.filter((p) => p.newArrival)
+              : slug === "sale"
+                ? all
+                    .filter((p) => p.salePrice != null)
+                    .sort((a, b) => discountPercent(b) - discountPercent(a))
+                : [];
       return { meta, products };
     }
 
