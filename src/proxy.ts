@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import {
   isOpenDuringMaintenance,
@@ -137,7 +137,10 @@ async function route(request: NextRequest): Promise<NextResponse> {
   */
   const ref = request.nextUrl.searchParams.get("ref");
   if (ref && /^[a-z0-9-]{1,64}$/i.test(ref)) {
-    response.cookies.set("kalima_ref", ref.toLowerCase(), {
+    const slug = ref.toLowerCase();
+    // Before the cookie is (re)set: the check inside reads the incoming one.
+    recordAffiliateClick(request, slug);
+    response.cookies.set("kalima_ref", slug, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
@@ -149,6 +152,80 @@ async function route(request: NextRequest): Promise<NextResponse> {
   attachMetaCookies(request, response);
 
   return response;
+}
+
+/*
+  Counts the click behind a ?ref link.
+
+  The affiliate dashboard has shown a clicks figure since the programme
+  launched, and it read zero for everyone: the table existed, the page summed
+  it, and nothing ever wrote to it. An affiliate who shares a link and sees
+  "0 clicks" beside a real referred order concludes the tracking is broken.
+
+  Runs in after(), so the page is never held up by the database — a slow or
+  unreachable Supabase costs a click, not a page view. Approved affiliates
+  only: a pending slug is not a link anyone was told to share.
+
+  One click per visitor per affiliate. If the incoming cookie already carries
+  this slug the visitor has been counted, so a refresh or a bookmarked ?ref URL
+  adds nothing. Link previewers are skipped too: WhatsApp and Telegram fetch
+  every shared URL to draw a card, which would count one share as one click
+  before any human tapped it.
+
+  visitor_hash is a salted SHA-256 of the IP, never the IP itself — the table
+  is documented as holding a hash and no user agent. The salt is the
+  service-role key: it must be present for the insert to happen at all, and
+  nothing outside this process ever needs to reproduce the hash.
+*/
+const LINK_PREVIEWERS =
+  /bot|crawl|spider|slurp|facebookexternalhit|whatsapp|telegram|twitter|linkedin|discord|skype|preview|headless/i;
+
+function recordAffiliateClick(request: NextRequest, slug: string): void {
+  if (request.cookies.get("kalima_ref")?.value === slug) return;
+
+  const userAgent = request.headers.get("user-agent") ?? "";
+  if (!userAgent || LINK_PREVIEWERS.test(userAgent)) return;
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) return;
+
+  // Same derivation as callerKey() in rate-limit.ts; read here because the
+  // request object is not available inside the after() callback.
+  const ip =
+    request.headers.get("x-real-ip") ??
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    "";
+
+  after(async () => {
+    try {
+      const db = createServerClient(url, serviceKey, {
+        cookies: { getAll: () => [], setAll: () => {} },
+      });
+
+      const { data: affiliate } = await db
+        .from("affiliates")
+        .select("id")
+        .eq("slug", slug)
+        .eq("status", "approved")
+        .maybeSingle();
+      if (!affiliate) return;
+
+      const visitorHash = ip ? await sha256Hex(`${serviceKey}|${ip}`) : null;
+
+      const { error } = await db
+        .from("affiliate_clicks")
+        .insert({ affiliate_id: affiliate.id, visitor_hash: visitorHash });
+      if (error) console.error("affiliate click not recorded:", error.message);
+    } catch (e) {
+      console.error("affiliate click not recorded:", e);
+    }
+  });
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /*
