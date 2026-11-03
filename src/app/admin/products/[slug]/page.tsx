@@ -39,7 +39,12 @@ export default async function EditProductPage({ params }: Params) {
             Edit product details and manage variants &amp; ledger-tracked stock.
           </p>
         </div>
-        <DeleteProduct productId={product.id} productName={product.name} />
+        <DeleteProduct
+          productId={product.id}
+          productName={product.name}
+          orderLineCount={product.orderLineCount}
+          archived={product.archivedAt != null}
+        />
       </div>
 
       <ProductForm product={product} />

@@ -25,6 +25,7 @@ export async function GET() {
   const { data, error } = await db
     .from("products")
     .select("slug, name, description, fabric, category, price_sen, sale_price_sen, best_seller, new_arrival, tone, published, product_variants(sku, color_name, color_hex, size, price_sen, weight_grams, stock_on_hand, color_position, position)")
+    .is("archived_at", null) // archived pieces are off the catalogue; keep them out of the sheet
     .order("name");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

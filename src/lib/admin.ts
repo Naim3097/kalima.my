@@ -727,6 +727,10 @@ export type ProductForEdit = {
   offersCustomSizing: boolean;
   /** Product-level size chart image — one per product, no colour scope. */
   sizeChartUrl: string | null;
+  /** Set when archived — hidden from the admin list and unpublishable until restored. */
+  archivedAt: string | null;
+  /** Order lines that reference any variant. Non-zero means it can only be archived, not deleted. */
+  orderLineCount: number;
   variants: EditVariant[];
   images: EditImage[];
   addons: EditAddon[];
@@ -759,6 +763,7 @@ export async function listAddonCandidates(excludeProductId: string): Promise<Add
     .from("products")
     .select("id, slug, name, product_variants(color_name, color_position)")
     .neq("id", excludeProductId)
+    .is("archived_at", null)
     .order("name", { ascending: true });
   if (error) throw new Error(`listAddonCandidates failed: ${error.message}`);
 
@@ -836,6 +841,19 @@ export async function getProductForEdit(slug: string): Promise<ProductForEdit | 
       colors: colorsOf(r.products!.product_variants ?? []),
     }));
 
+  /* Decides which way the editor's Delete button goes: a sold product can only
+     be archived (order_items restricts deleting its variants). */
+  const variantIds = (data.product_variants ?? []).map((v: Record<string, unknown>) => v.id as string);
+  let orderLineCount = 0;
+  if (variantIds.length) {
+    const { count, error: countErr } = await db()
+      .from("order_items")
+      .select("id", { count: "exact", head: true })
+      .in("product_variant_id", variantIds);
+    if (countErr) throw new Error(`getProductForEdit order count failed: ${countErr.message}`);
+    orderLineCount = count ?? 0;
+  }
+
   return {
     id: data.id, slug: data.slug, name: data.name, description: data.description, fabric: data.fabric,
     category: data.category, priceSen: data.price_sen,
@@ -844,6 +862,8 @@ export async function getProductForEdit(slug: string): Promise<ProductForEdit | 
     newArrival: data.new_arrival, tone: data.tone, published: data.published,
     offersCustomSizing: Boolean(data.offers_custom_sizing),
     sizeChartUrl: (data.size_chart_url as string | null) ?? null,
+    archivedAt: (data.archived_at as string | null) ?? null,
+    orderLineCount,
     variants, images, addons,
   };
 }
@@ -853,7 +873,7 @@ export async function getProductForEdit(slug: string): Promise<ProductForEdit | 
 export type AdminProductRow = {
   id: string; slug: string; name: string; category: string;
   priceSen: number; salePriceSen: number | null;
-  bestSeller: boolean; newArrival: boolean; published: boolean;
+  bestSeller: boolean; newArrival: boolean; published: boolean; archived: boolean;
   tone: string; image: string | null;
   colorCount: number; sizeCount: number; stock: number;
 };
@@ -866,11 +886,27 @@ export type AdminProductRow = {
   the only screen that could publish it again. Staff need to see everything
   they can edit.
 */
-export async function listProductsForAdmin(): Promise<AdminProductRow[]> {
-  const { data, error } = await db()
+/** How many products are archived — drives the "Show archived" link. */
+export async function countArchivedProducts(): Promise<number> {
+  const { count, error } = await db()
     .from("products")
-    .select("id, slug, name, category, price_sen, sale_price_sen, best_seller, new_arrival, published, tone, product_variants(color_name, size, stock_on_hand), product_images(url, color_name, position)")
-    .order("name");
+    .select("id", { count: "exact", head: true })
+    .not("archived_at", "is", null);
+  if (error) throw new Error(`countArchivedProducts failed: ${error.message}`);
+  return count ?? 0;
+}
+
+export async function listProductsForAdmin(
+  { archived = false }: { archived?: boolean } = {},
+): Promise<AdminProductRow[]> {
+  // Archived products live behind their own filter — out of the way, not gone.
+  const base = db()
+    .from("products")
+    .select("id, slug, name, category, price_sen, sale_price_sen, best_seller, new_arrival, published, archived_at, tone, product_variants(color_name, size, stock_on_hand), product_images(url, color_name, position)");
+  const { data, error } = await (archived
+    ? base.not("archived_at", "is", null)
+    : base.is("archived_at", null)
+  ).order("name");
   if (error) throw new Error(`listProductsForAdmin failed: ${error.message}`);
 
   return (data ?? []).map((p) => {
@@ -879,7 +915,8 @@ export async function listProductsForAdmin(): Promise<AdminProductRow[]> {
     return {
       id: p.id, slug: p.slug, name: p.name, category: p.category,
       priceSen: p.price_sen, salePriceSen: (p.sale_price_sen as number | null) ?? null,
-      bestSeller: p.best_seller, newArrival: p.new_arrival, published: p.published, tone: p.tone,
+      bestSeller: p.best_seller, newArrival: p.new_arrival, published: p.published,
+      archived: p.archived_at != null, tone: p.tone,
       // Same hero rule as the storefront: no colour scope, lowest position.
       image: images.filter((i) => !i.color_name).sort((a, b) => a.position - b.position)[0]?.url ?? null,
       colorCount: new Set(variants.map((v) => v.color_name)).size,

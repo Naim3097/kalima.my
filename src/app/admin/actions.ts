@@ -1384,7 +1384,9 @@ export async function saveProduct(input: ProductInput): Promise<ActionResult & {
     : await db.from("products").insert(row);
 
   if (error) {
-    return { error: error.message.includes("unique") ? "That slug is already in use." : error.message };
+    return { error: error.message.includes("unique")
+      ? "That slug is already in use."
+      : archivedPublishError(error.message) ?? error.message };
   }
 
   await logAudit(db, {
@@ -1479,7 +1481,7 @@ export async function bulkUpdateProducts(
     }
 
     const { error } = await db.from("products").update(values).eq("id", row.id);
-    if (error) failed.push(`${row.name}: ${error.message}`);
+    if (error) failed.push(`${row.name}: ${archivedPublishError(error.message) ?? error.message}`);
     else {
       updated += 1;
       revalidatePath(`/products/${row.slug}`);
@@ -1537,7 +1539,7 @@ export async function deleteProduct(id: string): Promise<ActionResult> {
     if (ordErr) return { error: ordErr.message };
     if (count) {
       return {
-        error: `"${product.name}" appears in ${count} order line(s), so it can't be deleted. Unpublish it instead to hide it from the shop.`,
+        error: `"${product.name}" appears in ${count} order line(s), so it can't be deleted. Archive it instead.`,
       };
     }
   }
@@ -1553,7 +1555,7 @@ export async function deleteProduct(id: string): Promise<ActionResult> {
   if (error) {
     // An order placed between the check and the delete still hits the FK.
     return { error: error.message.includes("foreign key") || error.message.includes("violates")
-      ? `"${product.name}" is referenced by an order, so it can't be deleted. Unpublish it instead.`
+      ? `"${product.name}" is referenced by an order, so it can't be deleted. Archive it instead.`
       : error.message };
   }
 
@@ -1570,6 +1572,51 @@ export async function deleteProduct(id: string): Promise<ActionResult> {
 
   revalidateProduct(product.slug as string);
   return { ok: true };
+}
+
+/*
+  Archive / restore — the way out for a product that has been sold and so can
+  never be deleted. Archiving unpublishes in the same write; the
+  products_archived_not_published constraint makes that hold everywhere else
+  too. Restoring brings it back as a draft, never straight onto the shop.
+*/
+export async function archiveProduct(id: string): Promise<ActionResult> {
+  return setArchived(id, true);
+}
+
+export async function restoreProduct(id: string): Promise<ActionResult> {
+  return setArchived(id, false);
+}
+
+async function setArchived(id: string, archive: boolean): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: product, error } = await db
+    .from("products")
+    .update(archive ? { archived_at: new Date().toISOString(), published: false } : { archived_at: null })
+    .eq("id", id)
+    .select("slug, name")
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!product) return { error: "That product no longer exists." };
+
+  await logAudit(db, {
+    action: archive ? "product.archived" : "product.restored",
+    entityType: "product",
+    entityId: product.slug as string,
+    summary: `Product "${product.name}" ${archive ? "archived" : "restored as a draft"}`,
+  });
+
+  revalidateProduct(product.slug as string);
+  return { ok: true };
+}
+
+/* The constraint's message is meaningless to staff; say what to do instead. */
+function archivedPublishError(message: string): string | null {
+  return message.includes("products_archived_not_published")
+    ? "Archived products can't be published — restore it first."
+    : null;
 }
 
 export async function addVariant(input: {

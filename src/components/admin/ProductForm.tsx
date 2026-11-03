@@ -32,6 +32,7 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const isEdit = Boolean(product);
+  const archived = product?.archivedAt != null;
 
   const [name, setName] = useState(product?.name ?? "");
   const [slug, setSlug] = useState(product?.slug ?? "");
@@ -272,10 +273,14 @@ export function ProductForm({ product }: { product?: ProductForEdit }) {
             />
             New arrival
           </label>
-          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-navy">
+          <label
+            className={`flex items-center gap-2 text-[13px] ${archived ? "cursor-not-allowed text-navy-400" : "cursor-pointer text-navy"}`}
+            title={archived ? "Archived products can't be published — restore it first." : undefined}
+          >
             <input
               type="checkbox"
               checked={published}
+              disabled={archived}
               onChange={(e) => setPublished(e.target.checked)}
               className="size-4 accent-navy"
             />

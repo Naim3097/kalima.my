@@ -164,7 +164,7 @@ export function ProductsTable({ products }: Props) {
                 </Td>
                 <Td>
                   <span className="flex flex-wrap items-center gap-1.5">
-                    <Pill value={p.published ? "active" : "draft"} />
+                    <Pill value={p.archived ? "archived" : p.published ? "active" : "draft"} />
                     {p.salePriceSen != null && <Pill value="on sale" />}
                   </span>
                 </Td>

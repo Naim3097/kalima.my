@@ -95,6 +95,7 @@ const PILL_STYLES: Record<string, string> = {
   sent: "bg-emerald-100 text-emerald-900",
   scheduled: "bg-amber-100 text-amber-900",
   draft: "bg-navy-100 text-navy-400",
+  archived: "bg-stone-200 text-stone-600",
   synced: "bg-emerald-100 text-emerald-900",
   attention: "bg-red-100 text-red-900",
   "label ready": "bg-amber-100 text-amber-900",
