@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Dev only: lets the app hydrate when opened as 127.0.0.1 rather than localhost.
+  allowedDevOrigins: ["127.0.0.1"],
   images: {
     /*
       NO VERCEL IMAGE OPTIMIZATION.

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AddonEditor } from "@/components/admin/AddonEditor";
+import { DeleteProduct } from "@/components/admin/DeleteProduct";
 import { ProductForm } from "@/components/admin/ProductForm";
 import { ProductImages } from "@/components/admin/ProductImages";
 import { SizeChart } from "@/components/admin/SizeChart";
@@ -38,6 +39,7 @@ export default async function EditProductPage({ params }: Params) {
             Edit product details and manage variants &amp; ledger-tracked stock.
           </p>
         </div>
+        <DeleteProduct productId={product.id} productName={product.name} />
       </div>
 
       <ProductForm product={product} />

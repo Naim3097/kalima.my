@@ -1502,6 +1502,76 @@ export async function bulkUpdateProducts(
   return { ok: true, updated, failed };
 }
 
+/*
+  Hard-deletes a product that has never been sold.
+
+  order_items.product_variant_id is ON DELETE RESTRICT, so a product whose
+  variants appear in any order cannot go — order history must keep pointing at
+  a real row. We check that up front and steer the staffer to unpublishing
+  rather than leaning on the raw FK error. Everything else hanging off the
+  product (variants, images, collection rows, add-ons, lookbook shots, channel
+  listings, stock ledger) cascades; Instagram tags are set null.
+
+  Storage objects are not covered by the cascade, so image and size-chart
+  files are collected first and removed best-effort afterwards.
+*/
+export async function deleteProduct(id: string): Promise<ActionResult> {
+  let db;
+  try { db = await assertStaff(); } catch { return { error: "Not authorized." }; }
+
+  const { data: product, error: readErr } = await db
+    .from("products").select("id, slug, name, size_chart_path").eq("id", id).maybeSingle();
+  if (readErr) return { error: readErr.message };
+  if (!product) return { error: "That product no longer exists." };
+
+  const { data: variants, error: varErr } = await db
+    .from("product_variants").select("id").eq("product_id", id);
+  if (varErr) return { error: varErr.message };
+  const variantIds = (variants ?? []).map((v) => v.id as string);
+
+  if (variantIds.length) {
+    const { count, error: ordErr } = await db
+      .from("order_items")
+      .select("id", { count: "exact", head: true })
+      .in("product_variant_id", variantIds);
+    if (ordErr) return { error: ordErr.message };
+    if (count) {
+      return {
+        error: `"${product.name}" appears in ${count} order line(s), so it can't be deleted. Unpublish it instead to hide it from the shop.`,
+      };
+    }
+  }
+
+  const { data: images } = await db
+    .from("product_images").select("storage_path").eq("product_id", id);
+  const paths = [
+    ...(images ?? []).map((i) => i.storage_path as string | null),
+    product.size_chart_path as string | null,
+  ].filter((p): p is string => Boolean(p));
+
+  const { error } = await db.from("products").delete().eq("id", id);
+  if (error) {
+    // An order placed between the check and the delete still hits the FK.
+    return { error: error.message.includes("foreign key") || error.message.includes("violates")
+      ? `"${product.name}" is referenced by an order, so it can't be deleted. Unpublish it instead.`
+      : error.message };
+  }
+
+  // Best-effort cleanup — a stranded object must never fail the delete.
+  if (paths.length) await db.storage.from(IMAGE_BUCKET).remove(paths).catch(() => {});
+
+  await logAudit(db, {
+    action: "product.deleted",
+    entityType: "product",
+    entityId: product.slug as string,
+    summary: `Product "${product.name}" deleted`,
+    meta: { id, variants: variantIds.length, files: paths.length },
+  });
+
+  revalidateProduct(product.slug as string);
+  return { ok: true };
+}
+
 export async function addVariant(input: {
   productId: string; productSlug: string;
   colorName: string; colorHex: string; size: string; sku: string;
